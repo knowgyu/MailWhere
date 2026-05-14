@@ -1,0 +1,24 @@
+
+# build outputs
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# local runtime data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# logs
+logs/
+*.log
+
+# packaged release artifacts
+artifacts/
+*.zip
+
+# local OMX workflow state (contains operator-specific planning context)
+.omx/

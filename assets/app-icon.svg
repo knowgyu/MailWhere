@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Outlook AI Secretary icon">
+  <defs>
+    <linearGradient id="bg" x1="18" y1="12" x2="110" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2458F2"/>
+      <stop offset="0.55" stop-color="#3478F6"/>
+      <stop offset="1" stop-color="#20C8B6"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0B1B3D" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="104" height="104" rx="28" fill="url(#bg)" filter="url(#shadow)"/>
+  <path d="M31 43h66a8 8 0 0 1 8 8v42a8 8 0 0 1-8 8H31a8 8 0 0 1-8-8V51a8 8 0 0 1 8-8Z" fill="#F8FBFF" opacity="0.96"/>
+  <path d="M27 50 64 76l37-26" fill="none" stroke="#2458F2" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M86 28c2 10 8 16 18 18-10 2-16 8-18 18-2-10-8-16-18-18 10-2 16-8 18-18Z" fill="#C8FFF4"/>
+  <circle cx="43" cy="91" r="6" fill="#20C8B6"/>
+  <path d="M56 91h30" stroke="#20345D" stroke-width="8" stroke-linecap="round" opacity="0.8"/>
+</svg>

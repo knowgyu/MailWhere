@@ -1,0 +1,55 @@
+name: Windows Portable Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+      - 'phase*'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-portable:
+    name: Build portable Windows artifact
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      BUILD_CONFIGURATION: Release
+      RUNTIME_IDENTIFIER: win-x64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5.0.5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Verify and publish portable zip
+        shell: pwsh
+        run: ./scripts/publish-portable.ps1 -Configuration $env:BUILD_CONFIGURATION -RuntimeIdentifier $env:RUNTIME_IDENTIFIER
+
+      - name: Upload portable zip
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: OutlookAiSecretary-win-x64-portable
+          path: artifacts/OutlookAiSecretary-win-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 14

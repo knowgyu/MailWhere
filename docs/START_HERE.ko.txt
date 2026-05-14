@@ -1,0 +1,19 @@
+Outlook AI Secretary 시작하기
+=============================
+
+1. 이 폴더의 OutlookAiSecretary.Windows.exe 를 실행하세요.
+2. 처음에는 [진단 실행]을 누릅니다.
+3. 관리형 PC에서는 smoke gate 전까지 자동 watcher를 켜지 마세요.
+4. [최근 1개월 스캔]을 누르면 Outlook Classic Inbox에서 최근 30일 메일을 읽고 할 일/회의/마감 후보를 로컬 DB에 저장합니다.
+5. LLM은 기본 OFF입니다. Ollama 또는 OpenAI-compatible/vLLM endpoint를 명시적으로 설정한 경우에만 호출됩니다.
+
+포함 파일
+- OutlookAiSecretary.Windows.exe: 실행 파일
+- appsettings.sample.json: 설정 예시
+- docs/: 운영/보안/검증 문서
+- BUILD-MANIFEST.json: 빌드 정보
+
+안전 경계
+- 메일 발송/삭제/이동/답장/첨부 자동 분석을 하지 않습니다.
+- vendor-specific mailbox export files 파일을 직접 파싱하지 않습니다.
+- raw mail body와 prompt 로그를 저장하지 않습니다.

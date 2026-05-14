@@ -1,0 +1,124 @@
+<Window x:Class="OutlookAiSecretary.Windows.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="메일 비서" Height="680" Width="1040" MinHeight="620" MinWidth="940"
+        Icon="Assets/app-icon.ico" Background="#F5F7FB">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="0,4,12,12"/>
+            <Setter Property="Padding" Value="8,6"/>
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#20304F"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" CornerRadius="22" Background="#FFFFFF" Padding="18" Margin="0,0,0,14" BorderBrush="#E3E8F2" BorderThickness="1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left">
+                    <TextBlock Text="Outlook AI Secretary" FontSize="24" FontWeight="Bold" Foreground="#14213D"/>
+                    <TextBlock Text="최근 1개월 메일에서 Action item, 회의/일정, 마감 리마인드를 찾아 조용히 알려줍니다." Margin="0,5,0,0" Foreground="#5F6B83"/>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Click="RunDiagnostics_Click">진단 실행</Button>
+                    <Button Click="ScanRecentMonth_Click" Background="#2458F2" Foreground="White">최근 1개월 스캔</Button>
+                    <Button Click="TestNotification_Click">알림 테스트</Button>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="1.1*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" CornerRadius="20" Background="#FFFFFF" Padding="16" Margin="0,0,14,0" BorderBrush="#E3E8F2" BorderThickness="1">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                        <TextBlock Text="오늘 봐야 할 항목" FontSize="18" FontWeight="Bold"/>
+                        <TextBlock x:Name="StatusText" Text="대기 중입니다. 관리형 PC에서는 진단 후 최근 1개월 스캔부터 시작하세요." Foreground="#667085" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <TabControl>
+                        <TabItem Header="할 일 / 일정">
+                            <DockPanel Margin="8">
+                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                    <TextBlock Text="빠른 할 일 추가" FontWeight="SemiBold"/>
+                                    <Grid Margin="0,6,0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="170"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="ManualTaskText" Grid.Column="0" MinHeight="34" ToolTip="예: 금요일까지 리뷰 자료 공유"/>
+                                        <TextBox x:Name="ManualDueText" Grid.Column="1" MinHeight="34" ToolTip="예: 내일, 금요일, 2026-05-20" />
+                                        <Button Grid.Column="2" Click="AddManualTask_Click" MinHeight="34">추가</Button>
+                                    </Grid>
+                                    <TextBlock Text="마감은 비워둘 수 있습니다. '내일', '금요일', '2026-05-20' 같은 표현을 우선 지원합니다." Foreground="#667085" FontSize="12" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <ListBox x:Name="TasksList" FontSize="14"/>
+                            </DockPanel>
+                        </TabItem>
+                        <TabItem Header="검토함">
+                            <TextBlock Text="LLM/rule 분석에서 확신이 낮은 후보는 여기에서 검토하도록 확장 예정입니다. 현재 0.1.0은 task 저장과 알림 중심입니다." TextWrapping="Wrap" Margin="12" Foreground="#667085"/>
+                        </TabItem>
+                        <TabItem Header="진단 로그">
+                            <TextBox x:Name="DiagnosticsText" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsReadOnly="True" FontFamily="Consolas"/>
+                        </TabItem>
+                    </TabControl>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Column="1" CornerRadius="20" Background="#FFFFFF" Padding="16" BorderBrush="#E3E8F2" BorderThickness="1">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="설정" FontSize="18" FontWeight="Bold"/>
+                        <TextBlock Text="기본값은 보안 우선 모드입니다. LLM은 명시적으로 켜야만 호출됩니다." Foreground="#667085" TextWrapping="Wrap" Margin="0,4,0,14"/>
+
+                        <CheckBox x:Name="StartupToggle" Content="Windows 시작 시 실행" Click="StartupToggle_Click" Margin="0,0,0,10"/>
+                        <CheckBox x:Name="AutoWatcherToggle" Content="자동 watcher 요청(운영 smoke gate 후 활성)" Margin="0,0,0,10"/>
+                        <CheckBox x:Name="LlmEnabledToggle" Content="LLM endpoint 사용" Margin="0,0,0,10"/>
+
+                        <TextBlock Text="LLM Provider" FontWeight="SemiBold"/>
+                        <ComboBox x:Name="LlmProviderBox" Margin="0,4,12,12" Padding="8,6">
+                            <ComboBoxItem Tag="Disabled" Content="사용 안 함 / rule-only"/>
+                            <ComboBoxItem Tag="Ollama" Content="Ollama (/api/chat)"/>
+                            <ComboBoxItem Tag="OpenAiCompatible" Content="OpenAI-compatible / vLLM"/>
+                        </ComboBox>
+
+                        <TextBlock Text="Endpoint" FontWeight="SemiBold"/>
+                        <TextBox x:Name="LlmEndpointText"/>
+                        <TextBlock Text="Model" FontWeight="SemiBold"/>
+                        <TextBox x:Name="LlmModelText"/>
+                        <TextBlock Text="API key 환경 변수(선택)" FontWeight="SemiBold"/>
+                        <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: OPENAI_API_KEY. 값 자체는 앱 설정에 저장하지 않는 것을 권장합니다."/>
+
+                        <TextBlock Text="최근 스캔 기간(일)" FontWeight="SemiBold"/>
+                        <TextBox x:Name="ScanDaysText"/>
+                        <TextBlock Text="최대 메일 수" FontWeight="SemiBold"/>
+                        <TextBox x:Name="MaxItemsText"/>
+                        <TextBlock Text="알림 look-ahead(시간)" FontWeight="SemiBold"/>
+                        <TextBox x:Name="ReminderLookAheadText"/>
+
+                        <Button Click="SaveSettings_Click" HorizontalAlignment="Left" Background="#14213D" Foreground="White">설정 저장</Button>
+
+                        <Border CornerRadius="14" Background="#F5F7FB" Padding="12" Margin="0,18,0,0">
+                            <TextBlock Text="안전 경계: 메일 발송/삭제/이동/답장/첨부 자동 분석은 하지 않습니다. vendor-specific mailbox export files 파일을 직접 파싱하지 않고 Outlook에서 보이는 메일만 읽습니다." TextWrapping="Wrap" Foreground="#4C5874"/>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
