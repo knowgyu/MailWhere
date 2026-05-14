@@ -35,6 +35,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Recent mail scan honors request window", RecentMailScanHonorsRequestWindow),
     ("Reminder planner emits lookahead notifications", ReminderPlannerEmitsLookaheadNotifications),
     ("SQLite store truncates source-derived fields", SqliteStoreTruncatesSourceDerivedFields),
+    ("SQLite review candidates can be listed", SqliteReviewCandidatesCanBeListed),
     ("SQLite delete source-derived data redacts task and candidate", SqliteDeleteSourceDerivedDataRedactsTaskAndCandidate),
     ("SQLite schema avoids raw mail columns", SqliteSchemaAvoidsRawMailColumns)
 };
@@ -425,6 +426,33 @@ static async Task SqliteStoreTruncatesSourceDerivedFields()
     }
 }
 
+static async Task SqliteReviewCandidatesCanBeListed()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var mail = Mail("검토 요청", "금요일까지 가능하면 검토 부탁드립니다.", "review-list");
+        var analysis = new FollowUpAnalysis(
+            FollowUpKind.ReviewNeeded,
+            AnalysisDisposition.Review,
+            0.52,
+            "검토 후보",
+            "확신이 낮아 검토함에 남깁니다.",
+            "검토 부탁",
+            null);
+
+        await store.SaveReviewCandidateAsync(ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow));
+        var candidates = await store.ListReviewCandidatesAsync();
+
+        Assert(candidates.Count == 1, "Expected one review candidate.");
+        Assert(candidates[0].Analysis.SuggestedTitle == "검토 후보", "Expected candidate title.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
 static async Task SqliteDeleteSourceDerivedDataRedactsTaskAndCandidate()
 {
     var (store, dbPath, cleanup) = await CreateTempStoreAsync();
@@ -607,6 +635,9 @@ sealed class FakeStore : IFollowUpStore
 
     public Task<IReadOnlyList<LocalTaskItem>> ListOpenTasksAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<LocalTaskItem>>(Tasks.Where(task => task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed).ToList());
+
+    public Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<ReviewCandidate>>(Candidates.Where(candidate => !candidate.Suppressed).ToList());
 
     public Task MarkNotATaskAsync(string sourceIdHash, CancellationToken cancellationToken = default)
     {

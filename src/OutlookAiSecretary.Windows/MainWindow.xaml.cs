@@ -6,6 +6,7 @@ using Microsoft.Win32;
 using OutlookAiSecretary.Core.Analysis;
 using OutlookAiSecretary.Core.Capabilities;
 using OutlookAiSecretary.Core.LLM;
+using OutlookAiSecretary.Core.Localization;
 using OutlookAiSecretary.Core.Notifications;
 using OutlookAiSecretary.Core.Pipeline;
 using OutlookAiSecretary.Core.Reminders;
@@ -102,6 +103,7 @@ public partial class MainWindow : Window
     private async Task OnLoadedAsync()
     {
         await RefreshTasksAsync();
+        await RefreshReviewCandidatesAsync();
         await NotifyDueRemindersAsync();
         StartReminderTimer();
 
@@ -128,10 +130,18 @@ public partial class MainWindow : Window
             now.AddDays(-_settings.RecentScanDays));
 
         var summary = await scanner.ScanAsync(request);
+        var smokeGateRecorded = showSummaryNotification && MarkSmokeGatePassedAfterManualScan(summary);
+        if (showSummaryNotification && smokeGateRecorded)
+        {
+            StatusText.Text = "수동 스캔이 성공해 자동 watcher smoke gate를 통과 처리했습니다.";
+        }
+
         await RefreshTasksAsync();
+        await RefreshReviewCandidatesAsync();
         await NotifyDueRemindersAsync();
 
-        StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 검토 후보 {summary.ReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건";
+        StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 검토 후보 {summary.ReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건"
+            + (smokeGateRecorded ? " · smoke gate 통과" : string.Empty);
         if (showSummaryNotification)
         {
             await _notificationSink.ShowAsync(new UserNotification(
@@ -208,6 +218,23 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task RefreshReviewCandidatesAsync()
+    {
+        var store = await GetStoreAsync();
+        var candidates = await store.ListReviewCandidatesAsync();
+        ReviewCandidatesList.Items.Clear();
+        foreach (var candidate in candidates)
+        {
+            var due = candidate.Analysis.DueAt is null ? "마감 불명" : $"{DdayFormatter.Format(candidate.Analysis.DueAt.Value, DateTimeOffset.Now)} · {candidate.Analysis.DueAt.Value:MM/dd HH:mm}";
+            ReviewCandidatesList.Items.Add($"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {candidate.Analysis.Confidence:P0} · {due}  |  {candidate.Analysis.SuggestedTitle}  |  {candidate.Analysis.Reason}");
+        }
+
+        if (candidates.Count == 0)
+        {
+            ReviewCandidatesList.Items.Add("검토 대기 후보가 없습니다.");
+        }
+    }
+
     private async Task NotifyDueRemindersAsync()
     {
         var store = await GetStoreAsync();
@@ -227,6 +254,23 @@ public partial class MainWindow : Window
                 reminder.Reason,
                 reminder.ReminderKey));
         }
+    }
+
+    private bool MarkSmokeGatePassedAfterManualScan(MailScanSummary summary)
+    {
+        if (_settings.SmokeGatePassed)
+        {
+            return false;
+        }
+
+        if (summary.ReadCount <= 0 || summary.Warnings.Any(warning => warning.Severity == CapabilitySeverity.Blocked))
+        {
+            return false;
+        }
+
+        _settings = _settings with { SmokeGatePassed = true };
+        WindowsRuntimeSettingsStore.Save(_settings);
+        return true;
     }
 
     private IFollowUpAnalyzer BuildAnalyzer(RuntimeSettings settings)

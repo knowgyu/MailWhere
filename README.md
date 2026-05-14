@@ -15,6 +15,7 @@
   - Ollama `/api/chat`
   - OpenAI-compatible/vLLM `/v1/chat/completions`
 - SQLite 로컬 task 저장
+- 낮은 확신 후보를 검토함에 표시
 - D-day 표시와 D-7/D-1/D-day reminder planning
 - tray 상주 + tray notification fallback
 - GitHub Actions Windows portable zip 빌드

@@ -71,7 +71,10 @@
                             </DockPanel>
                         </TabItem>
                         <TabItem Header="검토함">
-                            <TextBlock Text="LLM/rule 분석에서 확신이 낮은 후보는 여기에서 검토하도록 확장 예정입니다. 현재 0.1.0은 task 저장과 알림 중심입니다." TextWrapping="Wrap" Margin="12" Foreground="#667085"/>
+                            <DockPanel Margin="8">
+                                <TextBlock DockPanel.Dock="Top" Text="확신이 낮아 자동 등록하지 않은 후보입니다. 0.1.0에서는 메일 원문 없이 짧은 근거만 보여주고, 확정/제외 버튼은 다음 버전에서 확장합니다." TextWrapping="Wrap" Foreground="#667085" Margin="0,0,0,12"/>
+                                <ListBox x:Name="ReviewCandidatesList" FontSize="14"/>
+                            </DockPanel>
                         </TabItem>
                         <TabItem Header="진단 로그">
                             <TextBox x:Name="DiagnosticsText" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsReadOnly="True" FontFamily="Consolas"/>

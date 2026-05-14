@@ -119,6 +119,28 @@ public sealed class SqliteFollowUpStore : IFollowUpStore
         return tasks;
     }
 
+    public async Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, source_id_hash, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed
+            FROM review_candidates
+            WHERE suppressed = 0
+            ORDER BY created_at DESC
+            LIMIT 100
+            """;
+        var candidates = new List<ReviewCandidate>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            candidates.Add(ReadCandidate(reader));
+        }
+
+        return candidates;
+    }
+
     public async Task MarkNotATaskAsync(string sourceIdHash, CancellationToken cancellationToken = default)
     {
         await DeleteSourceDerivedDataForSourceAsync(sourceIdHash, cancellationToken).ConfigureAwait(false);
@@ -209,5 +231,26 @@ public sealed class SqliteFollowUpStore : IFollowUpStore
             DateTimeOffset.Parse(reader.GetString(9)),
             DateTimeOffset.Parse(reader.GetString(10)),
             reader.GetInt32(11) == 1);
+    }
+
+    private static ReviewCandidate ReadCandidate(SqliteDataReader reader)
+    {
+        static DateTimeOffset? MaybeDate(object value) => value == DBNull.Value ? null : DateTimeOffset.Parse((string)value);
+
+        var analysis = new FollowUpAnalysis(
+            Enum.Parse<FollowUpKind>(reader.GetString(2)),
+            AnalysisDisposition.Review,
+            reader.GetDouble(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.IsDBNull(6) ? null : reader.GetString(6),
+            MaybeDate(reader.GetValue(7)));
+
+        return new ReviewCandidate(
+            Guid.Parse(reader.GetString(0)),
+            reader.GetString(1),
+            analysis,
+            DateTimeOffset.Parse(reader.GetString(8)),
+            reader.GetInt32(9) == 1);
     }
 }

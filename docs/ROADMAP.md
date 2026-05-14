@@ -11,6 +11,7 @@ Included:
 - Rule-based + optional LLM analyzer.
 - Ollama `/api/chat` and OpenAI-compatible `/v1/chat/completions` providers.
 - Local SQLite task storage with source-derived redaction.
+- Review candidate list display for low-confidence items.
 - D-day labels and D-7/D-1/D-day reminder planning.
 - 30-minute reminder timer while app is running.
 - Korean-first WPF UI, tray host, app icon.
@@ -21,7 +22,7 @@ Not included yet:
 - Mail mutation of any kind.
 - Attachment auto analysis.
 - Full calendar sync.
-- Review candidate management UI.
+- Review candidate approve/dismiss/edit actions.
 - Native app-notification activation actions.
 
 ## Phase 0.2 — false positive control and daily-use inbox
