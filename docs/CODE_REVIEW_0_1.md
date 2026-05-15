@@ -4,7 +4,7 @@ Date: 2026-05-15
 
 ## Scope
 
-Reviewed the sanitized 0.1.0 release candidate after the tray-first Outlook secretary implementation:
+Reviewed the sanitized 0.1.0 release candidate after the tray-first MailWhere implementation:
 
 - Classic Outlook COM read-only adapter
 - rule-based + optional LLM analysis
@@ -22,18 +22,18 @@ Reviewed the sanitized 0.1.0 release candidate after the tray-first Outlook secr
 
 ## Applied review fixes before final release
 
-1. `src/OutlookAiSecretary.Core/Analysis/RuleBasedFollowUpAnalyzer.cs`
+1. `src/MailWhere.Core/Analysis/RuleBasedFollowUpAnalyzer.cs`
    - Meeting/date-like text without an explicit action no longer auto-creates a task.
    - This reduces false positives for ambiguous calendar references.
-2. `src/OutlookAiSecretary.Core/Analysis/LlmBackedFollowUpAnalyzer.cs`
+2. `src/MailWhere.Core/Analysis/LlmBackedFollowUpAnalyzer.cs`
    - LLM prompt payload keeps Korean text readable instead of JSON escaping every Hangul character.
    - This improves local LLM quality and made payload tests meaningful.
-3. `src/OutlookAiSecretary.Windows/MainWindow.xaml` and `.xaml.cs`
+3. `src/MailWhere.Windows/MainWindow.xaml` and `.xaml.cs`
    - Review candidates are now visible in the 검토함 tab instead of being only stored in SQLite.
    - Manual successful scans can record the smoke gate, but only when at least one mail is read and no blocked warning exists.
-4. `src/OutlookAiSecretary.Storage/SqliteFollowUpStore.cs`
+4. `src/MailWhere.Storage/SqliteFollowUpStore.cs`
    - Added a read path for unsuppressed review candidates so non-developers do not need to open the database.
-5. `tests/OutlookAiSecretary.Tests/Program.cs`
+5. `tests/MailWhere.Tests/Program.cs`
    - Added/updated coverage for LLM JSON, recent scan request window, ambiguous mail, reminders, and review-candidate listing.
 
 ## Security review
@@ -78,7 +78,7 @@ Architectural status: **CLEAR for 0.1.0**.
 
 The current architecture matches the release goal:
 
-- Outlook boundary is read-only and isolated in `OutlookAiSecretary.OutlookCom`.
+- Outlook boundary is read-only and isolated in `MailWhere.OutlookCom`.
 - LLM boundary is opt-in and abstracted as provider clients.
 - Local state is SQLite with source-derived truncation/redaction paths.
 - WPF/tray shell is intentionally portable-first.
@@ -95,7 +95,7 @@ Watchlist, not release blockers:
 0.1.0 is usable for a developer-friendly pilot:
 
 1. Download portable zip.
-2. Run `OutlookAiSecretary.Windows.exe`.
+2. Run `MailWhere.exe`.
 3. Run diagnostics.
 4. Optionally configure local LLM endpoint.
 5. Click “최근 1개월 스캔”.

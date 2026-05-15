@@ -33,7 +33,7 @@ It runs on:
 The workflow performs the Windows verification path and uploads:
 
 ```text
-artifacts/OutlookAiSecretary-win-x64-portable.zip
+artifacts/MailWhere-win-x64-portable.zip
 ```
 
 The zip contains the published app, README, operator docs, `appsettings.sample.json`, and `BUILD-MANIFEST.json`.
@@ -43,7 +43,7 @@ The zip contains the published app, README, operator docs, `appsettings.sample.j
 On a Windows machine with the .NET 10 SDK:
 
 ```powershell
-cd OutlookAiSecretary
+cd MailWhere
 .\scripts\publish-portable.ps1
 ```
 
@@ -59,8 +59,8 @@ Optional parameters:
 ## Managed-PC smoke process
 
 1. Download the portable artifact from GitHub Actions.
-2. Unzip to a user-owned folder, for example `%USERPROFILE%\Apps\OutlookAiSecretary`.
-3. Start `OutlookAiSecretary.Windows.exe`.
+2. Unzip to a user-owned folder, for example `%USERPROFILE%\Apps\MailWhere`.
+3. Start `MailWhere.exe`.
 4. Run diagnostics first.
 5. Keep watcher/automation disabled until `docs/MANAGED_PC_SMOKE_TEST.md` passes.
 6. Do not enable external LLM providers unless approved policy explicitly allows it.

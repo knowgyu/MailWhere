@@ -1,10 +1,10 @@
-# Outlook AI Secretary
+# MailWhere
 
 <p align="center">
-  <img src="assets/app-icon.svg" alt="Outlook AI Secretary" width="128" />
+  <img src="assets/app-icon.svg" alt="MailWhere" width="128" />
 </p>
 
-한국어 업무 메일을 계속 지켜보며 **Action item, 회의/일정성 항목, 마감 리마인드**를 찾아주는 Windows 11 상주형 Outlook 비서 PoC입니다.
+한국어 업무 메일을 계속 지켜보며 **Action item, 회의/일정성 항목, 마감 리마인드**를 찾아주는 Windows 11 상주형 업무 pulse 보드 PoC입니다.
 
 ## 지금 되는 것
 
@@ -35,7 +35,7 @@
 GitHub Actions artifact 또는 Release zip을 받아 압축을 풀고 아래 파일을 실행합니다.
 
 ```text
-OutlookAiSecretary.Windows.exe
+MailWhere.exe
 ```
 
 zip 안의 `START_HERE_시작하기.txt`를 먼저 읽는 것을 권장합니다.
@@ -43,7 +43,7 @@ zip 안의 `START_HERE_시작하기.txt`를 먼저 읽는 것을 권장합니다
 ## Windows 개발/검증
 
 ```powershell
-cd OutlookAiSecretary
+cd MailWhere
 .\scripts\verify-windows.ps1
 .\scripts\publish-portable.ps1
 ```
@@ -51,7 +51,7 @@ cd OutlookAiSecretary
 출력:
 
 ```text
-artifacts/OutlookAiSecretary-win-x64-portable.zip
+artifacts/MailWhere-win-x64-portable.zip
 ```
 
 ## LLM endpoint

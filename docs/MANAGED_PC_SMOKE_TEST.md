@@ -3,7 +3,7 @@
 Run this before enabling automatic watching on a managed Windows PC.
 
 1. Start Classic Outlook manually.
-2. Start Outlook AI Secretary.
+2. Start MailWhere.
 3. Open Diagnostics.
 4. Run probes with body probe disabled first.
 5. Confirm COM/profile/Inbox/metadata results.

@@ -26,7 +26,7 @@ Set-Location $repoRoot
 
 $artifactRoot = Join-Path $repoRoot $OutputRoot
 $publishRoot = Join-Path $artifactRoot "publish"
-$appName = "OutlookAiSecretary-$RuntimeIdentifier"
+$appName = "MailWhere-$RuntimeIdentifier"
 $publishDir = Join-Path $publishRoot $appName
 $zipPath = Join-Path $artifactRoot "$appName-portable.zip"
 
@@ -34,17 +34,17 @@ Write-Host "[portable] dotnet info"
 Invoke-Native { dotnet --info }
 
 Write-Host "[portable] restore"
-Invoke-Native { dotnet restore .\OutlookAiSecretary.sln }
+Invoke-Native { dotnet restore .\MailWhere.sln }
 
 Write-Host "[portable] build $Configuration"
-Invoke-Native { dotnet build .\OutlookAiSecretary.sln -c $Configuration --no-restore }
+Invoke-Native { dotnet build .\MailWhere.sln -c $Configuration --no-restore }
 
 if (-not $SkipTests) {
     Write-Host "[portable] core tests"
-    Invoke-Native { dotnet run --project .\tests\OutlookAiSecretary.Tests\OutlookAiSecretary.Tests.csproj -c $Configuration --no-build }
+    Invoke-Native { dotnet run --project .\tests\MailWhere.Tests\MailWhere.Tests.csproj -c $Configuration --no-build }
 
     Write-Host "[portable] test harness"
-    Invoke-Native { dotnet run --project .\tests\OutlookAiSecretary.TestHarness\OutlookAiSecretary.TestHarness.csproj -c $Configuration --no-build }
+    Invoke-Native { dotnet run --project .\tests\MailWhere.TestHarness\MailWhere.TestHarness.csproj -c $Configuration --no-build }
 }
 
 Write-Host "[portable] clean artifact folders"
@@ -54,7 +54,7 @@ New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
 
 Write-Host "[portable] publish self-contained folder"
 Invoke-Native {
-    dotnet publish .\src\OutlookAiSecretary.Windows\OutlookAiSecretary.Windows.csproj `
+    dotnet publish .\src\MailWhere.Windows\MailWhere.Windows.csproj `
         -c $Configuration `
         -r $RuntimeIdentifier `
         --self-contained true `
@@ -68,7 +68,7 @@ Copy-Item .\README.md (Join-Path $publishDir "README.md") -Force
 Copy-Item .\docs (Join-Path $publishDir "docs") -Recurse -Force
 Copy-Item .\docs\START_HERE.ko.txt (Join-Path $publishDir "START_HERE_시작하기.txt") -Force
 Copy-Item .\assets (Join-Path $publishDir "assets") -Recurse -Force
-Copy-Item .\src\OutlookAiSecretary.Windows\appsettings.sample.json (Join-Path $publishDir "appsettings.sample.json") -Force
+Copy-Item .\src\MailWhere.Windows\appsettings.sample.json (Join-Path $publishDir "appsettings.sample.json") -Force
 
 $commit = "unknown"
 try {
@@ -81,7 +81,7 @@ try {
 }
 
 $manifest = [ordered]@{
-    name = "Outlook AI Secretary"
+    name = "MailWhere"
     package = "$appName-portable.zip"
     configuration = $Configuration
     runtimeIdentifier = $RuntimeIdentifier

@@ -3,10 +3,10 @@
 The app is layered so the risky Windows/Outlook pieces are adapters, not the core product logic.
 
 ```text
-OutlookAiSecretary.Core        cross-platform domain, analyzer, gates, pipeline
-OutlookAiSecretary.Storage     SQLite persistence, raw-body-minimizing schema
-OutlookAiSecretary.OutlookCom  Windows-only Classic Outlook COM read adapter
-OutlookAiSecretary.Windows     WPF tray app, diagnostics, task/review UI
+MailWhere.Core        cross-platform domain, analyzer, gates, pipeline
+MailWhere.Storage     SQLite persistence, raw-body-minimizing schema
+MailWhere.OutlookCom  Windows-only Classic Outlook COM read adapter
+MailWhere.Windows     WPF tray app, diagnostics, task/review UI
 ```
 
 Phase 0/1 implementation is intentionally limited to read-only mailbox extraction, follow-up analysis, local task/reminder creation, diagnostics, and manual/degraded UX.
