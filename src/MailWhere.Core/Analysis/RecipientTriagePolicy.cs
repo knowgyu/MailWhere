@@ -58,5 +58,6 @@ public static class RecipientTriagePolicy
         kind is FollowUpKind.ReplyRequired
             or FollowUpKind.ActionRequested
             or FollowUpKind.Deadline
+            or FollowUpKind.PromisedByMe
             or FollowUpKind.WaitingForReply;
 }

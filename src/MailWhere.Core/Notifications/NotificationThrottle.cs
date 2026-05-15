@@ -4,6 +4,7 @@ public sealed class NotificationThrottle
 {
     private readonly TimeSpan _minimumInterval;
     private readonly Dictionary<string, DateTimeOffset> _lastNotified = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _dailyNotifications = new(StringComparer.Ordinal);
 
     public NotificationThrottle(TimeSpan? minimumInterval = null)
     {
@@ -30,5 +31,15 @@ public sealed class NotificationThrottle
 
         _lastNotified[sourceIdHash] = now;
         return true;
+    }
+
+    public bool ShouldNotifyOncePerDate(string key, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        return _dailyNotifications.Add($"{key}:{now:yyyy-MM-dd}");
     }
 }

@@ -1,25 +1,30 @@
 <Window x:Class="MailWhere.Windows.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="MailWhere" Height="680" Width="1040" MinHeight="620" MinWidth="940"
-        Icon="Assets/app-icon.ico" Background="#F5F7FB"
+        Title="MailWhere" Height="720" Width="1100" MinHeight="640" MinWidth="980"
+        Icon="Assets/app-icon.ico" Background="{StaticResource MwBrush.Page}"
         KeyDown="MainWindow_KeyDown">
     <Window.Resources>
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="14,8"/>
+        <!-- Window-local implicit styles intentionally scope shell form/list rhythm to MainWindow only.
+             App.xaml keeps broad resources keyed to avoid accidental app-wide restyling. -->
+        <Style TargetType="Button" BasedOn="{StaticResource MwButton.Base}">
             <Setter Property="Margin" Value="0,0,8,0"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="Margin" Value="0,4,12,12"/>
             <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="MinHeight" Value="34"/>
         </Style>
         <Style TargetType="ComboBox">
             <Setter Property="Margin" Value="0,4,12,12"/>
             <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="MinHeight" Value="34"/>
         </Style>
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#20304F"/>
+            <Setter Property="Foreground" Value="{StaticResource MwBrush.Text}"/>
+        </Style>
+        <Style x:Key="SectionCard" TargetType="Border" BasedOn="{StaticResource MwPanelBorder}">
+            <Setter Property="Margin" Value="0,0,12,12"/>
         </Style>
         <Style TargetType="ListBox">
             <Setter Property="BorderThickness" Value="0"/>
@@ -33,13 +38,7 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <Style TargetType="ListBoxItem">
-            <Setter Property="Padding" Value="10,8"/>
-            <Setter Property="Margin" Value="0,0,0,6"/>
-            <Setter Property="Background" Value="#F8FAFF"/>
-            <Setter Property="BorderBrush" Value="#E8EDF7"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Style TargetType="ListBoxItem" BasedOn="{StaticResource MwCardListBoxItem}">
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
@@ -48,8 +47,8 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Card" Property="Background" Value="#EEF3FF"/>
-                                <Setter TargetName="Card" Property="BorderBrush" Value="#2458F2"/>
+                                <Setter TargetName="Card" Property="Background" Value="{StaticResource MwBrush.PrimarySoft}"/>
+                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource MwBrush.Primary}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -64,38 +63,43 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" CornerRadius="22" Background="#FFFFFF" Padding="18" Margin="0,0,0,14" BorderBrush="#E3E8F2" BorderThickness="1">
+        <Border Grid.Row="0" CornerRadius="22" Background="{StaticResource MwBrush.Surface}" Padding="18" Margin="0,0,0,14" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Left">
-                    <TextBlock Text="MailWhere" FontSize="24" FontWeight="Bold" Foreground="#14213D"/>
-                    <TextBlock Text="최근 1개월 메일에서 Action item, 회의/일정, 마감 리마인드를 찾아 조용히 알려줍니다." Margin="0,5,0,0" Foreground="#5F6B83"/>
+                    <TextBlock Text="MailWhere" FontSize="24" FontWeight="Bold" Foreground="{StaticResource MwBrush.TextStrong}"/>
+                    <TextBlock Text="트레이에서 조용히 지켜보고, 필요한 순간 업무 보드와 오늘 브리핑으로 이어집니다." Margin="0,5,0,0" Foreground="{StaticResource MwBrush.TextMuted}"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Click="OpenDailyBoard_Click">업무 보드</Button>
-                    <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Background="#2458F2" Foreground="White">최근 1개월 스캔</Button>
-                    <Button x:Name="StopScanButton" Click="StopScan_Click" Visibility="Collapsed" Background="#F04438" Foreground="White">스캔 중지</Button>
+                    <Button Click="OpenDailyBoard_Click" Style="{StaticResource MwButton.Secondary}">업무 보드</Button>
+                    <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Style="{StaticResource MwButton.Primary}">최근 1개월 스캔</Button>
+                    <Button x:Name="StopScanButton" Click="StopScan_Click" Visibility="Collapsed" Style="{StaticResource MwButton.Danger}">스캔 중지</Button>
                 </StackPanel>
             </DockPanel>
         </Border>
 
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*"/>
-                <ColumnDefinition Width="1.1*"/>
-            </Grid.ColumnDefinitions>
-
-            <Border Grid.Column="0" CornerRadius="20" Background="#FFFFFF" Padding="16" Margin="0,0,14,0" BorderBrush="#E3E8F2" BorderThickness="1">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                        <TextBlock Text="오늘 봐야 할 항목" FontSize="18" FontWeight="Bold"/>
-                        <TextBlock x:Name="StatusText" Text="대기 중입니다. 최근 1개월 스캔을 실행하면 오늘 볼 항목을 모아줍니다." Foreground="#667085" Margin="0,4,0,0" TextWrapping="Wrap"/>
+        <Border Grid.Row="1" CornerRadius="20" Background="{StaticResource MwBrush.Surface}" Padding="16" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
+            <DockPanel>
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="오늘 업무" FontSize="18" FontWeight="Bold"/>
+                        <TextBlock x:Name="StatusText" Text="대기 중입니다. 최근 1개월 스캔을 실행하면 내가 할 일과 기다리는 일을 모아줍니다." Foreground="{StaticResource MwBrush.TextMuted}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         <ProgressBar x:Name="ScanProgressBar" Height="4" IsIndeterminate="True" Visibility="Collapsed" Margin="0,10,0,4"/>
-                        <TextBlock x:Name="ScanProgressText" Text="대기 중입니다." Visibility="Collapsed" Foreground="#2458F2" FontWeight="SemiBold" FontSize="12"/>
+                        <TextBlock x:Name="ScanProgressText" Text="대기 중입니다." Visibility="Collapsed" Foreground="{StaticResource MwBrush.Primary}" FontWeight="SemiBold" FontSize="12"/>
                     </StackPanel>
-                    <TabControl x:Name="MainTabs">
-                        <TabItem x:Name="TasksTab" Header="할 일 / 일정">
-                            <DockPanel Margin="8">
-                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                    <Border Grid.Column="1" CornerRadius="14" Background="{StaticResource MwBrush.PrimarySoft}" Padding="12,8" VerticalAlignment="Top" Margin="16,0,0,0">
+                        <TextBlock Text="설정은 탭 안에 정리했습니다" Foreground="{StaticResource MwBrush.Primary}" FontWeight="SemiBold"/>
+                    </Border>
+                </Grid>
+
+                <TabControl x:Name="MainTabs">
+                    <TabItem x:Name="TasksTab" Header="업무 보드">
+                        <DockPanel Margin="8">
+                            <Border DockPanel.Dock="Top" Style="{StaticResource SectionCard}">
+                                <StackPanel>
                                     <TextBlock Text="빠른 할 일 추가" FontWeight="SemiBold"/>
                                     <Grid Margin="0,6,0,2">
                                         <Grid.ColumnDefinitions>
@@ -103,125 +107,159 @@
                                             <ColumnDefinition Width="170"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBox x:Name="ManualTaskText" Grid.Column="0" MinHeight="34" ToolTip="예: 금요일까지 리뷰 자료 공유"/>
-                                        <TextBox x:Name="ManualDueText" Grid.Column="1" MinHeight="34" ToolTip="예: 내일, 금요일, 2026-05-20" />
-                                        <Button Grid.Column="2" Click="AddManualTask_Click" MinHeight="34">추가</Button>
+                                        <TextBox x:Name="ManualTaskText" Grid.Column="0" ToolTip="예: 금요일까지 리뷰 자료 공유"/>
+                                        <TextBox x:Name="ManualDueText" Grid.Column="1" ToolTip="예: 내일, 금요일, 2026-05-20" />
+                                        <Button Grid.Column="2" Click="AddManualTask_Click" Style="{StaticResource MwButton.Primary}">추가</Button>
                                     </Grid>
-                                    <TextBlock Text="마감은 비워둘 수 있습니다. '내일', '금요일', '2026-05-20' 같은 표현을 우선 지원합니다." Foreground="#667085" FontSize="12" TextWrapping="Wrap"/>
+                                    <TextBlock Text="마감은 비워둘 수 있습니다. '내일', '금요일', '2026-05-20'을 우선 지원합니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
-                                <ListBox x:Name="TasksList" FontSize="14">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <Grid>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="Auto"/>
-                                                </Grid.RowDefinitions>
-                                                <DockPanel Grid.Row="0" LastChildFill="True">
-                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
-                                                        <Button Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="SetTaskDueButton_Click" Padding="9,5" Margin="0,0,6,0"/>
-                                                        <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTaskButton_Click" Padding="9,5" Margin="0,0,6,0"/>
-                                                        <Button Content="삭제" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="DismissTaskButton_Click" Padding="9,5" Background="#FFF1F0" BorderBrush="#FDA29B" Foreground="#B42318"/>
-                                                    </StackPanel>
-                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                </DockPanel>
-                                                <TextBlock Grid.Row="1" Text="{Binding Meta}" Foreground="#667085" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </DockPanel>
-                        </TabItem>
-                        <TabItem x:Name="ReviewTab" Header="검토함">
-                            <DockPanel Margin="8">
-                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                                    <TextBlock Text="확신이 낮아 자동 등록하지 않은 후보입니다. 목록은 짧게 보여주고, 근거가 필요하면 원본 메일을 열어 확인하세요." TextWrapping="Wrap" Foreground="#667085" Margin="0,0,0,10"/>
+                            </Border>
+                            <ListBox x:Name="TasksList" FontSize="14">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <DockPanel Grid.Row="0" LastChildFill="True">
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+                                                    <Button Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="SetTaskDueButton_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,6,0"/>
+                                                    <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTaskButton_Click" Style="{StaticResource MwButton.Base}" Margin="0,0,6,0"/>
+                                                    <Button Content="숨김" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="DismissTaskButton_Click" Style="{StaticResource MwButton.Danger}"/>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            </DockPanel>
+                                            <TextBlock Grid.Row="1" Text="{Binding Meta}" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </TabItem>
+
+                    <TabItem x:Name="ReviewTab" Header="검토 후보">
+                        <DockPanel Margin="8">
+                            <Border DockPanel.Dock="Top" Style="{StaticResource SectionCard}">
+                                <StackPanel>
+                                    <TextBlock Text="검토 후보" FontWeight="SemiBold"/>
+                                    <TextBlock Text="확신이 낮아 자동 등록하지 않은 후보입니다. 필요한 항목만 골라 업무 보드에 올리세요." TextWrapping="Wrap" Foreground="{StaticResource MwBrush.TextMuted}" Margin="0,4,0,10"/>
                                     <StackPanel Orientation="Horizontal">
-                                        <Button Click="ApproveSelectedReview_Click" Background="#2458F2" Foreground="White">선택 항목 등록 (Alt+A)</Button>
+                                        <Button Click="ApproveSelectedReview_Click" Style="{StaticResource MwButton.Primary}">등록 (Alt+A)</Button>
                                         <Button Click="OpenSelectedReviewMail_Click">원본 메일 열기</Button>
                                         <Button Click="SnoozeSelectedReview_Click">나중에 보기 (Alt+S)</Button>
-                                        <Button Click="IgnoreSelectedReview_Click">선택 항목 무시 (Alt+I)</Button>
+                                        <Button Click="IgnoreSelectedReview_Click" Style="{StaticResource MwButton.Danger}">무시 (Alt+I)</Button>
                                     </StackPanel>
                                 </StackPanel>
-                                <ListBox x:Name="ReviewCandidatesList" FontSize="14" MouseDoubleClick="OpenSelectedReviewMail_DoubleClick"/>
-                            </DockPanel>
-                        </TabItem>
-                    </TabControl>
-                </DockPanel>
-            </Border>
+                            </Border>
+                            <ListBox x:Name="ReviewCandidatesList" FontSize="14" MouseDoubleClick="OpenSelectedReviewMail_DoubleClick"/>
+                        </DockPanel>
+                    </TabItem>
 
-            <Border Grid.Column="1" CornerRadius="20" Background="#FFFFFF" Padding="16" BorderBrush="#E3E8F2" BorderThickness="1">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <TextBlock Text="설정" FontSize="18" FontWeight="Bold"/>
-                        <TextBlock Text="LLM endpoint를 연결하면 새 메일을 먼저 LLM으로 분석합니다." Foreground="#667085" TextWrapping="Wrap" Margin="0,4,0,14"/>
+                    <TabItem x:Name="SettingsTab" Header="설정">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="8">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="1*"/>
+                                        <ColumnDefinition Width="1*"/>
+                                    </Grid.ColumnDefinitions>
 
-                        <CheckBox x:Name="StartupToggle" Content="Windows 시작 시 실행" Click="StartupToggle_Click" Margin="0,0,0,10"/>
-                        <CheckBox x:Name="LlmEnabledToggle" Content="로컬 LLM 분석 사용" Click="LlmEnabledToggle_Click" Margin="0,0,0,10"/>
+                                    <StackPanel Grid.Column="0">
+                                        <Border Style="{StaticResource SectionCard}">
+                                            <StackPanel>
+                                                <TextBlock Text="일반" FontSize="16" FontWeight="Bold"/>
+                                                <TextBlock Text="매일 쓰는 동작만 먼저 둡니다." Foreground="{StaticResource MwBrush.TextMuted}" Margin="0,4,0,12"/>
+                                                <CheckBox x:Name="StartupToggle" Content="Windows 시작 시 실행" Click="StartupToggle_Click" Margin="0,0,0,10"/>
+                                                <TextBlock Text="최근 스캔 기간(일)" FontWeight="SemiBold"/>
+                                                <TextBox x:Name="ScanDaysText"/>
+                                                <Button Click="SaveSettings_Click" HorizontalAlignment="Left" Style="{StaticResource MwButton.Primary}">설정 저장</Button>
+                                            </StackPanel>
+                                        </Border>
 
-                        <TextBlock Text="Endpoint 방식" FontWeight="SemiBold"/>
-                        <ComboBox x:Name="LlmProviderBox">
-                            <ComboBoxItem Tag="OllamaNative" Content="Ollama 로컬"/>
-                            <ComboBoxItem Tag="OpenAiChatCompletions" Content="OpenAI 호환 - Chat Completions"/>
-                            <ComboBoxItem Tag="OpenAiResponses" Content="OpenAI 호환 - Responses"/>
-                        </ComboBox>
+                                        <Border Style="{StaticResource SectionCard}">
+                                            <StackPanel>
+                                                <TextBlock Text="오늘 브리핑·알림" FontSize="16" FontWeight="Bold"/>
+                                                <TextBlock Text="트레이 알림과 업무 보드 진입 시간을 조정합니다." Foreground="{StaticResource MwBrush.TextMuted}" Margin="0,4,0,12"/>
+                                                <TextBlock Text="알림 미리 보기(시간)" FontWeight="SemiBold"/>
+                                                <TextBox x:Name="ReminderLookAheadText"/>
+                                                <TextBlock Text="오늘 브리핑 시간" FontWeight="SemiBold"/>
+                                                <TextBox x:Name="DailyBoardTimeText" ToolTip="기본 08:00. 이 시간이 지난 뒤 앱이 켜지면 다음 정시에 한 번 알립니다."/>
+                                                <TextBlock Text="시작 후 대기(분)" FontWeight="SemiBold"/>
+                                                <TextBox x:Name="DailyBoardStartupDelayText" ToolTip="Windows 시작 직후 Outlook/LLM 등 다른 프로세스가 준비될 시간을 둡니다. 기본 10분."/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
 
-                        <TextBlock Text="로컬 endpoint" FontWeight="SemiBold"/>
-                        <TextBox x:Name="LlmEndpointText" ToolTip="예: http://localhost:11434 또는 http://localhost:8000"/>
-                        <TextBlock Text="모델" FontWeight="SemiBold"/>
-                        <Grid Margin="0,4,12,12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <ComboBox x:Name="LlmModelBox" Grid.Column="0" IsEditable="True" Margin="0" MinHeight="36" ToolTip="모델을 불러오거나 직접 입력하세요."/>
-                            <Button x:Name="LoadLlmModelsButton" Grid.Column="1" Click="LoadLlmModels_Click" Margin="8,0,0,0" MinHeight="36">모델 불러오기</Button>
-                        </Grid>
+                                    <StackPanel Grid.Column="1">
+                                        <Border Style="{StaticResource SectionCard}">
+                                            <StackPanel>
+                                                <TextBlock Text="LLM" FontSize="16" FontWeight="Bold"/>
+                                                <TextBlock Text="연결된 endpoint가 있으면 메일 분석에 사용합니다. 토큰 값은 저장하지 않습니다." Foreground="{StaticResource MwBrush.TextMuted}" TextWrapping="Wrap" Margin="0,4,0,12"/>
+                                                <CheckBox x:Name="LlmEnabledToggle" Content="로컬 LLM 분석 사용" Click="LlmEnabledToggle_Click" Margin="0,0,0,10"/>
+                                                <TextBlock Text="Endpoint 방식" FontWeight="SemiBold"/>
+                                                <ComboBox x:Name="LlmProviderBox">
+                                                    <ComboBoxItem Tag="OllamaNative" Content="Ollama 로컬"/>
+                                                    <ComboBoxItem Tag="OpenAiChatCompletions" Content="OpenAI 호환 · Chat Completions"/>
+                                                    <ComboBoxItem Tag="OpenAiResponses" Content="OpenAI 호환 · Responses"/>
+                                                </ComboBox>
+                                                <TextBlock Text="Endpoint" FontWeight="SemiBold"/>
+                                                <TextBox x:Name="LlmEndpointText" ToolTip="예: http://localhost:11434 또는 http://localhost:8000"/>
+                                                <TextBlock Text="모델" FontWeight="SemiBold"/>
+                                                <Grid Margin="0,4,12,12">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <ComboBox x:Name="LlmModelBox" Grid.Column="0" IsEditable="True" Margin="0" ToolTip="모델을 불러오거나 직접 입력하세요."/>
+                                                    <Button x:Name="LoadLlmModelsButton" Grid.Column="1" Click="LoadLlmModels_Click" Margin="8,0,0,0">모델 불러오기</Button>
+                                                </Grid>
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                                    <Button x:Name="TestLlmEndpointButton" Click="TestLlmEndpoint_Click" Style="{StaticResource MwButton.Primary}">연결 테스트</Button>
+                                                    <TextBlock x:Name="LlmStatusText" Text="LLM 연결 테스트 전입니다." VerticalAlignment="Center" Foreground="{StaticResource MwBrush.TextMuted}" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
 
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                            <Button x:Name="TestLlmEndpointButton" Click="TestLlmEndpoint_Click" Background="#2458F2" Foreground="White">연결 테스트</Button>
-                            <TextBlock x:Name="LlmStatusText" Text="LLM 연결 테스트 전입니다." VerticalAlignment="Center" Foreground="#667085" TextWrapping="Wrap"/>
-                        </StackPanel>
+                                        <Border Style="{StaticResource SectionCard}">
+                                            <StackPanel>
+                                                <TextBlock Text="고급" FontSize="16" FontWeight="Bold"/>
+                                                <CheckBox x:Name="AutoWatcherToggle" Content="자동 watcher 요청(운영 smoke gate 후 활성)" Margin="0,8,0,10"/>
+                                                <TextBlock Text="최대 메일 수(비우면 최근 기간 전체)" FontWeight="SemiBold"/>
+                                                <TextBox x:Name="MaxItemsText" ToolTip="문제 진단 때만 숫자를 넣으세요."/>
+                                                <TextBlock Text="LLM timeout(초)" FontWeight="SemiBold"/>
+                                                <TextBox x:Name="LlmTimeoutText" ToolTip="로컬 30B 이상 모델은 90~180초를 권장합니다."/>
+                                                <TextBlock Text="Bearer token 환경 변수(선택)" FontWeight="SemiBold"/>
+                                                <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: LOCAL_LLM_TOKEN. 토큰 값 자체는 앱 설정에 저장하지 마세요."/>
+                                                <TextBlock Text="LLM 분석 실패 처리" FontWeight="SemiBold"/>
+                                                <ComboBox x:Name="LlmFallbackPolicyBox">
+                                                    <ComboBoxItem Tag="LlmOnly" Content="검토 후보로 보관"/>
+                                                    <ComboBoxItem Tag="LlmThenRules" Content="규칙 기반 fallback 허용"/>
+                                                </ComboBox>
+                                                <TextBlock Text="기본값은 검토 후보 보관입니다. 규칙 fallback은 LLM 장애 중에도 후보를 만들고 싶을 때만 켜세요." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap" Margin="0,-6,12,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Grid>
 
-                        <TextBlock Text="최근 스캔 기간(일)" FontWeight="SemiBold"/>
-                        <TextBox x:Name="ScanDaysText"/>
-
-                        <Button Click="SaveSettings_Click" HorizontalAlignment="Left" Background="#14213D" Foreground="White">설정 저장</Button>
-
-                        <Expander Header="고급 설정" Margin="0,18,12,0">
-                            <StackPanel Margin="0,10,0,0">
-                                <CheckBox x:Name="AutoWatcherToggle" Content="자동 watcher 요청(운영 smoke gate 후 활성)" Margin="0,0,0,10"/>
-                                <TextBlock Text="최대 메일 수(비우면 최근 기간 전체)" FontWeight="SemiBold"/>
-                                <TextBox x:Name="MaxItemsText" ToolTip="문제 진단 때만 숫자를 넣으세요."/>
-                                <TextBlock Text="알림 look-ahead(시간)" FontWeight="SemiBold"/>
-                                <TextBox x:Name="ReminderLookAheadText"/>
-                                <TextBlock Text="오늘의 업무 보드 시간" FontWeight="SemiBold"/>
-                                <TextBox x:Name="DailyBoardTimeText" ToolTip="기본 08:00. 이 시간이 지난 뒤 앱이 켜지면 다음 정시에 한 번 표시합니다."/>
-                                <TextBlock Text="LLM timeout(초)" FontWeight="SemiBold"/>
-                                <TextBox x:Name="LlmTimeoutText" ToolTip="로컬 30B 이상 모델은 90~180초를 권장합니다."/>
-                                <TextBlock Text="Bearer token 환경 변수(선택)" FontWeight="SemiBold"/>
-                                <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: LOCAL_LLM_TOKEN. 토큰 값 자체는 앱 설정에 저장하지 마세요."/>
-                                <TextBlock Text="LLM 분석 실패 처리" FontWeight="SemiBold"/>
-                                <ComboBox x:Name="LlmFallbackPolicyBox">
-                                    <ComboBoxItem Tag="LlmOnly" Content="검토함에 보관"/>
-                                    <ComboBoxItem Tag="LlmThenRules" Content="규칙 기반 fallback 허용"/>
-                                </ComboBox>
-                                <TextBlock Text="기본값은 검토함 보관입니다. 규칙 fallback은 LLM이 안 될 때도 후보를 계속 만들고 싶을 때만 켜세요." Foreground="#667085" FontSize="12" TextWrapping="Wrap" Margin="0,-6,12,10"/>
+                                <Border Style="{StaticResource SectionCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="문제 해결" FontSize="16" FontWeight="Bold"/>
+                                        <TextBlock Text="평소에는 열지 않아도 됩니다. Outlook/저장소/LLM 연결이 이상할 때만 확인하세요." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,10"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                            <Button Click="RunDiagnostics_Click">진단 실행</Button>
+                                            <Button Click="TestNotification_Click">알림 테스트</Button>
+                                            <Button Click="ResetLocalData_Click" Style="{StaticResource MwButton.Danger}">업무 데이터 초기화</Button>
+                                        </StackPanel>
+                                        <TextBlock Text="초기화는 테스트/개발용입니다. 저장된 할 일·검토 후보·스캔 중복 기록만 지우고 설정은 유지합니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                        <TextBox x:Name="DiagnosticsText" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsReadOnly="True" FontFamily="Consolas" MinHeight="140" Text="진단을 실행하면 안전한 코드와 상태만 표시됩니다."/>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-                        </Expander>
-                        <Expander Header="문제 해결" Margin="0,12,12,0">
-                            <StackPanel Margin="0,10,0,0">
-                                <TextBlock Text="평소에는 열지 않아도 됩니다. Outlook/저장소/LLM 연결이 이상할 때만 확인하세요." Foreground="#667085" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                    <Button Click="RunDiagnostics_Click" Margin="0,0,8,0">진단 실행</Button>
-                                    <Button Click="TestNotification_Click">알림 테스트</Button>
-                                </StackPanel>
-                                <TextBox x:Name="DiagnosticsText" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsReadOnly="True" FontFamily="Consolas" MinHeight="140" Text="진단을 실행하면 여기에 안전한 코드만 표시됩니다."/>
-                            </StackPanel>
-                        </Expander>
-                    </StackPanel>
-                </ScrollViewer>
-            </Border>
-        </Grid>
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
+            </DockPanel>
+        </Border>
     </Grid>
 </Window>

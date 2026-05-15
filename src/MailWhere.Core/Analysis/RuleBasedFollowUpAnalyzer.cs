@@ -21,6 +21,14 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
         "(참석|초대|입장|조인|참여|발표|회의\\s*(?:예정|진행|참석)|attend|join|invite|presentation)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex SelfPromiseKeyword = new(
+        "(?:제가|저희가|내가|I\\s+will|I'll).{0,40}(?:공유|전달|발송|보내|처리|진행|확인|정리|작성|수정|send|share|provide|follow up|handle|update).{0,30}(?:하겠습니다|드리겠습니다|드릴게요|하겠|할게요|겠습니다|하겠습니다|$)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex OutboundWaitingKeyword = new(
+        "(부탁드립니다|요청드립니다|공유\\s*부탁|전달\\s*부탁|회신\\s*부탁|확인\\s*부탁|보내주세요|알려주세요|please|could you|can you|send me|let me know|share)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static readonly Regex IgnoreKeyword = new(
         "(참고|공지|뉴스레터|시스템 알림|자동 발송|newsletter|no action|FYI|for your information|advertisement|unsubscribe|광고|구독)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -71,6 +79,35 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
         var ignore = IgnoreKeyword.Match(contextText);
         var automatedSender = AutomatedSender.Match(email.SenderDisplay);
         var dueAt = SimpleDueDateParser.TryParse(contextText, email.ReceivedAt);
+        var sentByMailboxUser = SentByMailboxUser(email);
+        var selfPromise = sentByMailboxUser ? SelfPromiseKeyword.Match(contextText) : Match.Empty;
+        var outboundWaiting = sentByMailboxUser ? OutboundWaitingKeyword.Match(text) : Match.Empty;
+
+        if (selfPromise.Success)
+        {
+            return Task.FromResult(new FollowUpAnalysis(
+                FollowUpKind.PromisedByMe,
+                AnalysisDisposition.AutoCreateTask,
+                dueAt is null ? 0.78 : 0.88,
+                BuildTitle(context.SubjectCore, selfPromise.Value),
+                "보낸 메일에서 내가 하겠다고 한 약속이 감지되었습니다.",
+                EvidenceAround(contextText, selfPromise.Index),
+                dueAt,
+                "내 약속"));
+        }
+
+        if (outboundWaiting.Success)
+        {
+            return Task.FromResult(new FollowUpAnalysis(
+                FollowUpKind.WaitingForReply,
+                AnalysisDisposition.AutoCreateTask,
+                dueAt is null ? 0.74 : 0.86,
+                BuildTitle(context.SubjectCore, outboundWaiting.Value),
+                "보낸 메일에서 상대의 회신/전달을 기다리는 요청이 감지되었습니다.",
+                EvidenceAround(text, outboundWaiting.Index),
+                dueAt,
+                "기다리는 중"));
+        }
 
         if ((ignore.Success || automatedSender.Success) && !action.Success && !due.Success)
         {
@@ -141,6 +178,10 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
         keyword.Contains("회신", StringComparison.OrdinalIgnoreCase)
         || keyword.Contains("reply", StringComparison.OrdinalIgnoreCase)
         || keyword.Contains("respond", StringComparison.OrdinalIgnoreCase);
+
+    private static bool SentByMailboxUser(EmailSnapshot email) =>
+        !string.IsNullOrWhiteSpace(email.MailboxOwnerDisplayName)
+        && OwnershipClassifier.LooksLikeMailboxOwner(email.SenderDisplay, email.MailboxOwnerDisplayName);
 
     private static string BuildTitle(string subject, string keyword)
     {

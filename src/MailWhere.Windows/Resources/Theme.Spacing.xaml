@@ -1,0 +1,9 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Thickness x:Key="MwSpace.Window">18</Thickness>
+    <Thickness x:Key="MwSpace.Panel">16</Thickness>
+    <Thickness x:Key="MwSpace.Card">12,10</Thickness>
+    <CornerRadius x:Key="MwRadius.Panel">20</CornerRadius>
+    <CornerRadius x:Key="MwRadius.Card">14</CornerRadius>
+    <CornerRadius x:Key="MwRadius.Pill">14</CornerRadius>
+</ResourceDictionary>

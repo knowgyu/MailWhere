@@ -5,6 +5,7 @@ using MailWhere.Core.Analysis;
 using MailWhere.Core.Capabilities;
 using MailWhere.Core.Domain;
 using MailWhere.Core.LLM;
+using MailWhere.Core.Localization;
 using MailWhere.Core.Mail;
 using MailWhere.Core.Notifications;
 using MailWhere.Core.Pipeline;
@@ -28,6 +29,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Reply quoted history does not auto create", ReplyQuotedHistoryDoesNotAutoCreate),
     ("Explicit other assignee is ignored", ExplicitOtherAssigneeIsIgnored),
     ("Explicit self assignee is recognized", ExplicitSelfAssigneeIsRecognized),
+    ("Sent promise is classified as my work", SentPromiseIsClassifiedAsMyWork),
+    ("Sent request is classified as waiting on them", SentRequestIsClassifiedAsWaitingOnThem),
+    ("Follow-up presentation buckets promise and waiting", FollowUpPresentationBucketsPromiseAndWaiting),
     ("Managed mode blocks watcher without smoke gate", ManagedModeBlocksWatcherWithoutGate),
     ("Smoke gate is required even if managed mode is false", SmokeGateRequiredEvenIfManagedModeFalse),
     ("Ambiguous mail does not auto create", AmbiguousMailDoesNotAutoCreate),
@@ -36,6 +40,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Manual task can be created", ManualTaskCanBeCreated),
     ("Review candidate ignore persists", ReviewCandidateIgnorePersists),
     ("Notification throttle suppresses repeat alerts", NotificationThrottleSuppressesRepeatAlerts),
+    ("Notification throttle supports once per date", NotificationThrottleSupportsOncePerDate),
     ("Diagnostics exporter drops sensitive detail keys", DiagnosticsExporterDropsSensitiveDetailKeys),
     ("Diagnostics exporter sanitizes allowed detail values", DiagnosticsExporterSanitizesAllowedDetailValues),
     ("Runtime diagnostics export includes safe gate codes", RuntimeDiagnosticsExportIncludesSafeGateCodes),
@@ -46,7 +51,18 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Runtime settings serialize canonical provider names", RuntimeSettingsSerializeCanonicalProviderNames),
     ("Runtime settings default unlimited recent scan", RuntimeSettingsDefaultUnlimitedRecentScan),
     ("Runtime settings default daily board time", RuntimeSettingsDefaultDailyBoardTime),
+    ("Runtime settings default daily board startup delay", RuntimeSettingsDefaultDailyBoardStartupDelay),
     ("Daily board planner schedules next whole hour", DailyBoardPlannerSchedulesNextWholeHour),
+    ("Daily board planner waits for startup settling delay", DailyBoardPlannerWaitsForStartupSettlingDelay),
+    ("Daily board route options map manual and today brief", DailyBoardRouteOptionsMapManualAndTodayBrief),
+    ("Daily board Today brief route includes brief highlights", DailyBoardTodayBriefRouteIncludesBriefHighlights),
+    ("Notification action resolver maps daily brief", NotificationActionResolverMapsDailyBrief),
+    ("Daily brief notification marks shown after success", DailyBriefNotificationMarksShownAfterSuccess),
+    ("Daily brief notification does not mark shown after cancellation", DailyBriefNotificationDoesNotMarkShownAfterCancellation),
+    ("Daily brief notification does not mark shown after failure", DailyBriefNotificationDoesNotMarkShownAfterFailure),
+    ("Snooze planner computes presets", SnoozePlannerComputesPresets),
+    ("Daily brief planner highlights due and hides future snooze", DailyBriefPlannerHighlightsDueAndHidesFutureSnooze),
+    ("Korean labels use concise product copy", KoreanLabelsUseConciseProductCopy),
     ("LLM JSON creates calendar task", LlmJsonCreatesCalendarTask),
     ("LLM success does not pre-run fallback rules", LlmSuccessDoesNotPreRunFallbackRules),
     ("LLM payload includes thread and owner context", LlmPayloadIncludesThreadAndOwnerContext),
@@ -74,6 +90,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Recent mail scan supports unlimited count", RecentMailScanSupportsUnlimitedCount),
     ("Mail scan reports progress", MailScanReportsProgress),
     ("Reminder planner emits lookahead notifications", ReminderPlannerEmitsLookaheadNotifications),
+    ("Reminder planner suppresses future snooze and emits due snooze", ReminderPlannerSuppressesFutureSnoozeAndEmitsDueSnooze),
     ("SQLite store truncates source-derived fields", SqliteStoreTruncatesSourceDerivedFields),
     ("SQLite review candidates can be listed", SqliteReviewCandidatesCanBeListed),
     ("SQLite review candidate can be resolved as task", SqliteReviewCandidateCanBeResolvedAsTask),
@@ -82,6 +99,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("SQLite double review approval is idempotent", SqliteDoubleReviewApprovalIsIdempotent),
     ("SQLite review candidate snooze hides until due", SqliteReviewCandidateSnoozeHidesUntilDue),
     ("SQLite task dismiss and due update persist", SqliteTaskDismissAndDueUpdatePersist),
+    ("SQLite task complete and snooze persist", SqliteTaskCompleteAndSnoozePersist),
     ("SQLite stale review ignore does not redact approved task", SqliteStaleReviewIgnoreDoesNotRedactApprovedTask),
     ("SQLite migrates pre daily board schema", SqliteMigratesPreDailyBoardSchema),
     ("SQLite delete source-derived data redacts task and candidate", SqliteDeleteSourceDerivedDataRedactsTaskAndCandidate),
@@ -111,10 +129,11 @@ static EmailSnapshot Mail(
     string? id = null,
     string? conversationId = null,
     string? mailboxOwner = null,
-    MailboxRecipientRole recipientRole = MailboxRecipientRole.Direct) => new(
+    MailboxRecipientRole recipientRole = MailboxRecipientRole.Direct,
+    string? sender = null) => new(
     id ?? Guid.NewGuid().ToString("N"),
     new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9)),
-    "tester",
+    sender ?? "tester",
     subject,
     body,
     conversationId,
@@ -178,9 +197,11 @@ static Task KoreanWeekdayDueDateParses()
     var anchor = new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9)); // Thursday
     var friday = SimpleDueDateParser.TryParse("이번 주 금요일까지 공유", anchor);
     var nextMonday = SimpleDueDateParser.TryParse("다음 주 월요일 회의", anchor);
+    var dayOnly = SimpleDueDateParser.TryParse("20일까지 견적서 공유 부탁드립니다.", anchor);
 
     Assert(friday == new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)), "Expected this Friday.");
     Assert(nextMonday == new DateTimeOffset(2026, 5, 18, 9, 0, 0, TimeSpan.FromHours(9)), "Expected next Monday.");
+    Assert(dayOnly == new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.FromHours(9)), "Expected current-month day-only deadline.");
     return Task.CompletedTask;
 }
 
@@ -278,6 +299,61 @@ static async Task ExplicitSelfAssigneeIsRecognized()
         mailboxOwner: "김영희 프로"));
 
     Assert(result.Disposition == AnalysisDisposition.AutoCreateTask, "Explicit self assignee should remain actionable.");
+}
+
+static async Task SentPromiseIsClassifiedAsMyWork()
+{
+    var analyzer = new RuleBasedFollowUpAnalyzer();
+    var result = await analyzer.AnalyzeAsync(Mail(
+        "수정본 공유",
+        "제가 금요일까지 수정본 공유드리겠습니다.",
+        mailboxOwner: "김영희",
+        sender: "김영희"));
+
+    Assert(result.Kind == FollowUpKind.PromisedByMe, "Expected sent promise to be tracked as my promise.");
+    Assert(result.Disposition == AnalysisDisposition.AutoCreateTask, "Expected confident sent promise to auto-create.");
+    Assert(result.DueAt is not null, "Expected due date on promised item.");
+    Assert(FollowUpPresentation.CategoryFor(LocalTaskItem.FromAnalysis(Mail("x", "x"), result, DateTimeOffset.UtcNow)) == FollowUpDisplayCategory.ActionForMe, "Promised item should appear under my work.");
+}
+
+static async Task SentRequestIsClassifiedAsWaitingOnThem()
+{
+    var analyzer = new RuleBasedFollowUpAnalyzer();
+    var result = await analyzer.AnalyzeAsync(Mail(
+        "견적서 요청",
+        "20일까지 견적서 공유 부탁드립니다.",
+        mailboxOwner: "김영희",
+        sender: "김영희"));
+
+    Assert(result.Kind == FollowUpKind.WaitingForReply, "Expected sent request to be tracked as waiting on them.");
+    Assert(result.Disposition == AnalysisDisposition.AutoCreateTask, "Expected sent request to auto-create a waiting item.");
+    Assert(result.DueAt is not null, "Expected due date on waiting item.");
+}
+
+static Task FollowUpPresentationBucketsPromiseAndWaiting()
+{
+    var now = DateTimeOffset.UtcNow;
+    var promise = new LocalTaskItem(
+        Guid.NewGuid(),
+        "수정본 공유",
+        null,
+        null,
+        null,
+        0.9,
+        "테스트",
+        null,
+        LocalTaskStatus.Open,
+        null,
+        now,
+        now,
+        Kind: FollowUpKind.PromisedByMe);
+    var waiting = promise with { Id = Guid.NewGuid(), Kind = FollowUpKind.WaitingForReply };
+
+    Assert(FollowUpPresentation.CategoryFor(promise) == FollowUpDisplayCategory.ActionForMe, "Promise should be my work.");
+    Assert(FollowUpPresentation.CategoryFor(waiting) == FollowUpDisplayCategory.WaitingOnThem, "Waiting item should be waiting-on-them.");
+    Assert(FollowUpPresentation.CompactBadge(FollowUpKind.ReplyRequired) == "할 일", "Reply is not a top-level category.");
+    Assert(FollowUpPresentation.CompactBadge(FollowUpKind.CalendarEvent) == "일정", "Calendar should use schedule badge.");
+    return Task.CompletedTask;
 }
 
 static Task ManagedModeBlocksWatcherWithoutGate()
@@ -390,6 +466,16 @@ static Task NotificationThrottleSuppressesRepeatAlerts()
     Assert(throttle.ShouldNotify("source", now), "First alert should pass.");
     Assert(!throttle.ShouldNotify("source", now.AddMinutes(5)), "Repeat alert should be suppressed.");
     Assert(throttle.ShouldNotify("source", now.AddHours(2)), "Later alert should pass.");
+    return Task.CompletedTask;
+}
+
+static Task NotificationThrottleSupportsOncePerDate()
+{
+    var throttle = new NotificationThrottle(TimeSpan.FromMinutes(1));
+    var now = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
+    Assert(throttle.ShouldNotifyOncePerDate("due-task", now), "First daily alert should pass.");
+    Assert(!throttle.ShouldNotifyOncePerDate("due-task", now.AddHours(2)), "Same-day alert should be suppressed.");
+    Assert(throttle.ShouldNotifyOncePerDate("due-task", now.AddDays(1)), "Next-day alert should pass.");
     return Task.CompletedTask;
 }
 
@@ -589,6 +675,21 @@ static Task RuntimeSettingsDefaultDailyBoardTime()
     return Task.CompletedTask;
 }
 
+static Task RuntimeSettingsDefaultDailyBoardStartupDelay()
+{
+    var defaults = RuntimeSettingsSerializer.ParseOrDefault("{}");
+    Assert(defaults.DailyBoardStartupDelayMinutes == 10, "Expected default startup settling delay.");
+
+    var invalidLow = RuntimeSettingsSerializer.ParseOrDefault("""{"DailyBoardStartupDelayMinutes":-5}""");
+    var invalidHigh = RuntimeSettingsSerializer.ParseOrDefault("""{"DailyBoardStartupDelayMinutes":999}""");
+    var valid = RuntimeSettingsSerializer.ParseOrDefault("""{"DailyBoardStartupDelayMinutes":15}""");
+
+    Assert(invalidLow.DailyBoardStartupDelayMinutes == 0, "Expected low delay clamp.");
+    Assert(invalidHigh.DailyBoardStartupDelayMinutes == 120, "Expected high delay clamp.");
+    Assert(valid.DailyBoardStartupDelayMinutes == 15, "Expected custom startup delay.");
+    return Task.CompletedTask;
+}
+
 static Task DailyBoardPlannerSchedulesNextWholeHour()
 {
     var before = new DateTimeOffset(2026, 5, 15, 7, 30, 0, TimeSpan.FromHours(9));
@@ -613,6 +714,193 @@ static Task DailyBoardPlannerSchedulesNextWholeHour()
     Assert(!alreadyShown.ShouldShowNow, "Already-shown date should not show again.");
     return Task.CompletedTask;
 }
+
+static Task DailyBoardPlannerWaitsForStartupSettlingDelay()
+{
+    var startedAt = new DateTimeOffset(2026, 5, 15, 8, 0, 0, TimeSpan.FromHours(9));
+    var beforeSettled = startedAt.AddMinutes(5);
+    var beforePlan = DailyBoardPlanner.Plan(beforeSettled, "08:00", lastShownDateKey: null, appStartedAt: startedAt, startupSettlingDelay: TimeSpan.FromMinutes(10));
+    Assert(!beforePlan.ShouldShowNow, "Startup plan should wait for settling delay.");
+    Assert(beforePlan.NextShowAt == startedAt.AddMinutes(10), "Expected next show at settled time.");
+
+    var afterSettled = startedAt.AddMinutes(10);
+    var afterPlan = DailyBoardPlanner.Plan(afterSettled, "08:00", lastShownDateKey: null, appStartedAt: startedAt, startupSettlingDelay: TimeSpan.FromMinutes(10));
+    Assert(afterPlan.ShouldShowNow, "Startup plan should show after settling delay.");
+    return Task.CompletedTask;
+}
+
+static Task DailyBoardRouteOptionsMapManualAndTodayBrief()
+{
+    var manual = DailyBoardOpenOptions.ManualAll();
+    Assert(manual.Filter == BoardRouteFilter.All, "Generic board route should use All filter.");
+    Assert(!manual.ShowBriefSummary, "Generic board route should not show brief summary.");
+    Assert(manual.Origin == BoardOrigin.Manual, "Generic board route should record manual origin.");
+    Assert(manual.BringToFront, "Generic board route should bring the board forward.");
+
+    var fromToast = DailyBoardOpenOptions.TodayBrief(BoardOrigin.DailyBriefToast);
+    Assert(fromToast.Filter == BoardRouteFilter.Today, "Daily Brief route should use Today filter.");
+    Assert(fromToast.ShowBriefSummary, "Daily Brief route should show the Today brief summary.");
+    Assert(fromToast.Origin == BoardOrigin.DailyBriefToast, "Daily Brief route should preserve toast origin.");
+    Assert(fromToast.BringToFront, "Daily Brief route should bring the board forward.");
+    return Task.CompletedTask;
+}
+
+static Task NotificationActionResolverMapsDailyBrief()
+{
+    var dailyBrief = NotificationActionResolver.Resolve(UserNotificationKind.DailyBrief);
+    Assert(dailyBrief.PrimaryTarget == NotificationPrimaryActionTarget.OpenDailyBoardTodayBrief, "Daily Brief primary action should open Today+brief board route.");
+
+    var reminder = NotificationActionResolver.Resolve(UserNotificationKind.Reminder);
+    Assert(reminder.PrimaryTarget == NotificationPrimaryActionTarget.OpenDailyBoard, "Reminder primary action should preserve generic board routing.");
+
+    var scanSummary = NotificationActionResolver.Resolve(UserNotificationKind.ScanSummary);
+    Assert(scanSummary.PrimaryTarget == NotificationPrimaryActionTarget.OpenDailyBoard, "Scan summary primary action should preserve generic board routing.");
+    Assert(scanSummary.SecondaryTarget == NotificationSecondaryActionTarget.OpenReviewTab, "Scan summary secondary action should preserve review tab routing.");
+
+    var notification = DailyBriefNotificationEmitter.CreateNotification(EmptyBriefSnapshot(), new DailyBoardPlan(true, DateTimeOffset.Now, "2026-05-15", "08:00"));
+    Assert(notification.Title == "오늘 브리핑", "Expected concise Daily Brief notification title.");
+    Assert(notification.Message.Contains("업무 보드", StringComparison.Ordinal), "Daily Brief notification should keep board-source-of-truth copy.");
+    return Task.CompletedTask;
+}
+
+static Task DailyBoardTodayBriefRouteIncludesBriefHighlights()
+{
+    var now = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
+    var dueToday = BriefTask("오늘 마감", FollowUpKind.PromisedByMe, now.AddHours(2), LocalTaskStatus.Open, null, now.AddDays(-1), 0.8);
+    var dueSnoozedWaiting = BriefTask("다시 볼 대기", FollowUpKind.WaitingForReply, null, LocalTaskStatus.Snoozed, now.AddMinutes(-1), now.AddDays(-2), 0.8);
+    var agedWaiting = BriefTask("오래 기다림", FollowUpKind.WaitingForReply, null, LocalTaskStatus.Open, null, now.AddDays(-4), 0.7);
+    var futureTask = BriefTask("다음 주 할 일", FollowUpKind.PromisedByMe, now.AddDays(7), LocalTaskStatus.Open, null, now.AddDays(-1), 0.8);
+
+    var todayBrief = DailyBoardRouteTaskSelector.SelectVisibleTasks(
+        new[] { dueToday, dueSnoozedWaiting, agedWaiting, futureTask },
+        Array.Empty<ReviewCandidate>(),
+        now,
+        BoardRouteFilter.Today,
+        showBriefSummary: true);
+
+    var todayBriefTitles = todayBrief.Select(task => task.Title).ToHashSet(StringComparer.Ordinal);
+    Assert(todayBriefTitles.SetEquals(new[]
+    {
+        "다시 볼 대기",
+        "오래 기다림",
+        "오늘 마감"
+    }), "Today+brief route should include all brief highlights without unrelated future tasks.");
+
+    var plainToday = DailyBoardRouteTaskSelector.SelectVisibleTasks(
+        new[] { dueToday, dueSnoozedWaiting, agedWaiting, futureTask },
+        Array.Empty<ReviewCandidate>(),
+        now,
+        BoardRouteFilter.Today,
+        showBriefSummary: false);
+
+    Assert(plainToday.Single().Title == "오늘 마감", "Plain Today filter should keep the existing due-today behavior.");
+    return Task.CompletedTask;
+}
+
+static async Task DailyBriefNotificationMarksShownAfterSuccess()
+{
+    var store = new FakeStore();
+    var plan = new DailyBoardPlan(true, DateTimeOffset.Now, "2026-05-15", "08:00");
+    var sink = new RecordingNotificationSink();
+    await DailyBriefNotificationEmitter.EmitAndMarkShownAsync(sink, store, plan, EmptyBriefSnapshot());
+
+    Assert(store.AppState[DailyBoardPlanner.LastShownDateKey] == "2026-05-15", "Successful Daily Brief emission should mark today's key.");
+    Assert(sink.Notifications.Single().Kind == UserNotificationKind.DailyBrief, "Expected Daily Brief notification kind.");
+}
+
+static async Task DailyBriefNotificationDoesNotMarkShownAfterCancellation()
+{
+    var store = new FakeStore();
+    var plan = new DailyBoardPlan(true, DateTimeOffset.Now, "2026-05-15", "08:00");
+    var sink = new RecordingNotificationSink((_, _) => throw new OperationCanceledException());
+
+    try
+    {
+        await DailyBriefNotificationEmitter.EmitAndMarkShownAsync(sink, store, plan, EmptyBriefSnapshot());
+        Assert(false, "Expected canceled notification emission to propagate.");
+    }
+    catch (OperationCanceledException)
+    {
+        Assert(!store.AppState.ContainsKey(DailyBoardPlanner.LastShownDateKey), "Canceled Daily Brief emission must not mark shown.");
+    }
+}
+
+static async Task DailyBriefNotificationDoesNotMarkShownAfterFailure()
+{
+    var store = new FakeStore();
+    var plan = new DailyBoardPlan(true, DateTimeOffset.Now, "2026-05-15", "08:00");
+    var sink = new RecordingNotificationSink((_, _) => throw new InvalidOperationException("toast failed"));
+
+    try
+    {
+        await DailyBriefNotificationEmitter.EmitAndMarkShownAsync(sink, store, plan, EmptyBriefSnapshot());
+        Assert(false, "Expected failed notification emission to propagate.");
+    }
+    catch (InvalidOperationException)
+    {
+        Assert(!store.AppState.ContainsKey(DailyBoardPlanner.LastShownDateKey), "Failed Daily Brief emission must not mark shown.");
+    }
+}
+
+static Task SnoozePlannerComputesPresets()
+{
+    var morning = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)); // Friday
+    var afternoon = new DateTimeOffset(2026, 5, 15, 14, 0, 0, TimeSpan.FromHours(9));
+
+    Assert(SnoozePlanner.Plan(SnoozePreset.TodayAtOnePm, morning) == new DateTimeOffset(2026, 5, 15, 13, 0, 0, TimeSpan.FromHours(9)), "Expected today 1 PM.");
+    Assert(SnoozePlanner.Plan(SnoozePreset.TodayAtOnePm, afternoon) == new DateTimeOffset(2026, 5, 16, 13, 0, 0, TimeSpan.FromHours(9)), "Expected next-day 1 PM when today's 1 PM passed.");
+    Assert(SnoozePlanner.Plan(SnoozePreset.TomorrowMorning, morning) == new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.FromHours(9)), "Expected tomorrow morning.");
+    Assert(SnoozePlanner.Plan(SnoozePreset.NextMondayMorning, morning) == new DateTimeOffset(2026, 5, 18, 9, 0, 0, TimeSpan.FromHours(9)), "Expected next Monday morning.");
+    return Task.CompletedTask;
+}
+
+static Task DailyBriefPlannerHighlightsDueAndHidesFutureSnooze()
+{
+    var now = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
+    var dueAction = BriefTask("오늘 할 일", FollowUpKind.PromisedByMe, now.AddHours(2), LocalTaskStatus.Open, null, now.AddDays(-1), 0.9);
+    var futureSnoozed = BriefTask("내일 다시", FollowUpKind.PromisedByMe, now.AddDays(2), LocalTaskStatus.Snoozed, now.AddDays(1), now.AddDays(-1), 0.9);
+    var dueSnoozedWaiting = BriefTask("다시 확인할 대기", FollowUpKind.WaitingForReply, null, LocalTaskStatus.Snoozed, now.AddMinutes(-1), now.AddDays(-2), 0.8);
+    var youngWaiting = BriefTask("아직 기다림", FollowUpKind.WaitingForReply, now.AddDays(5), LocalTaskStatus.Open, null, now.AddDays(-1), 0.7);
+    var oldWaiting = BriefTask("오래 기다림", FollowUpKind.WaitingForReply, null, LocalTaskStatus.Open, null, now.AddDays(-4), 0.7);
+    var candidate = ReviewCandidate.FromAnalysis(
+        Mail("후보", "확인 부탁드립니다.", "brief-candidate"),
+        new FollowUpAnalysis(FollowUpKind.ReviewNeeded, AnalysisDisposition.Review, 0.5, "검토 후보", "검토 필요", null, null),
+        now);
+
+    var brief = DailyBriefPlanner.Build(new[] { dueAction, futureSnoozed, dueSnoozedWaiting, youngWaiting, oldWaiting }, new[] { candidate }, now);
+
+    Assert(brief.ActionItems.Single().Title == "오늘 할 일", "Expected only due action item.");
+    Assert(brief.WaitingItems.Select(item => item.Title).OrderBy(title => title, StringComparer.Ordinal).SequenceEqual(new[] { "다시 확인할 대기", "오래 기다림" }), "Expected aged and due-snoozed waiting highlights.");
+    Assert(!brief.ActionItems.Concat(brief.WaitingItems).Any(item => item.Title == "내일 다시"), "Future snooze should stay hidden from brief.");
+    Assert(!brief.WaitingItems.Any(item => item.Title == "아직 기다림"), "Young waiting item should stay off brief.");
+    Assert(brief.HiddenCandidateCount == 1, "Review candidates should be counted but hidden by default.");
+    return Task.CompletedTask;
+}
+
+static Task KoreanLabelsUseConciseProductCopy()
+{
+    Assert(KoreanLabels.Kind(FollowUpKind.ActionRequested) == "할 일", "ActionRequested should not surface as an English label.");
+    return Task.CompletedTask;
+}
+
+static DailyBriefSnapshot EmptyBriefSnapshot() =>
+    new(Array.Empty<LocalTaskItem>(), Array.Empty<LocalTaskItem>(), HiddenCandidateCount: 0);
+
+static LocalTaskItem BriefTask(string title, FollowUpKind kind, DateTimeOffset? dueAt, LocalTaskStatus status, DateTimeOffset? snoozeUntil, DateTimeOffset createdAt, double confidence) =>
+    new(
+        Guid.NewGuid(),
+        title,
+        dueAt,
+        null,
+        null,
+        confidence,
+        "테스트",
+        null,
+        status,
+        snoozeUntil,
+        createdAt,
+        createdAt,
+        Kind: kind);
 
 static async Task LlmJsonCreatesCalendarTask()
 {
@@ -732,6 +1020,8 @@ static async Task LlmPromptContainsTriagePolicyAndFewShots()
     Assert(prompt.Contains("quotedHistoryPreview만 있는 과거 요청", StringComparison.Ordinal), "Expected stale quoted history policy.");
     Assert(prompt.Contains("다른 사람에게 명시 배정", StringComparison.Ordinal), "Expected explicit other-assignee policy.");
     Assert(prompt.Contains("마감일을 상상하지 마세요", StringComparison.Ordinal), "Expected due-date hallucination guard.");
+    Assert(prompt.Contains("promisedByMe", StringComparison.Ordinal), "Expected my-promise kind in prompt schema.");
+    Assert(prompt.Contains("waitingForReply", StringComparison.Ordinal), "Expected waiting-on-them kind in prompt schema.");
 }
 
 static async Task LlmQuotedHistoryAutoCreateDowngradesToReview()
@@ -1173,7 +1463,7 @@ static async Task LlmFailureReviewCandidateRetriesAfterRecovery()
             AnalysisDisposition.AutoCreateTask,
             0.92,
             "자료 검토 후 회신",
-            "LLM 재분석으로 내 업무 Action item을 확인했습니다.",
+            "LLM 재분석으로 내 업무 항목을 확인했습니다.",
             "내일까지 검토 후 회신",
             new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)))),
         store);
@@ -1396,6 +1686,38 @@ static Task ReminderPlannerEmitsLookaheadNotifications()
     return Task.CompletedTask;
 }
 
+static Task ReminderPlannerSuppressesFutureSnoozeAndEmitsDueSnooze()
+{
+    var now = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
+    var futureSnoozed = new LocalTaskItem(
+        Guid.NewGuid(),
+        "아직 숨김",
+        now,
+        null,
+        null,
+        0.9,
+        "테스트",
+        null,
+        LocalTaskStatus.Snoozed,
+        now.AddHours(1),
+        now.AddDays(-1),
+        now.AddDays(-1));
+    var dueSnoozed = futureSnoozed with
+    {
+        Id = Guid.NewGuid(),
+        Title = "다시 볼 시간",
+        SnoozeUntil = now.AddMinutes(-5)
+    };
+
+    var hidden = ReminderPlanner.DueForNotification(new[] { futureSnoozed }, now, TimeSpan.FromHours(24));
+    var due = ReminderPlanner.DueForNotification(new[] { dueSnoozed }, now, TimeSpan.FromMinutes(1));
+
+    Assert(hidden.Count == 0, "Future snooze should suppress reminders.");
+    Assert(due.Any(item => item.ReminderKey.EndsWith(":snooze-due", StringComparison.Ordinal)), "Due snooze should emit explicit reminder.");
+    Assert(due.Any(item => item.ReminderKey.EndsWith(":D-day", StringComparison.Ordinal)), "Due-day item should still emit D-day reminder.");
+    return Task.CompletedTask;
+}
+
 static async Task SqliteStoreTruncatesSourceDerivedFields()
 {
     var (store, dbPath, cleanup) = await CreateTempStoreAsync();
@@ -1444,7 +1766,7 @@ static async Task SqliteReviewCandidatesCanBeListed()
             AnalysisDisposition.Review,
             0.52,
             "검토 후보",
-            "확신이 낮아 검토함에 남깁니다.",
+            "확신이 낮아 검토 후보에 남깁니다.",
             "검토 부탁",
             null);
 
@@ -1472,7 +1794,7 @@ static async Task SqliteReviewCandidateCanBeResolvedAsTask()
             AnalysisDisposition.Review,
             0.72,
             "승인 요청 처리",
-            "확인 필요 후보",
+            "검토 후보",
             "승인 부탁",
             dueAt);
         var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
@@ -1509,7 +1831,7 @@ static async Task SqliteReviewCandidateNotTaskRedactsSourceMetadata()
             AnalysisDisposition.Review,
             0.61,
             "검토 후보",
-            "확인 필요 후보",
+            "검토 후보",
             "확인 부탁",
             null);
         var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
@@ -1565,7 +1887,7 @@ static async Task SqliteDoubleReviewApprovalIsIdempotent()
             AnalysisDisposition.Review,
             0.72,
             "승인 요청 처리",
-            "확인 필요 후보",
+            "검토 후보",
             "승인 부탁",
             null);
         var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
@@ -1596,7 +1918,7 @@ static async Task SqliteReviewCandidateSnoozeHidesUntilDue()
             AnalysisDisposition.Review,
             0.61,
             "나중에 볼 후보",
-            "확인 필요 후보",
+            "검토 후보",
             "검토 부탁",
             null);
         var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
@@ -1667,6 +1989,53 @@ static async Task SqliteTaskDismissAndDueUpdatePersist()
     }
 }
 
+static async Task SqliteTaskCompleteAndSnoozePersist()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var completeTarget = new LocalTaskItem(
+            Guid.NewGuid(),
+            "완료 테스트",
+            null,
+            StableHash.Create("complete-source"),
+            "complete-source",
+            0.9,
+            "테스트",
+            null,
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now);
+        var snoozeTarget = completeTarget with
+        {
+            Id = Guid.NewGuid(),
+            Title = "나중에 보기 테스트",
+            SourceIdHash = StableHash.Create("snooze-source"),
+            SourceId = "snooze-source"
+        };
+        await store.SaveTaskAsync(completeTarget);
+        await store.SaveTaskAsync(snoozeTarget);
+
+        var snoozeUntil = now.AddDays(1);
+        var completed = await store.CompleteTaskAsync(completeTarget.Id, now.AddMinutes(1));
+        var snoozed = await store.SnoozeTaskAsync(snoozeTarget.Id, snoozeUntil, now.AddMinutes(2));
+        var open = await store.ListOpenTasksAsync();
+
+        Assert(completed, "Expected complete to succeed.");
+        Assert(snoozed, "Expected snooze to succeed.");
+        Assert(open.Count == 1, "Completed task should be hidden from open list.");
+        Assert(open[0].Id == snoozeTarget.Id, "Expected snoozed task to remain active.");
+        Assert(open[0].Status == LocalTaskStatus.Snoozed, "Expected snoozed status.");
+        Assert(open[0].SnoozeUntil == snoozeUntil, "Expected snooze time persisted.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
 static async Task SqliteStaleReviewIgnoreDoesNotRedactApprovedTask()
 {
     var (store, _, cleanup) = await CreateTempStoreAsync();
@@ -1678,7 +2047,7 @@ static async Task SqliteStaleReviewIgnoreDoesNotRedactApprovedTask()
             AnalysisDisposition.Review,
             0.72,
             "승인 요청 처리",
-            "확인 필요 후보",
+            "검토 후보",
             "승인 부탁",
             null);
         var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
@@ -2071,6 +2440,35 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         return Task.FromResult(true);
     }
 
+    public Task<bool> CompleteTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = Tasks.FindIndex(task => task.Id == taskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed);
+        if (index < 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        Tasks[index] = Tasks[index] with { Status = LocalTaskStatus.Done, SnoozeUntil = null, UpdatedAt = now };
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> SnoozeTaskAsync(Guid taskId, DateTimeOffset until, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = Tasks.FindIndex(task => task.Id == taskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed);
+        if (index < 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        Tasks[index] = Tasks[index] with
+        {
+            Status = LocalTaskStatus.Snoozed,
+            SnoozeUntil = until <= now ? now.AddHours(1) : until,
+            UpdatedAt = now
+        };
+        return Task.FromResult(true);
+    }
+
     public Task<bool> UpdateTaskDueAtAsync(Guid taskId, DateTimeOffset dueAt, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
         var index = Tasks.FindIndex(task => task.Id == taskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed);
@@ -2139,6 +2537,24 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
     {
         AppState[key] = value;
         return Task.CompletedTask;
+    }
+}
+
+sealed class RecordingNotificationSink : IUserNotificationSink
+{
+    private readonly Func<UserNotification, CancellationToken, Task> _handler;
+
+    public RecordingNotificationSink(Func<UserNotification, CancellationToken, Task>? handler = null)
+    {
+        _handler = handler ?? ((_, _) => Task.CompletedTask);
+    }
+
+    public List<UserNotification> Notifications { get; } = [];
+
+    public async Task ShowAsync(UserNotification notification, CancellationToken cancellationToken = default)
+    {
+        Notifications.Add(notification);
+        await _handler(notification, cancellationToken);
     }
 }
 

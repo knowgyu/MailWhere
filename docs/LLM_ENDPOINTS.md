@@ -69,12 +69,12 @@ Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다
 
 | 값 | 의미 | 추천 상황 |
 | --- | --- | --- |
-| `LlmOnly` | LLM이 실패하면 자동 등록하지 않고 검토함에 “LLM 분석 실패” 후보로 남김 | 기본값. rule 오탐 없이 endpoint 품질을 먼저 확인하려는 경우 |
+| `LlmOnly` | LLM이 실패하면 자동 등록하지 않고 검토 후보에 “LLM 분석 실패” 후보로 남김 | 기본값. rule 오탐 없이 endpoint 품질을 먼저 확인하려는 경우 |
 | `LlmThenRules` | LLM을 먼저 호출하고 실패/invalid JSON/timeout이면 규칙 기반 analyzer로 fallback | 사용자가 명시적으로 fallback을 허용한 경우 |
 
 스캔 후 앱 상태에는 `LLM 시도/성공/fallback/실패/평균 응답시간`이 표시됩니다. 이 통계에는 메일 제목/본문/prompt가 들어가지 않습니다.
 
-LLM 연결 테스트나 스캔 중 LLM 실패가 발생하고 현재 정책이 `LlmOnly`이면, 앱이 “다음 스캔부터 규칙 기반 fallback을 사용할지”를 한 번 물어봅니다. 동의하지 않으면 계속 LLM 실패 후보를 검토함에 남깁니다. 이 후보는 같은 source에 중복 생성되지 않으며, LLM 연결이 복구되어 재분석이 성공하면 자동으로 정리됩니다.
+LLM 연결 테스트나 스캔 중 LLM 실패가 발생하고 현재 정책이 `LlmOnly`이면, 앱이 “다음 스캔부터 규칙 기반 fallback을 사용할지”를 한 번 물어봅니다. 동의하지 않으면 계속 LLM 실패 후보를 검토 후보에 남깁니다. 이 후보는 같은 source에 중복 생성되지 않으며, LLM 연결이 복구되어 재분석이 성공하면 자동으로 정리됩니다.
 
 ## 모델 목록 불러오기
 
@@ -102,4 +102,4 @@ endpoint가 이미 `/v1`로 끝나면 중복으로 `/v1/v1/models`가 되지 않
 - prompt와 raw mail body는 저장하지 않습니다.
 - SQLite에는 source hash, 짧은 제목/사유/근거 snippet을 저장합니다. Outlook 원본 메일 열기와 업무보드 한 줄 표기를 위해 새 항목에는 로컬 source id, 보낸 사람 표시명, 수신 시각, 수신/참조 역할도 저장할 수 있으며, source-derived data 삭제/Not-a-task 처리/LLM 실패 후보 정리 시 함께 제거하거나 비식별화합니다.
 - 외부 네트워크 LLM은 기본 사용 시나리오가 아닙니다. 승인된 보안 정책이 허용할 때만 켭니다.
-- LLM JSON 파싱이 실패하면 선택한 `LlmFallbackPolicy`에 따라 검토함에 남기거나 rule-based analyzer로 fallback합니다.
+- LLM JSON 파싱이 실패하면 선택한 `LlmFallbackPolicy`에 따라 검토 후보에 남기거나 rule-based analyzer로 fallback합니다.

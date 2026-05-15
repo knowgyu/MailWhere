@@ -1,23 +1,16 @@
 <Window x:Class="MailWhere.Windows.DailyBoardWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="오늘의 업무 보드" Height="720" Width="1040" MinHeight="620" MinWidth="900"
-        Icon="Assets/app-icon.ico" Background="#F5F7FB" WindowStartupLocation="CenterScreen">
+        Title="MailWhere 업무 보드" Height="740" Width="1120" MinHeight="640" MinWidth="980"
+        Icon="Assets/app-icon.ico" Background="{StaticResource MwBrush.Page}" WindowStartupLocation="CenterScreen">
     <Window.Resources>
+        <!-- Window-local implicit styles are limited to the 업무 보드 card/list surface;
+             shared app-wide primitives remain keyed dictionaries merged from App.xaml. -->
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#20304F"/>
+            <Setter Property="Foreground" Value="{StaticResource MwBrush.Text}"/>
         </Style>
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="12,7"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-        </Style>
-        <Style x:Key="PillButton" TargetType="Button">
-            <Setter Property="Padding" Value="14,7"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
-            <Setter Property="Background" Value="#EEF3FF"/>
-            <Setter Property="BorderBrush" Value="#D8E2FF"/>
-            <Setter Property="Foreground" Value="#2458F2"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
+        <Style x:Key="PillButton" TargetType="Button" BasedOn="{StaticResource MwSegmentedButton}">
+            <Setter Property="Margin" Value="0"/>
         </Style>
         <Style x:Key="CardList" TargetType="ListBox">
             <Setter Property="BorderThickness" Value="0"/>
@@ -32,12 +25,18 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <DockPanel Grid.Row="0" LastChildFill="True">
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
-                                    <Button Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" Tag="{Binding}" Click="SetDue_Click" Padding="9,5" Margin="0,0,6,0"/>
-                                    <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTask_Click" Padding="9,5" Margin="0,0,6,0"/>
-                                    <Button Content="삭제" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="DismissTask_Click" Padding="9,5" Background="#FFF1F0" BorderBrush="#FDA29B" Foreground="#B42318"/>
+	                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+	                                    <Button Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" Tag="{Binding}" Click="SetDue_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,6,0"/>
+	                                    <Button Content="완료" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="CompleteTask_Click" Style="{StaticResource MwButton.Success}" Margin="0,0,6,0"/>
+	                                    <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTask_Click" Style="{StaticResource MwButton.Base}" Margin="0,0,6,0"/>
+	                                    <Button Content="더보기" ToolTip="나중에 보기, 직접 기한, 보드에서 숨기기" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="MoreActions_Click" Style="{StaticResource MwButton.Ghost}"/>
+	                                </StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border CornerRadius="9" Background="{StaticResource MwBrush.PrimarySoft}" Padding="7,3" Margin="0,0,8,0">
+                                        <TextBlock Text="{Binding Badge}" Foreground="{StaticResource MwBrush.Primary}" FontSize="11" FontWeight="SemiBold"/>
+                                    </Border>
+                                    <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="14" TextTrimming="CharacterEllipsis"/>
                                 </StackPanel>
-                                <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="14" TextTrimming="CharacterEllipsis"/>
                             </DockPanel>
                             <TextBlock Grid.Row="1" Text="{Binding Meta}" Foreground="#667085" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
                         </Grid>
@@ -48,8 +47,8 @@
         <Style TargetType="ListBoxItem">
             <Setter Property="Padding" Value="12,10"/>
             <Setter Property="Margin" Value="0,0,0,8"/>
-            <Setter Property="Background" Value="#F8FAFF"/>
-            <Setter Property="BorderBrush" Value="#E8EDF7"/>
+            <Setter Property="Background" Value="{StaticResource MwBrush.SurfaceMuted}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource MwBrush.Border}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="Template">
@@ -77,27 +76,49 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" CornerRadius="22" Background="#FFFFFF" Padding="18" Margin="0,0,0,14" BorderBrush="#E3E8F2" BorderThickness="1">
+        <Border Grid.Row="0" CornerRadius="22" Background="{StaticResource MwBrush.Surface}" Padding="18" Margin="0,0,0,14" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Left">
-                    <TextBlock Text="오늘의 업무 보드" FontSize="24" FontWeight="Bold" Foreground="#14213D"/>
-                    <TextBlock x:Name="SubtitleText" Text="오늘 챙길 할 일과 일정을 메일 기반으로 정리합니다." Margin="0,5,0,0" Foreground="#5F6B83"/>
+                    <TextBlock x:Name="TitleText" Text="업무 보드" FontSize="24" FontWeight="Bold" Foreground="{StaticResource MwBrush.TextStrong}"/>
+                    <TextBlock x:Name="SubtitleText" Text="오늘 챙길 할 일과 일정을 메일 기반으로 정리합니다." Margin="0,5,0,0" Foreground="{StaticResource MwBrush.TextMuted}"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Click="AddManualTask_Click" Background="#2458F2" Foreground="White" Margin="0,0,8,0">+ 직접 추가</Button>
-                    <Border CornerRadius="14" Background="#EEF3FF" Padding="12,8">
-                        <TextBlock x:Name="SummaryText" Text="요약 계산 중" FontWeight="SemiBold" Foreground="#2458F2"/>
+                    <Button Click="AddManualTask_Click" Style="{StaticResource MwButton.Primary}" Margin="0,0,8,0">+ 직접 추가</Button>
+                    <Border CornerRadius="14" Background="#F8FAFC" Padding="12,8" Margin="0,0,8,0">
+                        <TextBlock x:Name="OriginText" Text="수동으로 열었습니다" FontWeight="SemiBold" Foreground="#475467"/>
+                    </Border>
+                    <Border CornerRadius="14" Background="{StaticResource MwBrush.PrimarySoft}" Padding="12,8">
+                        <TextBlock x:Name="SummaryText" Text="요약 계산 중" FontWeight="SemiBold" Foreground="{StaticResource MwBrush.Primary}"/>
                     </Border>
                 </StackPanel>
             </DockPanel>
         </Border>
 
         <DockPanel Grid.Row="1">
-            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
-                <Button x:Name="TodayFilterButton" Style="{StaticResource PillButton}" Click="TodayFilter_Click">오늘</Button>
-                <Button x:Name="WeekFilterButton" Style="{StaticResource PillButton}" Click="WeekFilter_Click">7일 내</Button>
-                <Button x:Name="MonthFilterButton" Style="{StaticResource PillButton}" Click="MonthFilter_Click">30일 내</Button>
-                <Button x:Name="NoDueFilterButton" Style="{StaticResource PillButton}" Click="NoDueFilter_Click">기한 미정</Button>
+            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                <Border x:Name="BriefSummaryPanel" CornerRadius="18" Background="{StaticResource MwBrush.SurfaceMuted}" Padding="16" Margin="0,0,0,12" BorderBrush="{StaticResource MwBrush.BorderStrong}" BorderThickness="1" Visibility="Collapsed">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="오늘 브리핑" FontSize="18" FontWeight="Bold" Foreground="{StaticResource MwBrush.TextStrong}"/>
+                            <TextBlock x:Name="BriefSummaryBodyText" Text="요약 계산 중" Margin="0,5,0,0" Foreground="{StaticResource MwBrush.Primary}" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="BriefSummaryMetaText" Text="업무 보드에서 계속 관리합니다." Margin="0,4,0,0" Foreground="{StaticResource MwBrush.TextMuted}"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Click="ReviewCandidates_Click" Style="{StaticResource MwButton.Secondary}" VerticalAlignment="Center">검토 후보 보기</Button>
+                    </Grid>
+                </Border>
+                <Border x:Name="FilterPanel" CornerRadius="16" Background="{StaticResource MwBrush.PrimarySoft}" Padding="4" BorderBrush="{StaticResource MwBrush.BorderStrong}" BorderThickness="1">
+                    <UniformGrid Rows="1" Columns="5">
+                        <Button x:Name="AllFilterButton" Style="{StaticResource PillButton}" Click="AllFilter_Click">전체</Button>
+                        <Button x:Name="TodayFilterButton" Style="{StaticResource PillButton}" Click="TodayFilter_Click">오늘</Button>
+                        <Button x:Name="WeekFilterButton" Style="{StaticResource PillButton}" Click="WeekFilter_Click">7일 내</Button>
+                        <Button x:Name="MonthFilterButton" Style="{StaticResource PillButton}" Click="MonthFilter_Click">30일 내</Button>
+                        <Button x:Name="NoDueFilterButton" Style="{StaticResource PillButton}" Click="NoDueFilter_Click">기한 미정</Button>
+                    </UniformGrid>
+                </Border>
             </StackPanel>
 
             <Grid>
@@ -105,31 +126,34 @@
                     <ColumnDefinition Width="1*"/>
                     <ColumnDefinition Width="1*"/>
                 </Grid.ColumnDefinitions>
-                <Border Grid.Column="0" CornerRadius="18" Background="#FFFFFF" Padding="16" Margin="0,0,8,0" BorderBrush="#E3E8F2" BorderThickness="1">
+                <Border Grid.Column="0" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="16" Margin="0,0,8,0" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                            <TextBlock Text="할 일" FontSize="19" FontWeight="Bold"/>
-                            <TextBlock Text="회신, 제출, 확인, 검토처럼 내가 처리할 항목입니다." Foreground="#667085" FontSize="12" Margin="0,3,0,0"/>
+                            <TextBlock Text="내가 할 일" FontSize="19" FontWeight="Bold"/>
+                            <TextBlock Text="답장, 약속, 제출, 확인, 일정처럼 내가 처리할 항목입니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,3,0,0"/>
                         </StackPanel>
                         <ListBox x:Name="ActionList" Style="{StaticResource CardList}"/>
                     </DockPanel>
                 </Border>
 
-                <Border Grid.Column="1" CornerRadius="18" Background="#FFFFFF" Padding="16" Margin="8,0,0,0" BorderBrush="#E3E8F2" BorderThickness="1">
+                <Border Grid.Column="1" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="16" Margin="8,0,0,0" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                            <TextBlock Text="일정" FontSize="19" FontWeight="Bold"/>
-                            <TextBlock Text="회의, 참석, 발표, 캘린더성 일정입니다. 참조 메일이어도 표시합니다." Foreground="#667085" FontSize="12" Margin="0,3,0,0"/>
+                            <TextBlock Text="기다리는 중" FontSize="19" FontWeight="Bold"/>
+                            <TextBlock Text="내가 요청했고 상대 회신/전달을 기다리는 항목입니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,3,0,0"/>
                         </StackPanel>
-                        <ListBox x:Name="ScheduleList" Style="{StaticResource CardList}"/>
+                        <ListBox x:Name="WaitingList" Style="{StaticResource CardList}"/>
                     </DockPanel>
                 </Border>
             </Grid>
         </DockPanel>
 
         <DockPanel Grid.Row="2" Margin="0,14,0,0">
-            <TextBlock x:Name="FooterText" DockPanel.Dock="Left" Text="삭제는 MailWhere 업무보드에서만 숨깁니다." Foreground="#667085" VerticalAlignment="Center"/>
-            <Button DockPanel.Dock="Right" Click="Close_Click" Background="#14213D" Foreground="White">확인</Button>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock x:Name="FooterText" Text="숨김/완료는 MailWhere 업무 보드에서만 처리합니다." Foreground="{StaticResource MwBrush.TextMuted}" VerticalAlignment="Center"/>
+                <Button x:Name="ReviewCandidatesButton" Click="ReviewCandidates_Click" Margin="12,0,0,0" Style="{StaticResource MwButton.Secondary}">검토 후보 보기</Button>
+            </StackPanel>
+            <Button DockPanel.Dock="Right" Click="Close_Click" Style="{StaticResource MwButton.Primary}">닫기</Button>
         </DockPanel>
     </Grid>
 </Window>

@@ -24,16 +24,40 @@ public static class ReminderPlanner
 {
     public static IReadOnlyList<ReminderCandidate> Plan(LocalTaskItem task, DateTimeOffset now, IReadOnlyList<ReminderRule>? rules = null)
     {
-        if (task.DueAt is null || task.Status is LocalTaskStatus.Done or LocalTaskStatus.Dismissed or LocalTaskStatus.NotATask)
+        if (task.Status is LocalTaskStatus.Done or LocalTaskStatus.Dismissed or LocalTaskStatus.NotATask
+            || FollowUpPresentation.IsSnoozedForFuture(task, now))
         {
             return Array.Empty<ReminderCandidate>();
         }
 
-        var dueAt = task.DueAt.Value;
         var results = new List<ReminderCandidate>();
+        if (task.Status == LocalTaskStatus.Snoozed
+            && task.SnoozeUntil is not null
+            && task.SnoozeUntil.Value <= now)
+        {
+            results.Add(new ReminderCandidate(
+                task.Id,
+                $"{task.Id:N}:snooze-due",
+                now,
+                task.Title,
+                "다시 보기",
+                "나중에 보기 시간이 되었습니다."));
+        }
+
+        if (task.DueAt is null)
+        {
+            return results;
+        }
+
+        var dueAt = task.DueAt.Value;
         foreach (var rule in rules ?? ReminderRule.DefaultRules)
         {
             var notifyAt = dueAt - rule.BeforeDue;
+            if (rule.BeforeDue == TimeSpan.Zero && dueAt.Date <= now.Date)
+            {
+                notifyAt = now;
+            }
+
             if (notifyAt < now.AddMinutes(-1))
             {
                 continue;

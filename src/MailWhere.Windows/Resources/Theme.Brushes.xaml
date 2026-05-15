@@ -1,0 +1,19 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="MwBrush.Page" Color="#F5F7FB"/>
+    <SolidColorBrush x:Key="MwBrush.Surface" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="MwBrush.SurfaceMuted" Color="#F8FAFF"/>
+    <SolidColorBrush x:Key="MwBrush.Border" Color="#E3E8F2"/>
+    <SolidColorBrush x:Key="MwBrush.BorderStrong" Color="#D8E2FF"/>
+    <SolidColorBrush x:Key="MwBrush.Text" Color="#20304F"/>
+    <SolidColorBrush x:Key="MwBrush.TextStrong" Color="#14213D"/>
+    <SolidColorBrush x:Key="MwBrush.TextMuted" Color="#667085"/>
+    <SolidColorBrush x:Key="MwBrush.Primary" Color="#2458F2"/>
+    <SolidColorBrush x:Key="MwBrush.PrimarySoft" Color="#EEF3FF"/>
+    <SolidColorBrush x:Key="MwBrush.Success" Color="#067647"/>
+    <SolidColorBrush x:Key="MwBrush.SuccessSoft" Color="#ECFDF3"/>
+    <SolidColorBrush x:Key="MwBrush.Warning" Color="#F79009"/>
+    <SolidColorBrush x:Key="MwBrush.WarningSoft" Color="#FFF6E5"/>
+    <SolidColorBrush x:Key="MwBrush.Danger" Color="#B42318"/>
+    <SolidColorBrush x:Key="MwBrush.DangerSoft" Color="#FFF1F0"/>
+</ResourceDictionary>

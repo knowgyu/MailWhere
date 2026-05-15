@@ -575,7 +575,8 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         6. 다른 사람에게 명시 배정된 일은 ignore입니다. 명시 대상이 mailboxOwner이면 내 업무입니다. 팀/담당자/전체처럼 불명확하지만 Direct 수신이면 autoCreateTask입니다.
         7. 명확한 action/deadline/reply/meeting이면 autoCreateTask, FYI/공지/감사/단순 확인은 ignore입니다. review는 LLM이 정말 판단 불가할 때만 씁니다.
         8. dueAt은 메일에 근거가 있을 때만 ISO-8601로 쓰고, 없으면 null입니다. 마감일을 상상하지 마세요.
-        9. reason/evidenceSnippet/summary는 UI 보조용이므로 각각 50자 이내로 짧게 쓰세요.
+        9. 보낸 사람이 mailboxOwner이면 사용자가 보낸 메일입니다. 사용자가 "제가 보내겠습니다/공유드리겠습니다"처럼 한 약속은 promisedByMe, 사용자가 상대에게 요청하고 기다리는 것은 waitingForReply입니다.
+        10. reason/evidenceSnippet/summary는 UI 보조용이므로 각각 50자 이내로 짧게 쓰세요.
 
         Few-shot:
         - "영희님 내일까지 비용 자료 검토 후 회신 부탁드립니다" + mailboxOwner "김영희" => autoCreateTask, deadline/replyRequired.
@@ -584,6 +585,8 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         - mailboxRecipientRole "Cc" + "오늘 15시 회의 참석" => autoCreateTask, meeting/calendarEvent.
         - "확인했습니다" + quotedHistoryPreview에 오래된 요청만 있음 => ignore.
         - "아래 고객 요청 건 확인 후 대응 부탁드립니다" + forwardedContext 있음 => currentSenderRequested true, actionOrigin forwardedContext, 명확하면 autoCreateTask 아니면 review.
+        - sender가 mailboxOwner + "제가 금요일까지 수정본 공유드리겠습니다" => autoCreateTask, promisedByMe.
+        - sender가 mailboxOwner + "20일까지 자료 공유 부탁드립니다" => autoCreateTask, waitingForReply.
         """;
 
     private static readonly string SystemPrompt = """
@@ -595,7 +598,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
 
         스키마:
         {
-          "kind": "none|replyRequired|actionRequested|deadline|waitingForReply|reviewNeeded|meeting|calendarEvent",
+          "kind": "none|replyRequired|actionRequested|deadline|promisedByMe|waitingForReply|reviewNeeded|meeting|calendarEvent",
           "disposition": "ignore|review|autoCreateTask",
           "confidence": 0.0,
           "suggestedTitle": "한국어 한 줄 제목",
@@ -620,7 +623,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         각 item 스키마:
         {
           "id": "입력 id",
-          "kind": "none|replyRequired|actionRequested|deadline|waitingForReply|reviewNeeded|meeting|calendarEvent",
+          "kind": "none|replyRequired|actionRequested|deadline|promisedByMe|waitingForReply|reviewNeeded|meeting|calendarEvent",
           "disposition": "ignore|review|autoCreateTask",
           "confidence": 0.0,
           "suggestedTitle": "해야 할 일 30자 이내",

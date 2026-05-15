@@ -41,9 +41,9 @@ Included:
 - LLM model names can be loaded from Ollama `/api/tags` or OpenAI-compatible `/v1/models`.
 - Scan status includes LLM attempts, success, fallback, failure, and average response time.
 - Provider naming is protocol-first: `OllamaNative`, `OpenAiChatCompletions`, `OpenAiResponses`, with legacy config strings kept compatible.
-- Review candidates can be snoozed from 검토함 and are hidden until the snooze time.
-- Daily board has card-like list items and can jump directly to 검토함.
-- MailWhere 알림 클릭은 dead-end가 아니라 업무 보드/검토함으로 이어진다.
+- Review candidates can be snoozed from 검토 후보 and are hidden until the snooze time.
+- Daily board has card-like list items and can jump directly to 검토 후보.
+- MailWhere 알림 클릭은 dead-end가 아니라 업무 보드/검토 후보으로 이어진다.
 
 ## Release 0.1.4 — app-owned toast and retryable LLM failures
 
@@ -52,7 +52,7 @@ Goal: Windows 기본 풍선 알림에 기대지 않고 MailWhere 자체 toast로
 Included:
 
 - 우하단 MailWhere toast stack: scan summary/reminder/error를 카드형으로 누적 표시.
-- Toast primary/secondary actions: 업무 보드, 검토함, 앱 열기.
+- Toast primary/secondary actions: 업무 보드, 검토 후보, 앱 열기.
 - LLM 설정 UI 정리: ON/OFF는 토글, provider는 실제 endpoint 방식만 표시.
 - 기본 LLM model은 빈 값이며 모델 불러오기 후 선택하는 흐름.
 - LLM fallback 정책은 고급 설정으로 이동.
@@ -89,6 +89,22 @@ Included:
 - Diagnostics and notification tests move from prominent header/tab controls into settings > problem solving.
 - LLM triage is more conservative for replied/forwarded mail, FYI notices, ownership cues, and unclear due dates.
 - LLM sampling is more deterministic for triage (`temperature=0`, `top_p=0.9`) and Ollama keep-alive is longer during scan sessions.
+
+## Release 0.3.0 — polished tray-first board and replayable Today Brief
+
+Goal: MailWhere should feel like a tray-resident professional mail-task assistant, with 업무 보드 as the durable source of truth and 오늘 브리핑 as a lightweight re-entry trigger.
+
+- 오늘 브리핑은 큰 보드 창을 자동으로 띄우지 않고 toast/peek로 알린 뒤, CTA에서 업무 보드 Today + `오늘 브리핑` 요약으로 이어진다.
+- 업무 보드는 `전체/오늘/7일 내/30일 내/기한 미정` equal-width filter와 `내가 할 일`/`기다리는 중` 2열 구성을 사용한다.
+- 카드 기본 액션은 기한 설정/완료/열기/더보기로 줄이고, 나중에 보기·직접 기한·보드에서 숨기기는 overflow에 둔다.
+- 설정은 주 사용 화면을 차지하지 않고 Settings 탭의 일반/LLM/오늘 브리핑·알림/고급/문제 해결 섹션으로 정리한다.
+- WPF resource dictionary 기반 brush/type/spacing/button/card/toast token을 추가해 기본 WPF 느낌을 줄인다.
+
+Not included:
+
+- Windows 실기기 visual/tray/scaling smoke 자동화.
+- 새 font/icon/package dependency.
+- Daily Brief 별도 원장/스냅샷 저장.
 
 ## Release 0.2.1 — recipient-aware board and resilient batches
 

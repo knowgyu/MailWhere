@@ -4,6 +4,7 @@ public enum UserNotificationKind
 {
     ScanSummary,
     Reminder,
+    DailyBrief,
     Diagnostics,
     Error
 }

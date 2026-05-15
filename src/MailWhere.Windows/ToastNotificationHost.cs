@@ -1,5 +1,6 @@
 using System.Windows;
 using MailWhere.Core.Notifications;
+using MailWhere.Core.Scheduling;
 
 namespace MailWhere.Windows;
 
@@ -93,11 +94,18 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
 
     private async Task RunPrimaryActionAsync(UserNotification notification)
     {
-        switch (notification.Kind)
+        switch (NotificationActionResolver.Resolve(notification.Kind).PrimaryTarget)
         {
-            case UserNotificationKind.ScanSummary:
-            case UserNotificationKind.Reminder:
+            case NotificationPrimaryActionTarget.OpenDailyBoard:
                 await _mainWindow.OpenDailyBoardAsync();
+                break;
+
+            case NotificationPrimaryActionTarget.OpenDailyBoardTodayBrief:
+                WindowsRuntimeDiagnostics.RecordUiEvent("daily-brief-cta-opened-today-brief", new Dictionary<string, string>
+                {
+                    ["origin"] = BoardOrigin.DailyBriefToast.ToString()
+                });
+                await _mainWindow.OpenDailyBoardTodayAsync(showBriefSummary: true, BoardOrigin.DailyBriefToast);
                 break;
 
             default:
@@ -106,14 +114,19 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
         }
     }
 
-    private Func<Task>? ResolveSecondaryAction(UserNotification notification) =>
-        notification.Kind == UserNotificationKind.ScanSummary
-            ? () =>
+    private Func<Task>? ResolveSecondaryAction(UserNotification notification)
+    {
+        var actionPlan = NotificationActionResolver.Resolve(notification.Kind);
+        return actionPlan.SecondaryTarget switch
+        {
+            NotificationSecondaryActionTarget.OpenReviewTab => () =>
             {
                 _mainWindow.OpenReviewTab();
                 return Task.CompletedTask;
-            }
-            : null;
+            },
+            _ => null
+        };
+    }
 
     private void ShowMainWindow()
     {
@@ -122,9 +135,22 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
         _mainWindow.Activate();
     }
 
-    private static ToastNotificationSpec CreateSpec(UserNotification notification) =>
-        notification.Kind switch
+    private static ToastNotificationSpec CreateSpec(UserNotification notification)
+    {
+        return notification.Kind switch
         {
+            UserNotificationKind.DailyBrief => new ToastNotificationSpec(
+                "오늘 브리핑",
+                notification.Title,
+                notification.Message,
+                "업무 보드에서 계속 관리합니다.",
+                "☀",
+                "#2458F2",
+                "#EEF3FF",
+                "오늘 업무 보기",
+                null,
+                TimeSpan.FromSeconds(14)),
+
             UserNotificationKind.Reminder => new ToastNotificationSpec(
                 "리마인더",
                 notification.Title,
@@ -141,12 +167,12 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
                 "메일 스캔 완료",
                 notification.Title,
                 notification.Message,
-                "검토 후보는 보드의 검토함에 모아둡니다",
+                "검토 후보는 보드의 검토 후보 탭에 모아둡니다",
                 "✓",
                 "#2458F2",
                 "#EEF3FF",
                 "업무 보드",
-                "검토함",
+                "검토 후보",
                 TimeSpan.FromSeconds(12)),
 
             UserNotificationKind.Error => new ToastNotificationSpec(
@@ -173,4 +199,5 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
                 null,
                 TimeSpan.FromSeconds(10))
         };
+    }
 }

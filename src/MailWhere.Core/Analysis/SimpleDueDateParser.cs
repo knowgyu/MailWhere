@@ -6,6 +6,7 @@ public static class SimpleDueDateParser
 {
     private static readonly Regex IsoDate = new("(?<year>20\\d{2})[-./](?<month>\\d{1,2})[-./](?<day>\\d{1,2})", RegexOptions.Compiled);
     private static readonly Regex KoreanMonthDay = new("(?<month>\\d{1,2})\\s*월\\s*(?<day>\\d{1,2})\\s*일", RegexOptions.Compiled);
+    private static readonly Regex KoreanDayOnlyDeadline = new("(?<day>\\d{1,2})\\s*일?\\s*(?:까지|전까지|내로)", RegexOptions.Compiled);
     private static readonly Regex Weekday = new(
         "(?<next>다음\\s*주|next\\s+week)?\\s*(?<day>월요일|화요일|수요일|목요일|금요일|토요일|일요일|monday|tuesday|wednesday|thursday|friday|saturday|sunday)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -32,6 +33,25 @@ public static class SimpleDueDateParser
             out var parsedMonthDay))
         {
             return parsedMonthDay;
+        }
+
+        var dayOnly = KoreanDayOnlyDeadline.Match(text);
+        if (dayOnly.Success)
+        {
+            var day = int.Parse(dayOnly.Groups["day"].Value);
+            var month = anchor.Month;
+            var year = anchor.Year;
+            if (day < anchor.Day)
+            {
+                var nextMonth = new DateTimeOffset(anchor.Year, anchor.Month, 1, 0, 0, 0, anchor.Offset).AddMonths(1);
+                year = nextMonth.Year;
+                month = nextMonth.Month;
+            }
+
+            if (TryDate(year, month, day, anchor.Offset, out var parsedDayOnly))
+            {
+                return parsedDayOnly;
+            }
         }
 
         if (text.Contains("내일", StringComparison.OrdinalIgnoreCase) || text.Contains("tomorrow", StringComparison.OrdinalIgnoreCase))

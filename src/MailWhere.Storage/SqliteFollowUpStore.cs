@@ -337,6 +337,46 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
     }
 
+    public async Task<bool> CompleteTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE tasks
+            SET status = $status,
+                snooze_until = NULL,
+                updated_at = $updatedAt
+            WHERE id = $id
+              AND status IN ('Open','Snoozed')
+            """;
+        command.Parameters.AddWithValue("$id", taskId.ToString());
+        command.Parameters.AddWithValue("$status", LocalTaskStatus.Done.ToString());
+        command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
+    public async Task<bool> SnoozeTaskAsync(Guid taskId, DateTimeOffset until, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE tasks
+            SET status = $status,
+                snooze_until = $snoozeUntil,
+                updated_at = $updatedAt
+            WHERE id = $id
+              AND status IN ('Open','Snoozed')
+            """;
+        var effectiveUntil = until <= now ? now.AddHours(1) : until;
+        command.Parameters.AddWithValue("$id", taskId.ToString());
+        command.Parameters.AddWithValue("$status", LocalTaskStatus.Snoozed.ToString());
+        command.Parameters.AddWithValue("$snoozeUntil", effectiveUntil.ToString("O"));
+        command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
     public async Task<bool> UpdateTaskDueAtAsync(Guid taskId, DateTimeOffset dueAt, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
         await using var connection = new SqliteConnection(_connectionString);

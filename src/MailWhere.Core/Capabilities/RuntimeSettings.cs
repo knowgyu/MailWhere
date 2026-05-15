@@ -22,7 +22,8 @@ public sealed record RuntimeSettings(
     int RecentScanDays,
     int RecentScanMaxItems,
     int ReminderLookAheadHours,
-    string DailyBoardTime)
+    string DailyBoardTime,
+    int DailyBoardStartupDelayMinutes)
 {
     public static RuntimeSettings ManagedSafeDefault { get; } = new(
         ManagedMode: true,
@@ -40,7 +41,8 @@ public sealed record RuntimeSettings(
         RecentScanDays: 30,
         RecentScanMaxItems: 0,
         ReminderLookAheadHours: 24,
-        DailyBoardTime: DailyBoardPlanner.DefaultDailyBoardTime);
+        DailyBoardTime: DailyBoardPlanner.DefaultDailyBoardTime,
+        DailyBoardStartupDelayMinutes: DailyBoardPlanner.DefaultStartupSettlingDelayMinutes);
 
     public LlmEndpointSettings ToLlmEndpointSettings() => new(
         LlmProvider,
@@ -83,7 +85,8 @@ public sealed record PartialRuntimeSettings(
     int? RecentScanDays = null,
     int? RecentScanMaxItems = null,
     int? ReminderLookAheadHours = null,
-    string? DailyBoardTime = null);
+    string? DailyBoardTime = null,
+    int? DailyBoardStartupDelayMinutes = null);
 
 public static class RuntimeSettingsSerializer
 {
@@ -134,7 +137,8 @@ public static class RuntimeSettingsSerializer
             RecentScanDays: Clamp(partial?.RecentScanDays, 1, 31, defaults.RecentScanDays),
             RecentScanMaxItems: Clamp(partial?.RecentScanMaxItems, 0, 100000, defaults.RecentScanMaxItems),
             ReminderLookAheadHours: Clamp(partial?.ReminderLookAheadHours, 1, 24 * 14, defaults.ReminderLookAheadHours),
-            DailyBoardTime: DailyBoardPlanner.NormalizeDailyBoardTime(partial?.DailyBoardTime));
+            DailyBoardTime: DailyBoardPlanner.NormalizeDailyBoardTime(partial?.DailyBoardTime),
+            DailyBoardStartupDelayMinutes: Clamp(partial?.DailyBoardStartupDelayMinutes, 0, 120, defaults.DailyBoardStartupDelayMinutes));
     }
 
     private static int Clamp(int? value, int min, int max, int fallback) =>

@@ -3,13 +3,14 @@
 The app is layered so the risky Windows/Outlook pieces are adapters, not the core product logic.
 
 ```text
-MailWhere.Core        cross-platform domain, analyzer, gates, pipeline
+MailWhere.Core        cross-platform domain, analyzer, gates, pipeline, UI-agnostic product route/action semantics
 MailWhere.Storage     SQLite persistence, raw-body-minimizing schema
 MailWhere.OutlookCom  Windows-only Classic Outlook COM read adapter
 MailWhere.Windows     WPF tray app, diagnostics, task/review UI
 ```
 
 Phase 0/1 implementation is intentionally limited to read-only mailbox extraction, follow-up analysis, local task/reminder creation, diagnostics, and manual/degraded UX.
+Core may define small semantic routing contracts such as "Daily Brief re-enters the Today board" so route behavior stays testable without WPF. Window presentation details—toast glyphs, colors, durations, layout, and control styling—belong in `MailWhere.Windows`.
 
 Runtime safety notes:
 

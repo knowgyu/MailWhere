@@ -23,7 +23,6 @@ public sealed class OutlookComMailSource : IEmailSource
         object? outlook = null;
         object? session = null;
         object? inbox = null;
-        object? items = null;
         var warnings = new List<MailReadWarning>();
         var limit = request.MaxItems <= 0 ? int.MaxValue : request.MaxItems;
         var messages = new List<EmailSnapshot>(Math.Min(limit, 512));
@@ -48,9 +47,105 @@ public sealed class OutlookComMailSource : IEmailSource
             dynamic sessionDynamic = session;
             var mailboxIdentity = TryReadCurrentUserIdentity(session);
             inbox = sessionDynamic.GetDefaultFolder(6); // olFolderInbox
-            dynamic inboxDynamic = inbox;
-            items = inboxDynamic.Items;
-            ((dynamic)items).Sort("[ReceivedTime]", true);
+            var inboxMessages = ReadFolderMessages(
+                inbox,
+                "inbox",
+                "ReceivedTime",
+                request,
+                mailboxIdentity,
+                cancellationToken,
+                warnings,
+                ref skipped);
+
+            var sentMessages = ReadSentMessages((object)session, request, mailboxIdentity, cancellationToken, warnings, ref skipped);
+            messages.AddRange(inboxMessages.Concat(sentMessages)
+                .OrderByDescending(message => message.ReceivedAt)
+                .Take(limit));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add(new MailReadWarning("outlook-read-failed", CapabilitySeverity.Blocked, ex.GetType().Name));
+        }
+        finally
+        {
+            ComRelease.FinalRelease(inbox);
+            ComRelease.FinalRelease(session);
+            ComRelease.FinalRelease(outlook);
+        }
+
+        return new EmailReadResult(messages, warnings, skipped);
+    }
+
+    private static IReadOnlyList<EmailSnapshot> ReadSentMessages(
+        object session,
+        MailReadRequest request,
+        MailboxIdentity mailboxIdentity,
+        CancellationToken cancellationToken,
+        List<MailReadWarning> warnings,
+        ref int skipped)
+    {
+        object? sent = null;
+        try
+        {
+            sent = session.GetType().InvokeMember(
+                "GetDefaultFolder",
+                System.Reflection.BindingFlags.InvokeMethod,
+                null,
+                session,
+                new object[] { 5 }); // olFolderSentMail
+            if (sent is null)
+            {
+                warnings.Add(new MailReadWarning("outlook-sent-folder-unavailable", CapabilitySeverity.Degraded, "NullFolder"));
+                return Array.Empty<EmailSnapshot>();
+            }
+
+            return ReadFolderMessages(
+                sent,
+                "sent",
+                "SentOn",
+                request,
+                mailboxIdentity,
+                cancellationToken,
+                warnings,
+                ref skipped);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add(new MailReadWarning("outlook-sent-folder-unavailable", CapabilitySeverity.Degraded, ex.GetType().Name));
+            return Array.Empty<EmailSnapshot>();
+        }
+        finally
+        {
+            ComRelease.FinalRelease(sent);
+        }
+    }
+
+    private static IReadOnlyList<EmailSnapshot> ReadFolderMessages(
+        object folder,
+        string folderCode,
+        string datePropertyName,
+        MailReadRequest request,
+        MailboxIdentity mailboxIdentity,
+        CancellationToken cancellationToken,
+        List<MailReadWarning> warnings,
+        ref int skipped)
+    {
+        object? items = null;
+        var limit = request.MaxItems <= 0 ? int.MaxValue : request.MaxItems;
+        var messages = new List<EmailSnapshot>(Math.Min(limit, 512));
+        try
+        {
+            dynamic folderDynamic = folder;
+            items = folderDynamic.Items;
+            ((dynamic)items).Sort($"[{datePropertyName}]", true);
 
             int total = Convert.ToInt32(((dynamic)items).Count);
             for (var i = 1; i <= total && messages.Count < limit; i++)
@@ -61,20 +156,25 @@ public sealed class OutlookComMailSource : IEmailSource
                 {
                     item = ((dynamic)items)[i];
                     dynamic itemDynamic = item;
-                    DateTime received = itemDynamic.ReceivedTime;
-                    var receivedAt = new DateTimeOffset(received);
+                    var itemDate = TryReadDateTime(item, datePropertyName)
+                                   ?? TryReadDateTime(item, "ReceivedTime")
+                                   ?? TryReadDateTime(item, "SentOn")
+                                   ?? DateTime.Now;
+                    var receivedAt = new DateTimeOffset(itemDate);
                     if (request.Since is not null && receivedAt < request.Since.Value)
                     {
                         break;
                     }
 
-                    string entryId = Convert.ToString(itemDynamic.EntryID) ?? $"unknown-{i}";
+                    string entryId = Convert.ToString(itemDynamic.EntryID) ?? $"unknown-{folderCode}-{i}";
                     string subject = Convert.ToString(itemDynamic.Subject) ?? string.Empty;
                     string sender = Convert.ToString(itemDynamic.SenderName) ?? string.Empty;
                     string? body = request.IncludeBody ? Convert.ToString(itemDynamic.Body) : null;
                     string? conversationId = TryReadString(item, "ConversationID");
                     var recipients = SplitRecipients(TryReadString(item, "To"), TryReadString(item, "CC"));
-                    var recipientRole = TryResolveMailboxRecipientRole(item, mailboxIdentity);
+                    var recipientRole = folderCode == "sent"
+                        ? MailboxRecipientRole.Other
+                        : TryResolveMailboxRecipientRole(item, mailboxIdentity);
 
                     messages.Add(new EmailSnapshot(
                         entryId,
@@ -94,7 +194,7 @@ public sealed class OutlookComMailSource : IEmailSource
                 catch (Exception ex)
                 {
                     skipped++;
-                    warnings.Add(new MailReadWarning("outlook-item-read-failed", CapabilitySeverity.Degraded, ex.GetType().Name));
+                    warnings.Add(new MailReadWarning($"outlook-{folderCode}-item-read-failed", CapabilitySeverity.Degraded, ex.GetType().Name));
                 }
                 finally
                 {
@@ -108,17 +208,27 @@ public sealed class OutlookComMailSource : IEmailSource
         }
         catch (Exception ex)
         {
-            warnings.Add(new MailReadWarning("outlook-read-failed", CapabilitySeverity.Blocked, ex.GetType().Name));
+            warnings.Add(new MailReadWarning($"outlook-{folderCode}-read-failed", CapabilitySeverity.Degraded, ex.GetType().Name));
         }
         finally
         {
             ComRelease.FinalRelease(items);
-            ComRelease.FinalRelease(inbox);
-            ComRelease.FinalRelease(session);
-            ComRelease.FinalRelease(outlook);
         }
 
-        return new EmailReadResult(messages, warnings, skipped);
+        return messages;
+    }
+
+    private static DateTime? TryReadDateTime(object item, string propertyName)
+    {
+        try
+        {
+            var value = item.GetType().InvokeMember(propertyName, System.Reflection.BindingFlags.GetProperty, null, item, null);
+            return value is DateTime date ? date : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? TryReadString(object item, string propertyName)

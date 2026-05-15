@@ -10,8 +10,14 @@ public static class DailyBoardPlanner
 {
     public const string LastShownDateKey = "daily-board:last-shown-date";
     public const string DefaultDailyBoardTime = "08:00";
+    public const int DefaultStartupSettlingDelayMinutes = 10;
 
-    public static DailyBoardPlan Plan(DateTimeOffset now, string? dailyBoardTime, string? lastShownDateKey)
+    public static DailyBoardPlan Plan(
+        DateTimeOffset now,
+        string? dailyBoardTime,
+        string? lastShownDateKey,
+        DateTimeOffset? appStartedAt = null,
+        TimeSpan? startupSettlingDelay = null)
     {
         var normalizedTime = NormalizeDailyBoardTime(dailyBoardTime);
         var todayKey = ToDateKey(now);
@@ -31,9 +37,25 @@ public static class DailyBoardPlanner
             0,
             now.Offset);
 
-        if (now < scheduledToday)
+        var earliestShowToday = scheduledToday;
+        if (appStartedAt is not null)
         {
-            return new DailyBoardPlan(false, scheduledToday, todayKey, normalizedTime);
+            var delay = startupSettlingDelay ?? TimeSpan.FromMinutes(DefaultStartupSettlingDelayMinutes);
+            var settledAt = appStartedAt.Value.Add(delay);
+            if (settledAt.Date == now.Date && settledAt > earliestShowToday)
+            {
+                earliestShowToday = settledAt;
+            }
+        }
+
+        if (now < earliestShowToday)
+        {
+            return new DailyBoardPlan(false, earliestShowToday, todayKey, normalizedTime);
+        }
+
+        if (appStartedAt is not null)
+        {
+            return new DailyBoardPlan(true, now, todayKey, normalizedTime);
         }
 
         if (IsSameMinute(now, scheduledToday) || IsTopOfHour(now))

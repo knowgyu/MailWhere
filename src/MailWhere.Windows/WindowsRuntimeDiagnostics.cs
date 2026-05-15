@@ -1,4 +1,6 @@
 using System.IO;
+using System.Text.Json;
+using Microsoft.VisualBasic.FileIO;
 using Microsoft.Win32;
 using MailWhere.Core.Capabilities;
 
@@ -111,5 +113,56 @@ internal static class WindowsRuntimeDiagnostics
         }
 
         return Path.Combine(root, "MailWhere");
+    }
+
+    public static string GetFollowUpDatabasePath() =>
+        Path.Combine(GetAppDataDirectory(), "followups.sqlite");
+
+    public static void RecordUiEvent(string code, IReadOnlyDictionary<string, string>? details = null)
+    {
+        try
+        {
+            var directory = GetAppDataDirectory();
+            Directory.CreateDirectory(directory);
+            var line = JsonSerializer.Serialize(new
+            {
+                atUtc = DateTimeOffset.UtcNow,
+                code,
+                details = details ?? new Dictionary<string, string>()
+            });
+            File.AppendAllText(Path.Combine(directory, "ui-events.jsonl"), line + Environment.NewLine);
+        }
+        catch
+        {
+            // UI observability must never block the tray assistant.
+        }
+    }
+
+    public static IReadOnlyList<string> GetFollowUpDatabaseResetPaths()
+    {
+        var databasePath = GetFollowUpDatabasePath();
+        return new[]
+        {
+            databasePath,
+            databasePath + "-wal",
+            databasePath + "-shm"
+        };
+    }
+
+    public static int DeleteFollowUpDatabaseFiles()
+    {
+        var deleted = 0;
+        foreach (var path in GetFollowUpDatabaseResetPaths())
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            FileSystem.DeleteFile(path);
+            deleted++;
+        }
+
+        return deleted;
     }
 }

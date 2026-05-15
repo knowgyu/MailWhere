@@ -29,7 +29,7 @@ Reviewed the sanitized 0.1.0 release candidate after the tray-first MailWhere im
    - LLM prompt payload keeps Korean text readable instead of JSON escaping every Hangul character.
    - This improves local LLM quality and made payload tests meaningful.
 3. `src/MailWhere.Windows/MainWindow.xaml` and `.xaml.cs`
-   - Review candidates are now visible in the 검토함 tab instead of being only stored in SQLite.
+   - Review candidates are now visible in the 검토 후보 tab instead of being only stored in SQLite.
    - Manual successful scans can record the smoke gate, but only when at least one mail is read and no blocked warning exists.
 4. `src/MailWhere.Storage/SqliteFollowUpStore.cs`
    - Added a read path for unsuppressed review candidates so non-developers do not need to open the database.

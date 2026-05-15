@@ -14,15 +14,7 @@
         ShowActivated="False"
         Focusable="False">
     <Window.Resources>
-        <Style x:Key="ToastButton" TargetType="Button">
-            <Setter Property="MinHeight" Value="32"/>
-            <Setter Property="Padding" Value="13,6"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
+        <Style x:Key="ToastButton" TargetType="Button" BasedOn="{StaticResource MwToastButton}"/>
     </Window.Resources>
 
     <Grid Margin="10">
@@ -121,13 +113,13 @@
                             <Button x:Name="PrimaryButton"
                                     Style="{StaticResource ToastButton}"
                                     Click="PrimaryButton_Click"
-                                    Background="#2458F2"
+                                    Background="{StaticResource MwBrush.Primary}"
                                     Foreground="White">업무 보드</Button>
                             <Button x:Name="SecondaryButton"
                                     Style="{StaticResource ToastButton}"
                                     Click="SecondaryButton_Click"
-                                    Background="#EEF2F7"
-                                    Foreground="#344054">검토함</Button>
+                                    Background="{StaticResource MwBrush.PrimarySoft}"
+                                    Foreground="#344054">검토 후보</Button>
                         </StackPanel>
                     </StackPanel>
                 </Grid>

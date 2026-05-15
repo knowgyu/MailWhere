@@ -6,6 +6,7 @@ public enum FollowUpKind
     ReplyRequired,
     ActionRequested,
     Deadline,
+    PromisedByMe,
     WaitingForReply,
     ReviewNeeded,
     Meeting,

@@ -31,7 +31,8 @@ Write-Host "[windows] test harness"
 Invoke-Native { dotnet run --project .\tests\MailWhere.TestHarness\MailWhere.TestHarness.csproj -c Release --no-build }
 
 Write-Host "[windows] forbidden Outlook mutation scan"
-$forbidden = Select-String -Path .\src\MailWhere.OutlookCom\*.cs, .\src\MailWhere.Windows\*.cs -Pattern '\.(Send|Delete|Move|Save|Reply|ReplyAll|Forward)\s*\(|\bUnRead\s*=|\bCategories\s*=|\bFlagStatus\s*=|\bSaveAsFile\s*\('
+$forbidden = Select-String -Path .\src\MailWhere.OutlookCom\*.cs, .\src\MailWhere.Windows\*.cs -Pattern '\.(Send|Delete|Move|Save|Reply|ReplyAll|Forward)\s*\(|\bUnRead\s*=|\bCategories\s*=|\bFlagStatus\s*=|\bSaveAsFile\s*\(' |
+    Where-Object { $_.Line -notmatch 'WindowsRuntimeSettingsStore\.Save\s*\(' }
 if ($forbidden) {
     $forbidden | Format-List
     throw "Forbidden Outlook mutation/display/attachment call found."
