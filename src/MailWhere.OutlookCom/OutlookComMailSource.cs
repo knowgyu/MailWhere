@@ -46,6 +46,7 @@ public sealed class OutlookComMailSource : IEmailSource
             dynamic outlookDynamic = outlook;
             session = outlookDynamic.Session;
             dynamic sessionDynamic = session;
+            string? mailboxOwner = TryReadCurrentUserDisplayName(session);
             inbox = sessionDynamic.GetDefaultFolder(6); // olFolderInbox
             dynamic inboxDynamic = inbox;
             items = inboxDynamic.Items;
@@ -72,6 +73,7 @@ public sealed class OutlookComMailSource : IEmailSource
                     string sender = Convert.ToString(itemDynamic.SenderName) ?? string.Empty;
                     string? body = request.IncludeBody ? Convert.ToString(itemDynamic.Body) : null;
                     string? conversationId = TryReadString(item, "ConversationID");
+                    var recipients = SplitRecipients(TryReadString(item, "To"), TryReadString(item, "CC"));
 
                     messages.Add(new EmailSnapshot(
                         entryId,
@@ -79,7 +81,9 @@ public sealed class OutlookComMailSource : IEmailSource
                         sender,
                         subject,
                         body,
-                        conversationId));
+                        conversationId,
+                        mailboxOwner,
+                        recipients));
                 }
                 catch (OperationCanceledException)
                 {
@@ -127,4 +131,35 @@ public sealed class OutlookComMailSource : IEmailSource
             return null;
         }
     }
+
+    private static string? TryReadCurrentUserDisplayName(object session)
+    {
+        object? currentUser = null;
+        try
+        {
+            currentUser = session.GetType().InvokeMember("CurrentUser", System.Reflection.BindingFlags.GetProperty, null, session, null);
+            if (currentUser is null)
+            {
+                return null;
+            }
+
+            return TryReadString(currentUser, "Name")
+                   ?? TryReadString(currentUser, "Address")
+                   ?? Convert.ToString(currentUser);
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            ComRelease.FinalRelease(currentUser);
+        }
+    }
+
+    private static IReadOnlyList<string> SplitRecipients(params string?[] values) =>
+        values.Where(value => !string.IsNullOrWhiteSpace(value))
+            .SelectMany(value => value!.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 }

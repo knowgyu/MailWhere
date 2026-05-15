@@ -36,6 +36,13 @@ public sealed class FollowUpPipeline
 
         var analysis = await _analyzer.AnalyzeAsync(email, cancellationToken).ConfigureAwait(false);
         var now = _timeProvider.GetUtcNow();
+        var actionSignature = FollowUpActionSignature.Create(email, analysis);
+        if (actionSignature is not null
+            && await _store.HasProcessedSourceAsync(actionSignature, cancellationToken).ConfigureAwait(false))
+        {
+            await _store.MarkSourceProcessedAsync(email.SourceHash, cancellationToken).ConfigureAwait(false);
+            return new PipelineOutcome(PipelineOutcomeKind.Duplicate, analysis);
+        }
 
         switch (analysis.Disposition)
         {
@@ -43,12 +50,22 @@ public sealed class FollowUpPipeline
                 var task = LocalTaskItem.FromAnalysis(email, analysis, now);
                 await _store.SaveTaskAsync(task, cancellationToken).ConfigureAwait(false);
                 await _store.MarkSourceProcessedAsync(email.SourceHash, cancellationToken).ConfigureAwait(false);
+                if (actionSignature is not null)
+                {
+                    await _store.MarkSourceProcessedAsync(actionSignature, cancellationToken).ConfigureAwait(false);
+                }
+
                 return new PipelineOutcome(PipelineOutcomeKind.TaskCreated, analysis, task.Id);
 
             case AnalysisDisposition.Review:
                 var candidate = ReviewCandidate.FromAnalysis(email, analysis, now);
                 await _store.SaveReviewCandidateAsync(candidate, cancellationToken).ConfigureAwait(false);
                 await _store.MarkSourceProcessedAsync(email.SourceHash, cancellationToken).ConfigureAwait(false);
+                if (actionSignature is not null)
+                {
+                    await _store.MarkSourceProcessedAsync(actionSignature, cancellationToken).ConfigureAwait(false);
+                }
+
                 return new PipelineOutcome(PipelineOutcomeKind.ReviewCandidateCreated, analysis, candidate.Id);
 
             default:

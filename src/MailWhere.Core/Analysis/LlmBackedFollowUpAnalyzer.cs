@@ -73,7 +73,8 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer, IAnalysisTele
 
     private static string BuildPayload(EmailSnapshot email)
     {
-        var body = email.Body ?? string.Empty;
+        var context = MailBodyContextBuilder.Build(email);
+        var body = context.BodyForAnalysis;
         if (body.Length > MaxPromptBodyChars)
         {
             body = body[..MaxPromptBodyChars] + "…";
@@ -87,7 +88,17 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer, IAnalysisTele
                 receivedAt = email.ReceivedAt.ToString("O", CultureInfo.InvariantCulture),
                 senderDisplay = email.SenderDisplay,
                 subject = email.Subject,
-                body
+                subjectCore = context.SubjectCore,
+                mailboxOwnerDisplayName = email.MailboxOwnerDisplayName,
+                recipientDisplayNames = email.RecipientDisplayNames ?? Array.Empty<string>(),
+                conversationIdPresent = !string.IsNullOrWhiteSpace(email.ConversationId),
+                contextKind = context.Kind.ToString(),
+                currentSenderDelegatesForwardedContext = context.CurrentSenderDelegatesForwardedContext,
+                quotedHistoryTrimmed = context.QuotedHistoryTrimmed,
+                currentMessage = context.CurrentMessage,
+                forwardedContext = context.ForwardedContext,
+                quotedHistory = context.QuotedHistory,
+                bodyForAnalysis = body
             },
             new JsonSerializerOptions
             {
@@ -144,11 +155,33 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer, IAnalysisTele
             var confidence = Math.Clamp(response.Confidence ?? 0.5, 0, 1);
             var disposition = response.Disposition ?? AnalysisDisposition.Review;
             var kind = response.Kind ?? FollowUpKind.ReviewNeeded;
+            var context = MailBodyContextBuilder.Build(email);
+            if (OwnershipClassifier.Decide(email, context) == OwnershipDecision.ExplicitlyOther)
+            {
+                parsed = new FollowUpAnalysis(
+                    FollowUpKind.None,
+                    AnalysisDisposition.Ignore,
+                    Math.Max(confidence, 0.75),
+                    string.Empty,
+                    "현재 작성부에서 다른 사람에게 명시적으로 배정된 요청으로 판단했습니다.",
+                    EvidencePolicy.Truncate(response.EvidenceSnippet ?? context.CurrentMessage),
+                    null,
+                    "내 업무로 분류하지 않음");
+                return true;
+            }
+
+            if (response.AssignedToMailboxUser == false && !string.IsNullOrWhiteSpace(response.ExplicitAssignee))
+            {
+                disposition = AnalysisDisposition.Review;
+                confidence = Math.Min(confidence, 0.6);
+            }
+
+            disposition = ApplyOriginPolicy(disposition, response, context);
             var dueAt = TryParseDate(response.DueAt);
             var title = EvidencePolicy.Truncate(response.SuggestedTitle);
             if (string.IsNullOrWhiteSpace(title) && disposition != AnalysisDisposition.Ignore)
             {
-                title = EvidencePolicy.Truncate($"메일 확인: {email.Subject}") ?? "메일 확인";
+                title = EvidencePolicy.Truncate($"메일 확인: {context.SubjectCore}") ?? "메일 확인";
             }
             else if (string.IsNullOrWhiteSpace(title))
             {
@@ -227,8 +260,17 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer, IAnalysisTele
           "reason": "짧은 판단 이유",
           "evidenceSnippet": "메일에서 필요한 짧은 근거",
           "dueAt": "ISO-8601 또는 null",
-          "summary": "요약 한 줄"
+          "summary": "요약 한 줄",
+          "actionOrigin": "currentMessage|forwardedContext|quotedHistory|none",
+          "currentSenderRequested": true,
+          "explicitAssignee": "명시 대상자 또는 null",
+          "assignedToMailboxUser": true
         }
+        `currentMessage`는 이번 메일 작성자가 새로 쓴 부분입니다.
+        `forwardedContext`는 현재 작성자가 아래/전달 내용을 확인·대응하라고 한 경우에만 action 근거로 사용하세요.
+        `quotedHistory`에만 있는 오래된 요청은 자동 등록하지 말고 currentSenderRequested=false로 두세요.
+        mailboxOwnerDisplayName이 있고 현재 작성부가 명시적으로 다른 사람에게 일을 배정하면 ignore로 두세요.
+        명시 대상자가 없거나 mailboxOwnerDisplayName을 가리키면 사용자의 업무로 간주하세요.
         확실하지 않으면 disposition은 review로 두세요. 뉴스레터/공지/FYI는 ignore로 두세요.
         """;
 
@@ -240,5 +282,36 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer, IAnalysisTele
         string? Reason,
         string? EvidenceSnippet,
         string? DueAt,
-        string? Summary);
+        string? Summary,
+        string? ActionOrigin,
+        bool? CurrentSenderRequested,
+        string? ExplicitAssignee,
+        bool? AssignedToMailboxUser);
+
+    private static AnalysisDisposition ApplyOriginPolicy(
+        AnalysisDisposition disposition,
+        LlmFollowUpResponse response,
+        MailBodyContext context)
+    {
+        if (disposition == AnalysisDisposition.Ignore)
+        {
+            return disposition;
+        }
+
+        var origin = response.ActionOrigin ?? string.Empty;
+        var currentRequested = response.CurrentSenderRequested == true || context.CurrentSenderDelegatesForwardedContext;
+        if (origin.Equals("quotedHistory", StringComparison.OrdinalIgnoreCase) && !currentRequested)
+        {
+            return AnalysisDisposition.Review;
+        }
+
+        if (origin.Equals("forwardedContext", StringComparison.OrdinalIgnoreCase)
+            && !currentRequested
+            && disposition == AnalysisDisposition.AutoCreateTask)
+        {
+            return AnalysisDisposition.Review;
+        }
+
+        return disposition;
+    }
 }

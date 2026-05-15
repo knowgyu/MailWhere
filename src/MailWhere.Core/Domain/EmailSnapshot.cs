@@ -6,7 +6,9 @@ public sealed record EmailSnapshot(
     string SenderDisplay,
     string Subject,
     string? Body,
-    string? ConversationId = null)
+    string? ConversationId = null,
+    string? MailboxOwnerDisplayName = null,
+    IReadOnlyList<string>? RecipientDisplayNames = null)
 {
     public string SourceHash => StableHash.Create(SourceId);
 }

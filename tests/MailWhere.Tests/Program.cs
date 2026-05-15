@@ -21,10 +21,16 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Korean weekday due date parses", KoreanWeekdayDueDateParses),
     ("FYI mail is ignored", FyiMailIsIgnored),
     ("Evidence is truncated", EvidenceIsTruncated),
+    ("Forwarded delegation keeps needed context", ForwardedDelegationKeepsNeededContext),
+    ("Forwarded context without current request becomes review", ForwardedContextWithoutCurrentRequestBecomesReview),
+    ("Reply quoted history does not auto create", ReplyQuotedHistoryDoesNotAutoCreate),
+    ("Explicit other assignee is ignored", ExplicitOtherAssigneeIsIgnored),
+    ("Explicit self assignee is recognized", ExplicitSelfAssigneeIsRecognized),
     ("Managed mode blocks watcher without smoke gate", ManagedModeBlocksWatcherWithoutGate),
     ("Smoke gate is required even if managed mode is false", SmokeGateRequiredEvenIfManagedModeFalse),
     ("Ambiguous mail does not auto create", AmbiguousMailDoesNotAutoCreate),
     ("Pipeline suppresses duplicate source", PipelineSuppressesDuplicateSource),
+    ("Pipeline suppresses semantic thread duplicate", PipelineSuppressesSemanticThreadDuplicate),
     ("Manual task can be created", ManualTaskCanBeCreated),
     ("Review candidate ignore persists", ReviewCandidateIgnorePersists),
     ("Notification throttle suppresses repeat alerts", NotificationThrottleSuppressesRepeatAlerts),
@@ -41,6 +47,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Daily board planner schedules next whole hour", DailyBoardPlannerSchedulesNextWholeHour),
     ("LLM JSON creates calendar task", LlmJsonCreatesCalendarTask),
     ("LLM success does not pre-run fallback rules", LlmSuccessDoesNotPreRunFallbackRules),
+    ("LLM payload includes thread and owner context", LlmPayloadIncludesThreadAndOwnerContext),
     ("Invalid LLM JSON falls back to rules", InvalidLlmJsonFallsBackToRules),
     ("LLM only failure creates review candidate", LlmOnlyFailureCreatesReviewCandidate),
     ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
@@ -79,12 +86,19 @@ foreach (var (name, test) in tests)
 
 return failures == 0 ? 0 : 1;
 
-static EmailSnapshot Mail(string subject, string body, string? id = null) => new(
+static EmailSnapshot Mail(
+    string subject,
+    string body,
+    string? id = null,
+    string? conversationId = null,
+    string? mailboxOwner = null) => new(
     id ?? Guid.NewGuid().ToString("N"),
     new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9)),
     "tester",
     subject,
-    body);
+    body,
+    conversationId,
+    mailboxOwner);
 
 static async Task KoreanDeadlineRequestCreatesAutoTask()
 {
@@ -128,6 +142,87 @@ static Task EvidenceIsTruncated()
     var truncated = EvidencePolicy.Truncate(longText);
     Assert(truncated is not null && truncated.Length <= EvidencePolicy.MaxEvidenceChars + 1, "Expected capped evidence.");
     return Task.CompletedTask;
+}
+
+static async Task ForwardedDelegationKeepsNeededContext()
+{
+    var analyzer = new RuleBasedFollowUpAnalyzer();
+    var mail = Mail(
+        "FW: 고객 요청",
+        """
+        아래 고객 요청 건 내일까지 검토 후 회신 부탁드립니다.
+
+        -----Original Message-----
+        From: customer@example.com
+        Subject: 사양 변경 요청
+        다음 주 적용 전까지 사양 변경 리스크 검토가 필요합니다.
+        """);
+
+    var context = MailBodyContextBuilder.Build(mail);
+    var result = await analyzer.AnalyzeAsync(mail);
+
+    Assert(context.Kind == MailContextKind.ForwardedDelegation, "Expected forwarded delegation context.");
+    Assert(context.ForwardedContext?.Contains("사양 변경", StringComparison.Ordinal) == true, "Expected forwarded context to be retained.");
+    Assert(result.Disposition == AnalysisDisposition.AutoCreateTask, "Expected explicit current delegation to auto-create.");
+}
+
+static async Task ForwardedContextWithoutCurrentRequestBecomesReview()
+{
+    var analyzer = new RuleBasedFollowUpAnalyzer();
+    var mail = Mail(
+        "FW: 고객 요청",
+        """
+        -----Original Message-----
+        From: customer@example.com
+        Subject: 사양 변경 요청
+        내일까지 사양 변경 리스크 검토 후 회신 부탁드립니다.
+        """);
+
+    var result = await analyzer.AnalyzeAsync(mail);
+
+    Assert(result.Disposition == AnalysisDisposition.Review, "Forward-only context should surface but not auto-create.");
+}
+
+static async Task ReplyQuotedHistoryDoesNotAutoCreate()
+{
+    var analyzer = new RuleBasedFollowUpAnalyzer();
+    var mail = Mail(
+        "RE: 자료 요청",
+        """
+        확인했습니다. 감사합니다.
+
+        -----Original Message-----
+        From: tester
+        Subject: 자료 요청
+        내일까지 비용 자료 검토 후 회신 부탁드립니다.
+        """);
+
+    var result = await analyzer.AnalyzeAsync(mail);
+
+    Assert(result.Disposition == AnalysisDisposition.Ignore, "Quoted history alone should not surface stale review items.");
+}
+
+static async Task ExplicitOtherAssigneeIsIgnored()
+{
+    var analyzer = new RuleBasedFollowUpAnalyzer();
+    var result = await analyzer.AnalyzeAsync(Mail(
+        "자료 요청",
+        "김철수님 내일까지 비용 자료 검토 후 회신 부탁드립니다.",
+        mailboxOwner: "김영희"));
+
+    Assert(result.Disposition == AnalysisDisposition.Ignore, "Explicit other assignee should be ignored.");
+    Assert(result.Reason.Contains("다른 사람", StringComparison.Ordinal), "Expected ownership reason.");
+}
+
+static async Task ExplicitSelfAssigneeIsRecognized()
+{
+    var analyzer = new RuleBasedFollowUpAnalyzer();
+    var result = await analyzer.AnalyzeAsync(Mail(
+        "자료 요청",
+        "영희님 내일까지 비용 자료 검토 후 회신 부탁드립니다.",
+        mailboxOwner: "김영희 프로"));
+
+    Assert(result.Disposition == AnalysisDisposition.AutoCreateTask, "Explicit self assignee should remain actionable.");
 }
 
 static Task ManagedModeBlocksWatcherWithoutGate()
@@ -180,6 +275,22 @@ static async Task PipelineSuppressesDuplicateSource()
     Assert(first.Kind == PipelineOutcomeKind.TaskCreated, "Expected first task.");
     Assert(second.Kind == PipelineOutcomeKind.Duplicate, "Expected duplicate suppression.");
     Assert(store.Tasks.Count == 1, "Expected one task.");
+}
+
+static async Task PipelineSuppressesSemanticThreadDuplicate()
+{
+    var store = new FakeStore();
+    var pipeline = new FollowUpPipeline(new RuleBasedFollowUpAnalyzer(), store);
+    var firstMail = Mail("RE: RE: 자료 요청", "내일까지 검토 후 회신 부탁드립니다.", "thread-1", "conversation-1");
+    var secondMail = Mail("FW: RE: 자료 요청", "내일까지 검토 후 회신 부탁드립니다.", "thread-2", "conversation-1");
+
+    var first = await pipeline.ProcessAsync(firstMail);
+    var second = await pipeline.ProcessAsync(secondMail);
+
+    Assert(first.Kind == PipelineOutcomeKind.TaskCreated, "Expected first semantic task.");
+    Assert(second.Kind == PipelineOutcomeKind.Duplicate, "Expected semantic duplicate suppression.");
+    Assert(store.Tasks.Count == 1, "Expected one task after semantic duplicate.");
+    Assert(store.Processed.Contains(secondMail.SourceHash), "Expected duplicate mail source to be marked processed.");
 }
 
 static async Task ManualTaskCanBeCreated()
@@ -494,6 +605,46 @@ static async Task LlmSuccessDoesNotPreRunFallbackRules()
     Assert(result.SuggestedTitle == "LLM 우선 후보", "Expected LLM result.");
     Assert(!fallback.Called, "Fallback rules should not run before successful LLM output.");
     Assert(analyzer.GetTelemetrySnapshot().LlmSuccessCount == 1, "Expected LLM success telemetry.");
+}
+
+static async Task LlmPayloadIncludesThreadAndOwnerContext()
+{
+    var llm = new FakeLlmClient("""
+        {
+          "kind": "actionRequested",
+          "disposition": "review",
+          "confidence": 0.70,
+          "suggestedTitle": "전달 맥락 검토",
+          "reason": "전달 메일 확인 요청",
+          "evidenceSnippet": "아래 건 확인",
+          "dueAt": null,
+          "summary": "전달 메일 검토",
+          "actionOrigin": "forwardedContext",
+          "currentSenderRequested": true,
+          "explicitAssignee": null,
+          "assignedToMailboxUser": true
+        }
+        """);
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm);
+
+    await analyzer.AnalyzeAsync(Mail(
+        "FW: 이슈 확인",
+        """
+        아래 건 확인 부탁드립니다.
+
+        -----Original Message-----
+        From: partner@example.com
+        Subject: 이슈 확인
+        내일까지 리스크 검토가 필요합니다.
+        """,
+        conversationId: "llm-conv",
+        mailboxOwner: "김영희"));
+
+    Assert(llm.LastUserPayload?.Contains("mailboxOwnerDisplayName", StringComparison.Ordinal) == true, "Expected owner field in LLM payload.");
+    Assert(llm.LastUserPayload?.Contains("currentMessage", StringComparison.Ordinal) == true, "Expected current-message field in LLM payload.");
+    Assert(llm.LastUserPayload?.Contains("forwardedContext", StringComparison.Ordinal) == true, "Expected forwarded-context field in LLM payload.");
+    Assert(llm.LastUserPayload?.Contains("bodyForAnalysis", StringComparison.Ordinal) == true, "Expected analysis-body field in LLM payload.");
+    Assert(llm.LastSystemPrompt?.Contains("quotedHistory", StringComparison.Ordinal) == true, "Expected prompt to constrain quoted history.");
 }
 
 static async Task InvalidLlmJsonFallsBackToRules()
