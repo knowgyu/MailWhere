@@ -24,7 +24,7 @@ public abstract class HttpJsonLlmClient : ILlmClient
 
     public abstract Task<string> CompleteJsonAsync(string systemPrompt, string userPayload, CancellationToken cancellationToken = default);
 
-    protected static Uri BuildUri(string endpoint, string suffix)
+    internal static Uri BuildUri(string endpoint, string suffix)
     {
         var trimmed = endpoint.Trim().TrimEnd('/');
         if (trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))

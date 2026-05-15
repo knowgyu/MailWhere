@@ -14,6 +14,10 @@
             <Setter Property="Margin" Value="0,4,12,12"/>
             <Setter Property="Padding" Value="8,6"/>
         </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Margin" Value="0,4,12,12"/>
+            <Setter Property="Padding" Value="8,6"/>
+        </Style>
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="#20304F"/>
         </Style>
@@ -125,53 +129,62 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <TextBlock Text="설정" FontSize="18" FontWeight="Bold"/>
-                        <TextBlock Text="기본값은 보안 우선 모드입니다. LLM은 명시적으로 켜야만 호출됩니다." Foreground="#667085" TextWrapping="Wrap" Margin="0,4,0,14"/>
+                        <TextBlock Text="LLM을 켜고 endpoint를 넣은 뒤 모델을 불러오세요." Foreground="#667085" TextWrapping="Wrap" Margin="0,4,0,14"/>
 
                         <CheckBox x:Name="StartupToggle" Content="Windows 시작 시 실행" Click="StartupToggle_Click" Margin="0,0,0,10"/>
-                        <CheckBox x:Name="AutoWatcherToggle" Content="자동 watcher 요청(운영 smoke gate 후 활성)" Margin="0,0,0,10"/>
                         <CheckBox x:Name="LlmEnabledToggle" Content="로컬 LLM 분석 사용" Margin="0,0,0,10"/>
 
-                        <TextBlock Text="LLM 실행 방식" FontWeight="SemiBold"/>
-                        <ComboBox x:Name="LlmProviderBox" Margin="0,4,12,12" Padding="8,6">
+                        <TextBlock Text="실행 방식" FontWeight="SemiBold"/>
+                        <ComboBox x:Name="LlmProviderBox">
                             <ComboBoxItem Tag="Disabled" Content="사용 안 함 / rule-only"/>
-                            <ComboBoxItem Tag="OllamaNative" Content="Ollama 로컬 - native /api/chat"/>
-                            <ComboBoxItem Tag="OpenAiChatCompletions" Content="OpenAI 호환 로컬 - Chat Completions"/>
-                            <ComboBoxItem Tag="OpenAiResponses" Content="OpenAI 호환 로컬 - Responses"/>
+                            <ComboBoxItem Tag="OllamaNative" Content="Ollama 로컬"/>
+                            <ComboBoxItem Tag="OpenAiChatCompletions" Content="OpenAI 호환 - Chat Completions"/>
+                            <ComboBoxItem Tag="OpenAiResponses" Content="OpenAI 호환 - Responses"/>
                         </ComboBox>
 
                         <TextBlock Text="로컬 endpoint" FontWeight="SemiBold"/>
-                        <TextBox x:Name="LlmEndpointText"/>
+                        <TextBox x:Name="LlmEndpointText" ToolTip="예: http://localhost:11434 또는 http://localhost:8000"/>
                         <TextBlock Text="모델" FontWeight="SemiBold"/>
-                        <TextBox x:Name="LlmModelText"/>
-                        <Expander Header="고급: 내부 서버 Bearer token 환경 변수(선택)" Margin="0,0,12,12">
-                            <StackPanel Margin="0,8,0,0">
-                                <TextBlock Text="브라우저 로그인/Enterprise 계정 재사용은 지원하지 않습니다. 로컬 또는 내부 OpenAI-compatible 서버가 Bearer token을 요구할 때만 환경 변수 이름을 넣으세요." TextWrapping="Wrap" Foreground="#667085" FontSize="12"/>
-                                <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: LOCAL_LLM_TOKEN. 값 자체는 앱 설정에 저장하지 않는 것을 권장합니다."/>
-                            </StackPanel>
-                        </Expander>
-                        <TextBlock Text="LLM 실패 시 처리" FontWeight="SemiBold"/>
-                        <ComboBox x:Name="LlmFallbackPolicyBox" Margin="0,4,12,12" Padding="8,6">
-                            <ComboBoxItem Tag="LlmOnly" Content="LLM만 사용: 실패하면 검토함에 남김"/>
-                            <ComboBoxItem Tag="LlmThenRules" Content="LLM 우선 + 실패 시 rule fallback"/>
+                        <Grid Margin="0,4,12,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="LlmModelBox" Grid.Column="0" IsEditable="True" Margin="0" MinHeight="36" ToolTip="모델을 불러오거나 직접 입력하세요."/>
+                            <Button x:Name="LoadLlmModelsButton" Grid.Column="1" Click="LoadLlmModels_Click" Margin="8,0,0,0" MinHeight="36">모델 불러오기</Button>
+                        </Grid>
+
+                        <TextBlock Text="LLM 실패 시" FontWeight="SemiBold"/>
+                        <ComboBox x:Name="LlmFallbackPolicyBox">
+                            <ComboBoxItem Tag="LlmOnly" Content="검토함에 남김 (기본)"/>
+                            <ComboBoxItem Tag="LlmThenRules" Content="rule fallback 사용 (명시 선택)"/>
                         </ComboBox>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                            <Button x:Name="TestLlmEndpointButton" Click="TestLlmEndpoint_Click">LLM 연결 테스트</Button>
+                            <Button x:Name="TestLlmEndpointButton" Click="TestLlmEndpoint_Click" Background="#2458F2" Foreground="White">연결 테스트</Button>
                             <TextBlock x:Name="LlmStatusText" Text="LLM 연결 테스트 전입니다." VerticalAlignment="Center" Foreground="#667085" TextWrapping="Wrap"/>
                         </StackPanel>
 
                         <TextBlock Text="최근 스캔 기간(일)" FontWeight="SemiBold"/>
                         <TextBox x:Name="ScanDaysText"/>
-                        <TextBlock Text="최대 메일 수(고급, 비우면 최근 1개월 전체)" FontWeight="SemiBold"/>
-                        <TextBox x:Name="MaxItemsText" ToolTip="기본은 비워두며 최근 1개월 안의 메일을 갯수 제한 없이 읽습니다. 문제 진단 때만 숫자를 넣으세요."/>
-                        <TextBlock Text="알림 look-ahead(시간)" FontWeight="SemiBold"/>
-                        <TextBox x:Name="ReminderLookAheadText"/>
-                        <TextBlock Text="오늘의 업무 보드 시간" FontWeight="SemiBold"/>
-                        <TextBox x:Name="DailyBoardTimeText" ToolTip="기본 08:00. 이 시간이 지난 뒤 앱이 켜지면 다음 정시에 한 번 표시합니다."/>
 
                         <Button Click="SaveSettings_Click" HorizontalAlignment="Left" Background="#14213D" Foreground="White">설정 저장</Button>
 
+                        <Expander Header="고급 설정" Margin="0,18,12,0">
+                            <StackPanel Margin="0,10,0,0">
+                                <CheckBox x:Name="AutoWatcherToggle" Content="자동 watcher 요청(운영 smoke gate 후 활성)" Margin="0,0,0,10"/>
+                                <TextBlock Text="최대 메일 수(비우면 최근 기간 전체)" FontWeight="SemiBold"/>
+                                <TextBox x:Name="MaxItemsText" ToolTip="문제 진단 때만 숫자를 넣으세요."/>
+                                <TextBlock Text="알림 look-ahead(시간)" FontWeight="SemiBold"/>
+                                <TextBox x:Name="ReminderLookAheadText"/>
+                                <TextBlock Text="오늘의 업무 보드 시간" FontWeight="SemiBold"/>
+                                <TextBox x:Name="DailyBoardTimeText" ToolTip="기본 08:00. 이 시간이 지난 뒤 앱이 켜지면 다음 정시에 한 번 표시합니다."/>
+                                <TextBlock Text="Bearer token 환경 변수(선택)" FontWeight="SemiBold"/>
+                                <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: LOCAL_LLM_TOKEN. 토큰 값 자체는 앱 설정에 저장하지 마세요."/>
+                            </StackPanel>
+                        </Expander>
+
                         <Border CornerRadius="14" Background="#F5F7FB" Padding="12" Margin="0,18,0,0">
-                            <TextBlock Text="안전 경계: 메일 발송/삭제/이동/답장/첨부 자동 분석은 하지 않습니다. vendor-specific mailbox export files 파일을 직접 파싱하지 않고 Outlook에서 보이는 메일만 읽습니다." TextWrapping="Wrap" Foreground="#4C5874"/>
+                            <TextBlock Text="메일은 읽기만 합니다. 발송/삭제/이동/답장/첨부 자동 분석은 하지 않습니다." TextWrapping="Wrap" Foreground="#4C5874"/>
                         </Border>
                     </StackPanel>
                 </ScrollViewer>

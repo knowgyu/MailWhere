@@ -21,7 +21,7 @@
   "LlmProvider": "OllamaNative",
   "LlmEndpoint": "http://localhost:11434",
   "LlmModel": "qwen3.6",
-  "LlmFallbackPolicy": "LlmThenRules"
+  "LlmFallbackPolicy": "LlmOnly"
 }
 ```
 
@@ -59,10 +59,21 @@
 
 | 값 | 의미 | 추천 상황 |
 | --- | --- | --- |
-| `LlmOnly` | LLM이 실패하면 자동 등록하지 않고 검토함에 “LLM 분석 실패” 후보로 남김 | rule 오탐이 싫고 LLM endpoint 품질을 직접 확인하려는 경우 |
-| `LlmThenRules` | LLM을 먼저 호출하고 실패/invalid JSON/timeout이면 rule-based analyzer로 fallback | endpoint가 가끔 불안정해도 후속조치 탐지를 계속하고 싶은 경우 |
+| `LlmOnly` | LLM이 실패하면 자동 등록하지 않고 검토함에 “LLM 분석 실패” 후보로 남김 | 기본값. rule 오탐 없이 endpoint 품질을 먼저 확인하려는 경우 |
+| `LlmThenRules` | LLM을 먼저 호출하고 실패/invalid JSON/timeout이면 rule-based analyzer로 fallback | 사용자가 명시적으로 fallback을 허용한 경우 |
 
 스캔 후 앱 상태에는 `LLM 시도/성공/fallback/실패/평균 응답시간`이 표시됩니다. 이 통계에는 메일 제목/본문/prompt가 들어가지 않습니다.
+
+LLM 연결 테스트나 스캔 중 LLM 실패가 발생하고 현재 정책이 `LlmOnly`이면, 앱이 “다음 스캔부터 rule fallback을 사용할지”를 한 번 물어봅니다. 동의하지 않으면 계속 LLM 실패 후보를 검토함에 남깁니다.
+
+## 모델 목록 불러오기
+
+앱의 **모델 불러오기** 버튼은 provider에 따라 다음 endpoint를 호출합니다.
+
+- `OllamaNative`: `GET {endpoint}/api/tags` → `models[].name`
+- `OpenAiChatCompletions`, `OpenAiResponses`: `GET {endpoint}/v1/models` → `data[].id`
+
+endpoint가 이미 `/v1`로 끝나면 중복으로 `/v1/v1/models`가 되지 않도록 `/models`만 붙입니다. 목록이 비어 있거나 서버가 모델 목록을 제공하지 않으면 모델명을 직접 입력할 수 있습니다.
 
 ## 연결 테스트
 

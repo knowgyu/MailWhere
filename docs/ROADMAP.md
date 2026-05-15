@@ -37,6 +37,8 @@ Included:
 - Recent-month scan defaults to date-window only; max-count is an advanced optional cap.
 - LLM endpoint test sends a non-mail JSON probe and reports sanitized success/failure.
 - LLM-enabled analysis is LLM-first, with explicit `LlmOnly` or `LlmThenRules` fallback policy.
+- `LlmOnly` is the default; rule fallback requires explicit user selection or a failure modal confirmation.
+- LLM model names can be loaded from Ollama `/api/tags` or OpenAI-compatible `/v1/models`.
 - Scan status includes LLM attempts, success, fallback, failure, and average response time.
 - Provider naming is protocol-first: `OllamaNative`, `OpenAiChatCompletions`, `OpenAiResponses`, with legacy config strings kept compatible.
 - Review candidates can be snoozed from 검토함 and are hidden until the snooze time.

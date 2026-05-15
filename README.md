@@ -15,7 +15,8 @@
   - Ollama native `/api/chat`
   - OpenAI-compatible local server `/v1/chat/completions`
   - OpenAI-compatible local server `/v1/responses`
-- LLM 연결 테스트와 스캔별 LLM 시도/성공/fallback/실패 요약
+- endpoint에서 모델 목록 불러오기 + LLM 연결 테스트
+- 스캔별 LLM 시도/성공/fallback/실패 요약
 - SQLite 로컬 task 저장
 - 낮은 확신 후보를 검토함에 표시
 - 기본 08:00 오늘의 업무 보드 창 표시(이후 실행 시 다음 정시)
@@ -61,9 +62,9 @@ artifacts/MailWhere-win-x64-portable.zip
 
 ## LLM endpoint
 
-기본은 rule-only입니다. LLM을 켜면 **LLM이 먼저 분석**하고, 실패 시 처리 정책을 선택합니다.
+기본은 rule-only입니다. LLM을 켜면 **LLM이 먼저 분석**하고, 실패하면 기본적으로 검토함에 남깁니다. Rule fallback은 사용자가 명시적으로 선택하거나 실패 후 모달에서 동의한 경우에만 켭니다.
 
-- `LlmOnly`: LLM 실패 시 자동 등록하지 않고 검토함에 남김
+- `LlmOnly`: LLM 실패 시 자동 등록하지 않고 검토함에 남김(기본)
 - `LlmThenRules`: LLM 실패 시 rule-based analyzer로 fallback
 
 ```json
@@ -72,11 +73,11 @@ artifacts/MailWhere-win-x64-portable.zip
   "LlmProvider": "OllamaNative",
   "LlmEndpoint": "http://localhost:11434",
   "LlmModel": "qwen3.6",
-  "LlmFallbackPolicy": "LlmThenRules"
+  "LlmFallbackPolicy": "LlmOnly"
 }
 ```
 
-vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 예전 설정값인 `Ollama`, `OpenAiCompatible`도 계속 읽지만 새 설정에서는 protocol 이름을 쓰는 것을 권장합니다. 앱의 **LLM 연결 테스트** 버튼은 메일 내용이 아닌 작은 JSON probe만 보내므로 endpoint/model/provider 문제를 먼저 확인할 수 있습니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
+vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 예전 설정값인 `Ollama`, `OpenAiCompatible`도 계속 읽지만 새 설정에서는 protocol 이름을 쓰는 것을 권장합니다. 앱의 **모델 불러오기** 버튼은 `/api/tags` 또는 `/v1/models`에서 모델 목록을 가져오고, **연결 테스트**는 메일 내용이 아닌 작은 JSON probe만 보냅니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
 
 ## 문서
 

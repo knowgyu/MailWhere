@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _dailyBoardTimer;
     private DispatcherTimer? _automaticScanTimer;
     private bool _scanInProgress;
+    private bool _fallbackPromptShownThisSession;
     private DailyBoardWindow? _dailyBoardWindow;
     private AnalysisTelemetry _lastAnalysisTelemetry = AnalysisTelemetry.Empty;
 
@@ -123,6 +124,7 @@ public partial class MainWindow : Window
             WindowsRuntimeSettingsStore.Save(settings);
             LlmStatusText.Text = "LLM endpoint 연결을 테스트하는 중입니다…";
             TestLlmEndpointButton.IsEnabled = false;
+            LoadLlmModelsButton.IsEnabled = false;
             ScanRecentMonthButton.IsEnabled = false;
             await Dispatcher.Yield(DispatcherPriority.Background);
 
@@ -142,6 +144,10 @@ public partial class MainWindow : Window
             StatusText.Text = result.Success
                 ? "LLM 연결 테스트가 성공했습니다."
                 : "LLM 연결 테스트가 실패했습니다. endpoint/model/provider를 확인하세요.";
+            if (!result.Success)
+            {
+                OfferRuleFallbackAfterLlmFailure();
+            }
         }
         catch (Exception ex)
         {
@@ -152,7 +158,58 @@ public partial class MainWindow : Window
             if (!_scanInProgress)
             {
                 TestLlmEndpointButton.IsEnabled = true;
+                LoadLlmModelsButton.IsEnabled = true;
                 ScanRecentMonthButton.IsEnabled = true;
+            }
+        }
+    }
+
+    private async void LoadLlmModels_Click(object sender, RoutedEventArgs e)
+    {
+        if (_scanInProgress)
+        {
+            return;
+        }
+
+        try
+        {
+            var settings = ReadSettingsFromControls();
+            if (settings.LlmProvider == LlmProviderKind.Disabled || string.IsNullOrWhiteSpace(settings.LlmEndpoint))
+            {
+                StatusText.Text = "Provider와 endpoint를 먼저 입력하세요.";
+                return;
+            }
+
+            LlmStatusText.Text = "모델 목록을 불러오는 중입니다…";
+            LoadLlmModelsButton.IsEnabled = false;
+            TestLlmEndpointButton.IsEnabled = false;
+            await Dispatcher.Yield(DispatcherPriority.Background);
+
+            var catalogSettings = settings.ToLlmEndpointSettings() with
+            {
+                Enabled = true,
+                Model = string.IsNullOrWhiteSpace(settings.LlmModel) ? "catalog" : settings.LlmModel
+            };
+            var models = await LlmModelCatalog.FetchAsync(catalogSettings);
+            ApplyModelList(models, settings.LlmModel);
+            LlmStatusText.Text = models.Count == 0
+                ? "모델 목록이 비어 있습니다. 모델명을 직접 입력하세요."
+                : $"모델 {models.Count}개를 불러왔습니다.";
+            StatusText.Text = models.Count == 0
+                ? "모델을 직접 입력한 뒤 연결 테스트를 실행하세요."
+                : "모델을 선택한 뒤 연결 테스트를 실행하세요.";
+        }
+        catch (Exception ex)
+        {
+            LlmStatusText.Text = $"모델 목록 불러오기 실패 · {ex.GetType().Name}";
+            DiagnosticsText.Text = $"모델 목록 불러오기 실패\n{ex.GetType().Name}: {ex.Message}";
+        }
+        finally
+        {
+            if (!_scanInProgress)
+            {
+                LoadLlmModelsButton.IsEnabled = true;
+                TestLlmEndpointButton.IsEnabled = true;
             }
         }
     }
@@ -263,6 +320,10 @@ public partial class MainWindow : Window
                     "최근 메일 스캔 완료",
                     $"할 일 {summary.TaskCreatedCount}건, 새 검토 후보 {newReviewCandidateCount}건을 찾았습니다. 검토는 MailWhere 보드에서 확인하세요.",
                     "scan-summary"));
+            }
+            if (_lastAnalysisTelemetry.LlmFailureCount > 0)
+            {
+                OfferRuleFallbackAfterLlmFailure();
             }
 
             return summary;
@@ -659,7 +720,7 @@ public partial class MainWindow : Window
             RuleOnlyModeAccepted: true,
             LlmProvider: provider,
             LlmEndpoint: LlmEndpointText.Text,
-            LlmModel: LlmModelText.Text,
+            LlmModel: LlmModelBox.Text,
             LlmApiKeyEnvironmentVariable: LlmApiKeyEnvText.Text,
             LlmTimeoutSeconds: defaults.LlmTimeoutSeconds,
             LlmFallbackPolicy: ParseFallbackPolicy(((ComboBoxItem?)LlmFallbackPolicyBox.SelectedItem)?.Tag?.ToString()),
@@ -674,7 +735,7 @@ public partial class MainWindow : Window
         LlmEnabledToggle.IsChecked = settings.ExternalLlmEnabled;
         AutoWatcherToggle.IsChecked = settings.AutomaticWatcherRequested;
         LlmEndpointText.Text = settings.LlmEndpoint;
-        LlmModelText.Text = settings.LlmModel;
+        ApplyModelList(Array.Empty<string>(), settings.LlmModel);
         LlmApiKeyEnvText.Text = settings.LlmApiKeyEnvironmentVariable ?? string.Empty;
         ScanDaysText.Text = settings.RecentScanDays.ToString();
         MaxItemsText.Text = settings.RecentScanMaxItems == 0 ? string.Empty : settings.RecentScanMaxItems.ToString();
@@ -703,7 +764,7 @@ public partial class MainWindow : Window
         Enum.TryParse<LlmProviderKind>(value, ignoreCase: true, out var parsed) ? parsed : LlmProviderKind.Disabled;
 
     private static LlmFallbackPolicy ParseFallbackPolicy(string? value) =>
-        Enum.TryParse<LlmFallbackPolicy>(value, ignoreCase: true, out var parsed) ? parsed : LlmFallbackPolicy.LlmThenRules;
+        Enum.TryParse<LlmFallbackPolicy>(value, ignoreCase: true, out var parsed) ? parsed : LlmFallbackPolicy.LlmOnly;
 
     private void ApplyFallbackPolicyToControls(LlmFallbackPolicy fallbackPolicy)
     {
@@ -717,7 +778,52 @@ public partial class MainWindow : Window
             }
         }
 
-        LlmFallbackPolicyBox.SelectedIndex = 1;
+        LlmFallbackPolicyBox.SelectedIndex = 0;
+    }
+
+    private void ApplyModelList(IReadOnlyList<string> models, string currentModel)
+    {
+        var selected = string.IsNullOrWhiteSpace(currentModel) ? RuntimeSettings.ManagedSafeDefault.LlmModel : currentModel;
+        LlmModelBox.Items.Clear();
+        foreach (var model in models)
+        {
+            LlmModelBox.Items.Add(model);
+        }
+
+        if (!models.Any(model => string.Equals(model, selected, StringComparison.OrdinalIgnoreCase)))
+        {
+            LlmModelBox.Items.Add(selected);
+        }
+
+        LlmModelBox.Text = selected;
+    }
+
+    private void OfferRuleFallbackAfterLlmFailure()
+    {
+        if (_fallbackPromptShownThisSession
+            || _settings.LlmFallbackPolicy != LlmFallbackPolicy.LlmOnly
+            || !_settings.ExternalLlmEnabled
+            || _settings.LlmProvider == LlmProviderKind.Disabled)
+        {
+            return;
+        }
+
+        _fallbackPromptShownThisSession = true;
+        var result = System.Windows.MessageBox.Show(
+            this,
+            "LLM 연결/분석이 실패했습니다.\n\n다음 스캔부터 rule-based fallback을 사용할까요?\n나중에도 오른쪽 설정의 'LLM 실패 시'에서 바꿀 수 있습니다.",
+            "LLM 실패 처리",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        _settings = _settings with { LlmFallbackPolicy = LlmFallbackPolicy.LlmThenRules };
+        WindowsRuntimeSettingsStore.Save(_settings);
+        ApplyFallbackPolicyToControls(_settings.LlmFallbackPolicy);
+        StatusText.Text = "다음 스캔부터 LLM 실패 시 rule fallback을 사용합니다.";
     }
 
     private static int ParseInt(string? value, int fallback) =>
@@ -727,6 +833,7 @@ public partial class MainWindow : Window
     {
         ScanRecentMonthButton.IsEnabled = !busy;
         TestLlmEndpointButton.IsEnabled = !busy;
+        LoadLlmModelsButton.IsEnabled = !busy;
         ScanProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressText.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressText.Text = message;

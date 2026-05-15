@@ -45,6 +45,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM only failure creates review candidate", LlmOnlyFailureCreatesReviewCandidate),
     ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
     ("OpenAI Responses client extracts output text", OpenAiResponsesClientExtractsOutputText),
+    ("LLM model catalog loads Ollama models", LlmModelCatalogLoadsOllamaModels),
+    ("LLM model catalog loads OpenAI-compatible models", LlmModelCatalogLoadsOpenAiCompatibleModels),
     ("Recent mail scan honors request window", RecentMailScanHonorsRequestWindow),
     ("Recent mail scan supports unlimited count", RecentMailScanSupportsUnlimitedCount),
     ("Mail scan reports progress", MailScanReportsProgress),
@@ -398,11 +400,11 @@ static Task RuntimeSettingsDefaultUnlimitedRecentScan()
     var defaults = RuntimeSettingsSerializer.ParseOrDefault("{}");
     Assert(defaults.RecentScanDays == 30, "Expected recent scan days default.");
     Assert(defaults.RecentScanMaxItems == 0, "Expected default scan max to mean unlimited.");
-    Assert(defaults.LlmFallbackPolicy == LlmFallbackPolicy.LlmThenRules, "Expected safe LLM fallback default.");
+    Assert(defaults.LlmFallbackPolicy == LlmFallbackPolicy.LlmOnly, "Expected default LLM failure handling to require explicit fallback consent.");
 
-    var explicitUnlimited = RuntimeSettingsSerializer.ParseOrDefault("""{"RecentScanMaxItems":0,"LlmFallbackPolicy":"LlmOnly"}""");
+    var explicitUnlimited = RuntimeSettingsSerializer.ParseOrDefault("""{"RecentScanMaxItems":0,"LlmFallbackPolicy":"LlmThenRules"}""");
     Assert(explicitUnlimited.RecentScanMaxItems == 0, "Expected explicit unlimited scan max.");
-    Assert(explicitUnlimited.LlmFallbackPolicy == LlmFallbackPolicy.LlmOnly, "Expected explicit LLM-only policy.");
+    Assert(explicitUnlimited.LlmFallbackPolicy == LlmFallbackPolicy.LlmThenRules, "Expected explicit fallback policy to be preserved.");
     return Task.CompletedTask;
 }
 
@@ -560,6 +562,55 @@ static async Task OpenAiResponsesClientExtractsOutputText()
 
     Assert(result == """{"ok":true}""", "Expected Responses output text to be extracted.");
     Assert(handler.LastRequestUri?.AbsolutePath == "/v1/responses", "Expected Responses endpoint path.");
+}
+
+static async Task LlmModelCatalogLoadsOllamaModels()
+{
+    var settings = new LlmEndpointSettings(
+        LlmProviderKind.OllamaNative,
+        Enabled: true,
+        Endpoint: "http://localhost:11434",
+        Model: "catalog",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+    var handler = new StubHttpMessageHandler("""
+        {
+          "models": [
+            { "name": "qwen3.6:latest" },
+            { "name": "llama3.2:latest" }
+          ]
+        }
+        """);
+
+    var models = await LlmModelCatalog.FetchAsync(settings, new HttpClient(handler));
+
+    Assert(models.SequenceEqual(new[] { "llama3.2:latest", "qwen3.6:latest" }), "Expected sorted Ollama model names.");
+    Assert(handler.LastRequestUri?.AbsolutePath == "/api/tags", "Expected Ollama tags endpoint.");
+}
+
+static async Task LlmModelCatalogLoadsOpenAiCompatibleModels()
+{
+    var settings = new LlmEndpointSettings(
+        LlmProviderKind.OpenAiChatCompletions,
+        Enabled: true,
+        Endpoint: "http://localhost:8000/v1",
+        Model: "catalog",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+    var handler = new StubHttpMessageHandler("""
+        {
+          "object": "list",
+          "data": [
+            { "id": "qwen-local" },
+            { "id": "gpt-oss" }
+          ]
+        }
+        """);
+
+    var models = await LlmModelCatalog.FetchAsync(settings, new HttpClient(handler));
+
+    Assert(models.SequenceEqual(new[] { "gpt-oss", "qwen-local" }), "Expected sorted OpenAI-compatible model IDs.");
+    Assert(handler.LastRequestUri?.AbsolutePath == "/v1/models", "Expected OpenAI-compatible models endpoint.");
 }
 
 static async Task RecentMailScanHonorsRequestWindow()
