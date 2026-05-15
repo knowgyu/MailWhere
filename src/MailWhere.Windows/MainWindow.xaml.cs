@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using MailWhere.Core.Analysis;
@@ -384,6 +385,31 @@ public partial class MainWindow : Window
         if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
         {
             await IgnoreReviewCandidateAsync(item.Candidate);
+        }
+    }
+
+    private async void MainWindow_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Alt) != ModifierKeys.Alt)
+        {
+            return;
+        }
+
+        if (e.Key == Key.A)
+        {
+            e.Handled = true;
+            if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem approveItem)
+            {
+                await ApproveReviewCandidateAsync(approveItem.Candidate);
+            }
+        }
+        else if (e.Key == Key.I)
+        {
+            e.Handled = true;
+            if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem ignoreItem)
+            {
+                await IgnoreReviewCandidateAsync(ignoreItem.Candidate);
+            }
         }
     }
 
