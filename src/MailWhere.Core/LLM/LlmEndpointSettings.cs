@@ -26,7 +26,7 @@ public sealed record LlmEndpointSettings(
         Endpoint: string.Empty,
         Model: string.Empty,
         ApiKey: null,
-        TimeoutSeconds: 30);
+        TimeoutSeconds: 90);
 
     public bool CanCall => Enabled && Provider != LlmProviderKind.Disabled && !string.IsNullOrWhiteSpace(Endpoint) && !string.IsNullOrWhiteSpace(Model);
 

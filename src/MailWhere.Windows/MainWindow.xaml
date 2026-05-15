@@ -24,6 +24,14 @@
         <Style TargetType="ListBox">
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="ItemTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" TextWrapping="Wrap" LineHeight="19"/>
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="ListBoxItem">
             <Setter Property="Padding" Value="10,8"/>
@@ -66,6 +74,7 @@
                     <Button Click="RunDiagnostics_Click">진단 실행</Button>
                     <Button Click="OpenDailyBoard_Click">업무 보드</Button>
                     <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Background="#2458F2" Foreground="White">최근 1개월 스캔</Button>
+                    <Button x:Name="StopScanButton" Click="StopScan_Click" Visibility="Collapsed" Background="#F04438" Foreground="White">스캔 중지</Button>
                     <Button Click="TestNotification_Click">알림 테스트</Button>
                 </StackPanel>
             </DockPanel>
@@ -102,7 +111,7 @@
                                     </Grid>
                                     <TextBlock Text="마감은 비워둘 수 있습니다. '내일', '금요일', '2026-05-20' 같은 표현을 우선 지원합니다." Foreground="#667085" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
-                                <ListBox x:Name="TasksList" FontSize="14"/>
+                                <ListBox x:Name="TasksList" FontSize="14" MouseDoubleClick="OpenSelectedTaskMail_DoubleClick"/>
                             </DockPanel>
                         </TabItem>
                         <TabItem x:Name="ReviewTab" Header="검토함">
@@ -111,11 +120,12 @@
                                     <TextBlock Text="확신이 낮아 자동 등록하지 않은 후보입니다. 메일 원문 없이 짧은 근거만 보여주며, 선택한 후보를 바로 할 일로 등록하거나 무시할 수 있습니다." TextWrapping="Wrap" Foreground="#667085" Margin="0,0,0,10"/>
                                     <StackPanel Orientation="Horizontal">
                                         <Button Click="ApproveSelectedReview_Click" Background="#2458F2" Foreground="White">선택 항목 등록 (Alt+A)</Button>
+                                        <Button Click="OpenSelectedReviewMail_Click">원본 메일 열기</Button>
                                         <Button Click="SnoozeSelectedReview_Click">나중에 보기 (Alt+S)</Button>
                                         <Button Click="IgnoreSelectedReview_Click">선택 항목 무시 (Alt+I)</Button>
                                     </StackPanel>
                                 </StackPanel>
-                                <ListBox x:Name="ReviewCandidatesList" FontSize="14"/>
+                                <ListBox x:Name="ReviewCandidatesList" FontSize="14" MouseDoubleClick="OpenSelectedReviewMail_DoubleClick"/>
                             </DockPanel>
                         </TabItem>
                         <TabItem Header="진단 로그">
@@ -172,6 +182,8 @@
                                 <TextBox x:Name="ReminderLookAheadText"/>
                                 <TextBlock Text="오늘의 업무 보드 시간" FontWeight="SemiBold"/>
                                 <TextBox x:Name="DailyBoardTimeText" ToolTip="기본 08:00. 이 시간이 지난 뒤 앱이 켜지면 다음 정시에 한 번 표시합니다."/>
+                                <TextBlock Text="LLM timeout(초)" FontWeight="SemiBold"/>
+                                <TextBox x:Name="LlmTimeoutText" ToolTip="로컬 30B 이상 모델은 90~180초를 권장합니다."/>
                                 <TextBlock Text="Bearer token 환경 변수(선택)" FontWeight="SemiBold"/>
                                 <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: LOCAL_LLM_TOKEN. 토큰 값 자체는 앱 설정에 저장하지 마세요."/>
                                 <TextBlock Text="LLM 분석 실패 처리" FontWeight="SemiBold"/>

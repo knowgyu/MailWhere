@@ -1,7 +1,9 @@
 using System.Windows;
+using System.Windows.Input;
 using MailWhere.Core.Domain;
 using MailWhere.Core.Localization;
 using MailWhere.Core.Reminders;
+using MailWhere.OutlookCom;
 
 namespace MailWhere.Windows;
 
@@ -43,7 +45,8 @@ public partial class DailyBoardWindow : Window
         foreach (var task in tasks)
         {
             var due = task.DueAt is null ? "마감 없음" : $"{DdayFormatter.Format(task.DueAt.Value, now)} · {task.DueAt.Value:MM/dd HH:mm}";
-            list.Items.Add($"{due}  |  {task.Title}  |  {task.Reason}");
+            var display = $"{due} · {CompactLine(task.Title, 42)}\n{CompactLine(task.Reason, 70)}";
+            list.Items.Add(new BoardItem(display, task.SourceId));
         }
 
         if (tasks.Count == 0)
@@ -60,7 +63,8 @@ public partial class DailyBoardWindow : Window
             var due = candidate.Analysis.DueAt is null
                 ? "마감 불명"
                 : $"{DdayFormatter.Format(candidate.Analysis.DueAt.Value, DateTimeOffset.Now)} · {candidate.Analysis.DueAt.Value:MM/dd HH:mm}";
-            ReviewList.Items.Add($"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {candidate.Analysis.Confidence:P0} · {due}  |  {candidate.Analysis.SuggestedTitle}");
+            var display = $"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {due} · 신뢰도 {candidate.Analysis.Confidence:P0}\n{CompactLine(candidate.Analysis.SuggestedTitle, 42)}\n{CompactLine(candidate.Analysis.Reason, 70)}";
+            ReviewList.Items.Add(new BoardItem(display, candidate.SourceId));
         }
 
         if (candidates.Count == 0)
@@ -80,4 +84,37 @@ public partial class DailyBoardWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private async void OpenSelectedMail_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ListBox list || list.SelectedItem is not BoardItem item)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(item.SourceId))
+        {
+            SubtitleText.Text = "이 항목은 원본 메일 연결 정보가 없습니다.";
+            return;
+        }
+
+        var result = await new OutlookComMailOpener().OpenAsync(item.SourceId);
+        SubtitleText.Text = result.Success ? result.Message : $"원본 메일 열기 실패: {result.Message}";
+    }
+
+    private static string CompactLine(string? value, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "-";
+        }
+
+        var compact = string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return compact.Length <= maxChars ? compact : compact[..maxChars].TrimEnd() + "…";
+    }
+
+    private sealed record BoardItem(string Display, string? SourceId)
+    {
+        public override string ToString() => Display;
+    }
 }

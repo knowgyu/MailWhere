@@ -66,6 +66,18 @@ Not included yet:
 - Toast notification history/quiet hours.
 - Reply drafts or agentic mail mutation.
 
+## Release 0.1.5 — local LLM scan control and action-first board
+
+Goal: qwen-class local models can handle initial mail scans without making the app look frozen, and the board shows the required action rather than long mail-subject strings.
+
+Included:
+
+- Ollama native requests use `think=false`, short JSON prompts, generation caps, and small batch analysis.
+- LLM timeout creates retryable review candidates and does not kill the entire scan.
+- Manual scan has a stop button and progress before each item/batch.
+- Tasks/review candidates can carry a local source id so double-click can open the Outlook original read-only.
+- Board/list cards wrap concise due/action/reason text instead of long one-line rows.
+
 ## Phase 0.2 — false positive control and daily-use inbox
 
 Priority: high.

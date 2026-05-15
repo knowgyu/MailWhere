@@ -20,9 +20,19 @@
   "LlmProvider": "OllamaNative",
   "LlmEndpoint": "http://localhost:11434",
   "LlmModel": "",
+  "LlmTimeoutSeconds": 90,
   "LlmFallbackPolicy": "LlmOnly"
 }
 ```
+
+Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다.
+
+- `think=false`: Qwen 계열처럼 thinking-capable 모델이 긴 내부 reasoning을 하느라 느려지는 것을 줄입니다.
+- `format=json`: JSON object 출력을 요구합니다.
+- `num_predict=768`: 필요한 구조화 결과 이상으로 길게 생성하지 않게 제한합니다.
+- `keep_alive=10m`: 대량 스캔 중 모델이 자주 unload되는 것을 줄입니다.
+
+초기/대량 스캔에서는 작은 batch 단위로 여러 메일을 한 번에 분석합니다. 단, 각 메일 결과는 독립 JSON item으로 매핑하고, 실패/timeout이 나면 자동 등록하지 않고 retry 가능한 검토 후보로 남깁니다.
 
 ## OpenAI-compatible Chat Completions 예시
 
@@ -84,9 +94,11 @@ endpoint가 이미 `/v1`로 끝나면 중복으로 `/v1/v1/models`가 되지 않
 - `timeout`: 설정된 timeout 안에 응답하지 않음
 - `http-error`: endpoint 연결/HTTP 오류
 
+로컬 30B 이상 모델은 첫 호출이나 긴 메일에서 30초를 넘길 수 있으므로 기본 timeout은 90초입니다. 필요하면 고급 설정에서 5~180초 범위로 조정합니다. 사용자가 [스캔 중지]를 누른 cancellation은 timeout과 구분되어 즉시 스캔을 멈춥니다.
+
 ## 보안 원칙
 
 - prompt와 raw mail body는 저장하지 않습니다.
-- SQLite에는 source hash, 짧은 제목/사유/근거 snippet만 저장합니다.
+- SQLite에는 source hash, 짧은 제목/사유/근거 snippet을 저장합니다. Outlook 원본 메일 열기를 위해 새 항목에는 로컬 source id도 저장하며, source-derived data 삭제 시 함께 제거합니다.
 - 외부 네트워크 LLM은 기본 사용 시나리오가 아닙니다. 승인된 보안 정책이 허용할 때만 켭니다.
 - LLM JSON 파싱이 실패하면 선택한 `LlmFallbackPolicy`에 따라 검토함에 남기거나 rule-based analyzer로 fallback합니다.

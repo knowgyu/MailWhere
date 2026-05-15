@@ -8,6 +8,7 @@ internal static class Schema
             title TEXT NOT NULL,
             due_at TEXT NULL,
             source_id_hash TEXT NULL,
+            source_id TEXT NULL,
             confidence REAL NOT NULL,
             reason TEXT NOT NULL,
             evidence_snippet TEXT NULL,
@@ -21,6 +22,7 @@ internal static class Schema
         CREATE TABLE IF NOT EXISTS review_candidates (
             id TEXT PRIMARY KEY,
             source_id_hash TEXT NOT NULL,
+            source_id TEXT NULL,
             kind TEXT NOT NULL,
             confidence REAL NOT NULL,
             suggested_title TEXT NOT NULL,

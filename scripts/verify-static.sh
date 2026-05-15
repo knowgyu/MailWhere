@@ -27,8 +27,15 @@ for f in "${required[@]}"; do
 done
 
 echo "[static] Checking Phase 0/1 Outlook adapter forbidden mutation calls"
-if grep -RInE '\.(Send|Delete|Move|Save|Reply|ReplyAll|Forward)\s*\(|\bUnRead\s*=|\bCategories\s*=|\bFlagStatus\s*=|\bSaveAsFile\s*\(|\bDisplay\s*\(' src/MailWhere.OutlookCom; then
+if grep -RInE '\.(Send|Delete|Move|Save|Reply|ReplyAll|Forward)\s*\(|\bUnRead\s*=|\bCategories\s*=|\bFlagStatus\s*=|\bSaveAsFile\s*\(' src/MailWhere.OutlookCom; then
   echo "Forbidden Outlook mutation/display/attachment call found" >&2
+  exit 1
+fi
+
+display_hits=$(grep -RInE '\bDisplay\s*\(' src/MailWhere.OutlookCom || true)
+if [[ -n "$display_hits" ]] && ! grep -q 'OutlookComMailOpener.cs' <<<"$display_hits"; then
+  echo "$display_hits"
+  echo "Unexpected Outlook Display call found outside audited read-only opener" >&2
   exit 1
 fi
 

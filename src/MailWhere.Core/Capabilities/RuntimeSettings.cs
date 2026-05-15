@@ -35,7 +35,7 @@ public sealed record RuntimeSettings(
         LlmModel: string.Empty,
         LlmApiKey: null,
         LlmApiKeyEnvironmentVariable: null,
-        LlmTimeoutSeconds: 30,
+        LlmTimeoutSeconds: 90,
         LlmFallbackPolicy: LlmFallbackPolicy.LlmOnly,
         RecentScanDays: 30,
         RecentScanMaxItems: 0,

@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _reminderTimer;
     private DispatcherTimer? _dailyBoardTimer;
     private DispatcherTimer? _automaticScanTimer;
+    private CancellationTokenSource? _scanCancellationSource;
     private bool _scanInProgress;
     private bool _fallbackPromptShownThisSession;
     private DailyBoardWindow? _dailyBoardWindow;
@@ -38,11 +39,16 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        _settings = WindowsRuntimeSettingsStore.Load();
+        _settings = UpgradeRuntimeSettings(WindowsRuntimeSettingsStore.Load());
         StartupToggle.IsChecked = IsStartupRegistered();
         ApplySettingsToControls(_settings);
         Loaded += async (_, _) => await OnLoadedAsync();
     }
+
+    private static RuntimeSettings UpgradeRuntimeSettings(RuntimeSettings settings) =>
+        settings.ExternalLlmEnabled && settings.LlmTimeoutSeconds == 30
+            ? settings with { LlmTimeoutSeconds = RuntimeSettings.ManagedSafeDefault.LlmTimeoutSeconds }
+            : settings;
 
     public void SetNotificationSink(IUserNotificationSink notificationSink)
     {
@@ -87,6 +93,18 @@ public partial class MainWindow : Window
         {
             await ShowErrorAsync("최근 메일 스캔 실패", ex);
         }
+    }
+
+    private void StopScan_Click(object sender, RoutedEventArgs e)
+    {
+        if (_scanCancellationSource is null || _scanCancellationSource.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _scanCancellationSource.Cancel();
+        StatusText.Text = "스캔 중지를 요청했습니다. 현재 LLM 요청이 정리되면 멈춥니다.";
+        ScanProgressText.Text = "중지 요청됨…";
     }
 
     private async void OpenDailyBoard_Click(object sender, RoutedEventArgs e)
@@ -263,6 +281,9 @@ public partial class MainWindow : Window
         }
 
         _scanInProgress = true;
+        _scanCancellationSource?.Dispose();
+        _scanCancellationSource = new CancellationTokenSource();
+        var scanCancellationToken = _scanCancellationSource.Token;
         SetScanBusy(true, "스캔 준비 중입니다…");
         try
         {
@@ -289,7 +310,7 @@ public partial class MainWindow : Window
                 now.AddDays(-_settings.RecentScanDays));
             var progress = new Progress<MailScanProgress>(UpdateScanProgress);
 
-            var summary = await scanner.ScanAsync(request, progress);
+            var summary = await scanner.ScanAsync(request, progress, scanCancellationToken);
             _lastAnalysisTelemetry = analyzer is IAnalysisTelemetrySource telemetrySource
                 ? telemetrySource.GetTelemetrySnapshot()
                 : AnalysisTelemetry.Empty;
@@ -330,8 +351,16 @@ public partial class MainWindow : Window
 
             return summary;
         }
+        catch (OperationCanceledException) when (scanCancellationToken.IsCancellationRequested)
+        {
+            StatusText.Text = "사용자 요청으로 스캔을 중지했습니다. 이미 처리된 항목은 유지됩니다.";
+            ScanProgressText.Text = "스캔 중지됨";
+            return new MailScanSummary(0, 0, 0, 0, 0, 0, Array.Empty<MailReadWarning>());
+        }
         finally
         {
+            _scanCancellationSource?.Dispose();
+            _scanCancellationSource = null;
             _scanInProgress = false;
             SetScanBusy(false, "대기 중입니다.");
         }
@@ -472,6 +501,30 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OpenSelectedReviewMail_Click(object sender, RoutedEventArgs e)
+    {
+        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
+        {
+            await OpenSourceMailAsync(item.Candidate.SourceId);
+        }
+    }
+
+    private async void OpenSelectedReviewMail_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
+        {
+            await OpenSourceMailAsync(item.Candidate.SourceId);
+        }
+    }
+
+    private async void OpenSelectedTaskMail_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (TasksList.SelectedItem is TaskListItem item)
+        {
+            await OpenSourceMailAsync(item.Task.SourceId);
+        }
+    }
+
     private async void MainWindow_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if ((Keyboard.Modifiers & ModifierKeys.Alt) != ModifierKeys.Alt)
@@ -514,7 +567,9 @@ public partial class MainWindow : Window
         foreach (var task in tasks)
         {
             var due = task.DueAt is null ? "마감 없음" : $"{DdayFormatter.Format(task.DueAt.Value, now)} · {task.DueAt.Value:MM/dd HH:mm}";
-            TasksList.Items.Add($"{due}  |  {task.Title}  |  신뢰도 {task.Confidence:P0}");
+            var display = $"{due} · {CompactLine(task.Title, 42)}\n{CompactLine(task.Reason, 70)} · 신뢰도 {task.Confidence:P0}"
+                          + (string.IsNullOrWhiteSpace(task.SourceId) ? string.Empty : "\n더블클릭하면 Outlook 원본 메일을 엽니다.");
+            TasksList.Items.Add(new TaskListItem(task, display));
         }
 
         if (tasks.Count == 0)
@@ -533,7 +588,7 @@ public partial class MainWindow : Window
             var due = candidate.Analysis.DueAt is null ? "마감 불명" : $"{DdayFormatter.Format(candidate.Analysis.DueAt.Value, DateTimeOffset.Now)} · {candidate.Analysis.DueAt.Value:MM/dd HH:mm}";
             ReviewCandidatesList.Items.Add(new ReviewCandidateListItem(
                 candidate,
-                $"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {candidate.Analysis.Confidence:P0} · {due}  |  {candidate.Analysis.SuggestedTitle}  |  {candidate.Analysis.Reason}"));
+                $"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {due} · 신뢰도 {candidate.Analysis.Confidence:P0}\n{CompactLine(candidate.Analysis.SuggestedTitle, 42)}\n{CompactLine(candidate.Analysis.Reason, 70)}"));
         }
 
         if (candidates.Count == 0)
@@ -542,6 +597,37 @@ public partial class MainWindow : Window
         }
 
         return candidates;
+    }
+
+    private static string CompactLine(string? value, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "-";
+        }
+
+        var compact = string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return compact.Length <= maxChars ? compact : compact[..maxChars].TrimEnd() + "…";
+    }
+
+    private async Task OpenSourceMailAsync(string? sourceId)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            StatusText.Text = "이 항목은 원본 메일 연결 정보가 없습니다. 새 버전에서 다시 스캔한 항목부터 열 수 있습니다.";
+            return;
+        }
+
+        try
+        {
+            StatusText.Text = "Outlook에서 원본 메일을 여는 중입니다…";
+            var result = await new OutlookComMailOpener().OpenAsync(sourceId);
+            StatusText.Text = result.Success ? result.Message : $"원본 메일 열기 실패: {result.Message}";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"원본 메일 열기 실패: {ex.GetType().Name}";
+        }
     }
 
     private async Task MaybeShowDailyBoardAsync()
@@ -732,7 +818,7 @@ public partial class MainWindow : Window
             LlmEndpoint: LlmEndpointText.Text,
             LlmModel: LlmModelBox.Text,
             LlmApiKeyEnvironmentVariable: LlmApiKeyEnvText.Text,
-            LlmTimeoutSeconds: defaults.LlmTimeoutSeconds,
+            LlmTimeoutSeconds: ParseInt(LlmTimeoutText.Text, defaults.LlmTimeoutSeconds),
             LlmFallbackPolicy: ParseFallbackPolicy(((ComboBoxItem?)LlmFallbackPolicyBox.SelectedItem)?.Tag?.ToString()),
             RecentScanDays: ParseInt(ScanDaysText.Text, defaults.RecentScanDays),
             RecentScanMaxItems: ParseInt(MaxItemsText.Text, defaults.RecentScanMaxItems),
@@ -751,6 +837,7 @@ public partial class MainWindow : Window
         MaxItemsText.Text = settings.RecentScanMaxItems == 0 ? string.Empty : settings.RecentScanMaxItems.ToString();
         ReminderLookAheadText.Text = settings.ReminderLookAheadHours.ToString();
         DailyBoardTimeText.Text = settings.DailyBoardTime;
+        LlmTimeoutText.Text = settings.LlmTimeoutSeconds.ToString();
         LlmStatusText.Text = "LLM 연결 테스트 전입니다.";
         var visibleProvider = settings.LlmProvider == LlmProviderKind.Disabled
             ? LlmProviderKind.OllamaNative
@@ -849,6 +936,8 @@ public partial class MainWindow : Window
     private void SetScanBusy(bool busy, string message)
     {
         ScanRecentMonthButton.IsEnabled = !busy;
+        StopScanButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        StopScanButton.IsEnabled = busy;
         ScanProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressText.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressText.Text = message;
@@ -861,6 +950,7 @@ public partial class MainWindow : Window
         LlmProviderBox.IsEnabled = enabled;
         LlmEndpointText.IsEnabled = enabled;
         LlmModelBox.IsEnabled = enabled;
+        LlmTimeoutText.IsEnabled = !_scanInProgress && LlmEnabledToggle.IsChecked == true;
         TestLlmEndpointButton.IsEnabled = enabled;
         LoadLlmModelsButton.IsEnabled = enabled;
     }
@@ -939,6 +1029,11 @@ public partial class MainWindow : Window
     }
 
     private sealed record ReviewCandidateListItem(ReviewCandidate Candidate, string Display)
+    {
+        public override string ToString() => Display;
+    }
+
+    private sealed record TaskListItem(LocalTaskItem Task, string Display)
     {
         public override string ToString() => Display;
     }

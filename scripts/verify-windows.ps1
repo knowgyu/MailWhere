@@ -31,10 +31,17 @@ Write-Host "[windows] test harness"
 Invoke-Native { dotnet run --project .\tests\MailWhere.TestHarness\MailWhere.TestHarness.csproj -c Release --no-build }
 
 Write-Host "[windows] forbidden Outlook mutation scan"
-$forbidden = Select-String -Path .\src\MailWhere.OutlookCom\*.cs, .\src\MailWhere.Windows\*.cs -Pattern '\.(Send|Delete|Move|Save|Reply|ReplyAll|Forward)\s*\(|\bUnRead\s*=|\bCategories\s*=|\bFlagStatus\s*=|\bSaveAsFile\s*\(|\bDisplay\s*\('
+$forbidden = Select-String -Path .\src\MailWhere.OutlookCom\*.cs, .\src\MailWhere.Windows\*.cs -Pattern '\.(Send|Delete|Move|Save|Reply|ReplyAll|Forward)\s*\(|\bUnRead\s*=|\bCategories\s*=|\bFlagStatus\s*=|\bSaveAsFile\s*\('
 if ($forbidden) {
     $forbidden | Format-List
     throw "Forbidden Outlook mutation/display/attachment call found."
+}
+
+$display = Select-String -Path .\src\MailWhere.OutlookCom\*.cs -Pattern '\bDisplay\s*\('
+$unexpectedDisplay = $display | Where-Object { $_.Path -notlike '*OutlookComMailOpener.cs' }
+if ($unexpectedDisplay) {
+    $unexpectedDisplay | Format-List
+    throw "Unexpected Outlook Display call found outside audited read-only opener."
 }
 
 Write-Host "[windows] OK"

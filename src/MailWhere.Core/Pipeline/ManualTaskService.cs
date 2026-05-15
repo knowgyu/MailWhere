@@ -27,6 +27,7 @@ public sealed class ManualTaskService
             title.Trim(),
             dueAt,
             null,
+            null,
             1.0,
             "Manual task",
             null,

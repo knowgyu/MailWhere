@@ -17,6 +17,7 @@
   - OpenAI-compatible local server `/v1/responses`
 - endpoint에서 모델 목록 불러오기 + LLM 연결 테스트
 - 스캔별 LLM 시도/성공/fallback/실패 요약
+- Ollama 분석 시 thinking 비활성화, 짧은 JSON 출력 제한, 소규모 batch 분석
 - LLM 실패 후보는 중복 생성하지 않고, endpoint 복구 후 같은 메일을 다시 분석
 - RE/FW 제목 정규화와 현재 작성부/전달 맥락/인용 히스토리 분리
 - 같은 스레드에서 반복되는 동일 action item 중복 생성 억제
@@ -27,7 +28,8 @@
 - 상단 버튼 또는 tray 우클릭에서 오늘의 업무 보드 다시 열기
 - 초기/대량 스캔 시 후보별 팝업 폭탄 대신 scan summary 1회 + 검토함/보드 중심 처리
 - 검토 후보 버튼 처리와 충돌 적은 Alt+A 등록 / Alt+S 나중에 보기 / Alt+I 무시 단축키
-- 스캔 중 진행 상태 표시와 스캔 버튼 잠금
+- 스캔 중 진행 상태 표시, 중지 버튼, timeout 발생 시 전체 스캔 중단 방지
+- 업무 보드/검토함 항목 더블클릭 시 가능한 경우 Outlook 원본 메일 열기
 - D-day 표시와 D-7/D-1/D-day reminder planning
 - tray 상주 + 앱 자체 우하단 토스트 알림 스택
 - GitHub Actions Windows portable zip 빌드
@@ -61,7 +63,7 @@ cd MailWhere
 출력:
 
 ```text
-artifacts/MailWhere-v0.1.4-win-x64-portable.zip
+artifacts/MailWhere-v0.1.5-win-x64-portable.zip
 ```
 
 ## LLM endpoint
@@ -77,11 +79,12 @@ artifacts/MailWhere-v0.1.4-win-x64-portable.zip
   "LlmProvider": "OllamaNative",
   "LlmEndpoint": "http://localhost:11434",
   "LlmModel": "",
+  "LlmTimeoutSeconds": 90,
   "LlmFallbackPolicy": "LlmOnly"
 }
 ```
 
-vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 기본 모델명은 비워두고, 앱의 **모델 불러오기** 버튼으로 `/api/tags` 또는 `/v1/models`에서 목록을 가져와 선택하는 흐름을 권장합니다. **연결 테스트**는 메일 내용이 아닌 작은 JSON probe만 보냅니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
+vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 기본 모델명은 비워두고, 앱의 **모델 불러오기** 버튼으로 `/api/tags` 또는 `/v1/models`에서 목록을 가져와 선택하는 흐름을 권장합니다. **연결 테스트**는 메일 내용이 아닌 작은 JSON probe만 보냅니다. Ollama native 호출은 Qwen 계열 같은 thinking-capable 모델을 업무 triage에 맞게 `think=false`와 짧은 출력 제한으로 호출합니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
 
 ## 문서
 

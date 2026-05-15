@@ -49,27 +49,39 @@ public sealed class MailActionScanner
         var duplicate = 0;
         var processed = 0;
 
-        foreach (var message in result.Messages)
+        var batchSize = Math.Max(1, _pipeline.PreferredBatchSize);
+        for (var start = 0; start < result.Messages.Count; start += batchSize)
         {
-            var outcome = await _pipeline.ProcessAsync(message, cancellationToken).ConfigureAwait(false);
-            processed++;
-            switch (outcome.Kind)
-            {
-                case PipelineOutcomeKind.TaskCreated:
-                    created++;
-                    break;
-                case PipelineOutcomeKind.ReviewCandidateCreated:
-                    review++;
-                    break;
-                case PipelineOutcomeKind.Ignored:
-                    ignored++;
-                    break;
-                case PipelineOutcomeKind.Duplicate:
-                    duplicate++;
-                    break;
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            var batch = result.Messages.Skip(start).Take(batchSize).ToArray();
+            var nextCount = Math.Min(result.Messages.Count, start + batch.Length);
+            var message = batch.Length == 1
+                ? $"메일 분석 중 {start + 1}/{result.Messages.Count} · 오래 걸리면 중지할 수 있습니다"
+                : $"메일 분석 중 {start + 1}-{nextCount}/{result.Messages.Count} · 오래 걸리면 중지할 수 있습니다";
+            progress?.Report(new MailScanProgress("analyzing", processed, result.Messages.Count, message));
 
-            progress?.Report(new MailScanProgress("analyzing", processed, result.Messages.Count, $"메일 분석 중 {processed}/{result.Messages.Count}"));
+            var outcomes = await _pipeline.ProcessBatchAsync(batch, cancellationToken).ConfigureAwait(false);
+            foreach (var outcome in outcomes)
+            {
+                processed++;
+                switch (outcome.Kind)
+                {
+                    case PipelineOutcomeKind.TaskCreated:
+                        created++;
+                        break;
+                    case PipelineOutcomeKind.ReviewCandidateCreated:
+                        review++;
+                        break;
+                    case PipelineOutcomeKind.Ignored:
+                        ignored++;
+                        break;
+                    case PipelineOutcomeKind.Duplicate:
+                        duplicate++;
+                        break;
+                }
+
+                progress?.Report(new MailScanProgress("analyzing", processed, result.Messages.Count, $"메일 분석 중 {processed}/{result.Messages.Count}"));
+            }
         }
 
         progress?.Report(new MailScanProgress("completed", processed, result.Messages.Count, "최근 1개월 스캔이 완료되었습니다."));

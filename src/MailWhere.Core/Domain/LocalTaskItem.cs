@@ -14,6 +14,7 @@ public sealed record LocalTaskItem(
     string Title,
     DateTimeOffset? DueAt,
     string? SourceIdHash,
+    string? SourceId,
     double Confidence,
     string Reason,
     string? EvidenceSnippet,
@@ -37,6 +38,7 @@ public sealed record LocalTaskItem(
             title,
             analysis.DueAt,
             source.SourceHash,
+            source.SourceId,
             analysis.Confidence,
             EvidencePolicy.Truncate(analysis.Reason) ?? "메일 후속 조치 분석",
             EvidencePolicy.Truncate(analysis.EvidenceSnippet),
@@ -65,6 +67,7 @@ public sealed record LocalTaskItem(
         Title = RedactedTitle,
         Reason = RedactedReason,
         EvidenceSnippet = null,
+        SourceId = null,
         SourceDerivedDataDeleted = true,
         UpdatedAt = now
     };
