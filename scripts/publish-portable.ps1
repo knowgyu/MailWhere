@@ -80,8 +80,19 @@ try {
     Write-Warning "Could not read git commit for build manifest: $($_.Exception.Message)"
 }
 
+$version = "unknown"
+try {
+    $version = (& dotnet msbuild .\src\MailWhere.Windows\MailWhere.Windows.csproj -nologo -getProperty:Version).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet msbuild -getProperty:Version failed with exit code $LASTEXITCODE"
+    }
+} catch {
+    Write-Warning "Could not read project version for build manifest: $($_.Exception.Message)"
+}
+
 $manifest = [ordered]@{
     name = "MailWhere"
+    version = $version
     package = "$appName-portable.zip"
     configuration = $Configuration
     runtimeIdentifier = $RuntimeIdentifier

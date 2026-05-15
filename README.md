@@ -17,6 +17,9 @@
   - OpenAI-compatible local server `/v1/responses`
 - endpoint에서 모델 목록 불러오기 + LLM 연결 테스트
 - 스캔별 LLM 시도/성공/fallback/실패 요약
+- RE/FW 제목 정규화와 현재 작성부/전달 맥락/인용 히스토리 분리
+- 같은 스레드에서 반복되는 동일 action item 중복 생성 억제
+- 명시적으로 다른 사람에게 배정된 요청은 내 업무로 자동 등록하지 않음
 - SQLite 로컬 task 저장
 - 낮은 확신 후보를 검토함에 표시
 - 기본 08:00 오늘의 업무 보드 창 표시(이후 실행 시 다음 정시)
