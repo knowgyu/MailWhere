@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-portable:
     name: Build portable Windows artifact
-    runs-on: windows-2022
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       DOTNET_NOLOGO: 'true'
@@ -35,10 +35,10 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Resolve package version
-        shell: pwsh
+        shell: bash
         run: |
-          $version = (dotnet msbuild .\src\MailWhere.Windows\MailWhere.Windows.csproj -nologo -getProperty:Version).Trim()
-          "PACKAGE_VERSION=v$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          version="$(dotnet msbuild ./src/MailWhere.Windows/MailWhere.Windows.csproj -nologo -getProperty:Version | tr -d '\r' | xargs)"
+          echo "PACKAGE_VERSION=v$version" >> "$GITHUB_ENV"
 
       - name: Cache NuGet packages
         uses: actions/cache@v5.0.5
@@ -49,8 +49,8 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Verify and publish portable zip
-        shell: pwsh
-        run: ./scripts/publish-portable.ps1 -Configuration $env:BUILD_CONFIGURATION -RuntimeIdentifier $env:RUNTIME_IDENTIFIER
+        shell: bash
+        run: ./scripts/publish-portable.sh
 
       - name: Upload portable zip
         uses: actions/upload-artifact@v7.0.1
