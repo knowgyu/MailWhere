@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-portable:
     name: Build portable Windows artifact
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 30
     env:
       DOTNET_NOLOGO: 'true'
