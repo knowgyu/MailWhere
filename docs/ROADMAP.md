@@ -7,7 +7,7 @@ Goal: 집에서 빌드한 portable zip을 Windows 11에서 실행해 Outlook rea
 Included:
 
 - Classic Outlook COM read-only mail scan.
-- Recent N-day / max N mail scan.
+- Recent-month mail scan with optional advanced max-count cap.
 - Rule-based + optional LLM analyzer.
 - Ollama `/api/chat` and OpenAI-compatible `/v1/chat/completions` providers.
 - Local SQLite task storage with source-derived redaction.
@@ -22,21 +22,40 @@ Not included yet:
 - Mail mutation of any kind.
 - Attachment auto analysis.
 - Full calendar sync.
-- Review candidate approve/dismiss/edit actions.
+- Review candidate edit actions.
 - Native app-notification activation actions.
+
+## Release 0.1.2 — calm bulk scan and LLM visibility
+
+Goal: 초기/대량 스캔을 상시 비서답게 조용하게 만들고, LLM endpoint 동작 여부를 사용자가 직접 확인할 수 있게 한다.
+
+Included:
+
+- Initial/bulk scan suppresses per-candidate popup storms and emits one digest.
+- Daily board can be reopened from the main header or tray context menu.
+- Scan progress/busy state is visible before Outlook/LLM work finishes.
+- Recent-month scan defaults to date-window only; max-count is an advanced optional cap.
+- LLM endpoint test sends a non-mail JSON probe and reports sanitized success/failure.
+- LLM-enabled analysis is LLM-first, with explicit `LlmOnly` or `LlmThenRules` fallback policy.
+- Scan status includes LLM attempts, success, fallback, failure, and average response time.
+
+Not included yet:
+
+- Bulk triage edit/snooze controls.
+- Native Action Center click actions.
+- Reply drafts or agentic mail mutation.
 
 ## Phase 0.2 — false positive control and daily-use inbox
 
 Priority: high.
 
-- Daily board: default 08:00 board window, or the next top-of-hour when the app starts after the daily time.
-- Lightweight review popup: new review candidates can be accepted/ignored from the popup, with Ctrl+Y/Ctrl+N enabled only after deliberate popup focus.
+- Rich triage queue: card mode, bulk selection, snooze, due-date edit, and keyboard hints on visible buttons.
 - Conservative automatic scan timer after smoke gate so new review candidates surface while the app stays in tray.
 - Review tab: approve as task, dismiss as not-a-task, edit title/due date.
 - “왜 이게 떴는지” panel: summary/reason/evidence/confidence/fallback source.
 - Feedback loop: candidate-id not-a-task decisions suppress the current candidate; future duplicate suppression should stay non-destructive and avoid source-wide redaction.
 - Scan result grouping: task created / review / ignored / duplicate / warning.
-- LLM quality counters: invalid JSON, timeout, fallback rate.
+- Candidate-level LLM source markers: LLM result vs rule fallback vs LLM failure review.
 
 Acceptance:
 

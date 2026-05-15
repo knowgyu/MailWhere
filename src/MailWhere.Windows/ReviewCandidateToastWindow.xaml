@@ -18,10 +18,10 @@
             </StackPanel>
 
             <DockPanel DockPanel.Dock="Bottom" Margin="0,14,0,0">
-                <TextBlock DockPanel.Dock="Left" Text="팝업 클릭 후 Ctrl+Y 등록 · Ctrl+N 무시" Foreground="#2458F2" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBlock DockPanel.Dock="Left" Text="Alt+A 등록 · Alt+I 무시" Foreground="#2458F2" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Click="Approve_Click" Padding="10,6" Margin="0,0,8,0" Background="#2458F2" Foreground="White" FontWeight="SemiBold">등록</Button>
-                    <Button Click="Ignore_Click" Padding="10,6" Background="#EEF2F7" Foreground="#334155" FontWeight="SemiBold">무시</Button>
+                    <Button Click="Approve_Click" Padding="10,6" Margin="0,0,8,0" Background="#2458F2" Foreground="White" FontWeight="SemiBold">등록 (Alt+A)</Button>
+                    <Button Click="Ignore_Click" Padding="10,6" Background="#EEF2F7" Foreground="#334155" FontWeight="SemiBold">무시 (Alt+I)</Button>
                 </StackPanel>
             </DockPanel>
         </DockPanel>

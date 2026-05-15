@@ -35,17 +35,17 @@ public partial class ReviewCandidateToastWindow : Window
             return;
         }
 
-        if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
+        if ((Keyboard.Modifiers & ModifierKeys.Alt) != ModifierKeys.Alt)
         {
             return;
         }
 
-        if (e.Key == Key.Y)
+        if (e.Key == Key.A)
         {
             e.Handled = true;
             await CompleteAsync(_approveAsync);
         }
-        else if (e.Key == Key.N)
+        else if (e.Key == Key.I)
         {
             e.Handled = true;
             await CompleteAsync(_ignoreAsync);

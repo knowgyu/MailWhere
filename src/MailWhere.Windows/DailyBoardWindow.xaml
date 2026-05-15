@@ -72,7 +72,7 @@
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                         <TextBlock Text="확인 필요" FontSize="17" FontWeight="Bold"/>
-                        <TextBlock Text="애매한 후보는 검토함에서 등록/무시할 수 있고, 새 후보 팝업은 클릭 후 Ctrl+Y 등록 / Ctrl+N 무시를 지원합니다." TextWrapping="Wrap" Foreground="#667085" FontSize="12" Margin="0,4,0,0"/>
+                        <TextBlock Text="애매한 후보는 팝업으로 쏟아내지 않고 보드/검토함에 모읍니다. 필요할 때 MailWhere 검토함에서 등록하거나 무시하세요." TextWrapping="Wrap" Foreground="#667085" FontSize="12" Margin="0,4,0,0"/>
                     </StackPanel>
                     <ListBox x:Name="ReviewList"/>
                 </DockPanel>

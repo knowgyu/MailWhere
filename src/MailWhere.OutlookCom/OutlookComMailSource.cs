@@ -20,17 +20,13 @@ public sealed class OutlookComMailSource : IEmailSource
 
     public EmailReadResult ReadRecentInboxMessages(MailReadRequest request, CancellationToken cancellationToken = default)
     {
-        if (request.MaxItems <= 0)
-        {
-            return new EmailReadResult(Array.Empty<EmailSnapshot>(), Array.Empty<MailReadWarning>(), 0);
-        }
-
         object? outlook = null;
         object? session = null;
         object? inbox = null;
         object? items = null;
         var warnings = new List<MailReadWarning>();
-        var messages = new List<EmailSnapshot>(request.MaxItems);
+        var limit = request.MaxItems <= 0 ? int.MaxValue : request.MaxItems;
+        var messages = new List<EmailSnapshot>(Math.Min(limit, 512));
         var skipped = 0;
 
         try
@@ -56,7 +52,7 @@ public sealed class OutlookComMailSource : IEmailSource
             ((dynamic)items).Sort("[ReceivedTime]", true);
 
             int total = Convert.ToInt32(((dynamic)items).Count);
-            for (var i = 1; i <= total && messages.Count < request.MaxItems; i++)
+            for (var i = 1; i <= total && messages.Count < limit; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 object? item = null;

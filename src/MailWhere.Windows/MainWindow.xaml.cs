@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -24,15 +25,13 @@ public partial class MainWindow : Window
     private SqliteFollowUpStore? _store;
     private IUserNotificationSink _notificationSink = new NullNotificationSink();
     private readonly NotificationThrottle _notificationThrottle = new(TimeSpan.FromHours(1));
-    private readonly Queue<ReviewCandidate> _pendingReviewToasts = new();
     private RuntimeSettings _settings;
     private DispatcherTimer? _reminderTimer;
     private DispatcherTimer? _dailyBoardTimer;
     private DispatcherTimer? _automaticScanTimer;
     private bool _scanInProgress;
     private DailyBoardWindow? _dailyBoardWindow;
-    private ReviewCandidateToastWindow? _reviewCandidateToast;
-    private bool _reviewCandidateToastOpening;
+    private AnalysisTelemetry _lastAnalysisTelemetry = AnalysisTelemetry.Empty;
 
     public MainWindow()
     {
@@ -88,6 +87,67 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OpenDailyBoard_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenDailyBoardAsync();
+    }
+
+    public async Task OpenDailyBoardAsync()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+        await ShowDailyBoardAsync(DateTimeOffset.Now, _settings.DailyBoardTime);
+    }
+
+    private async void TestLlmEndpoint_Click(object sender, RoutedEventArgs e)
+    {
+        if (_scanInProgress)
+        {
+            return;
+        }
+
+        try
+        {
+            var settings = ReadSettingsFromControls();
+            _settings = settings;
+            WindowsRuntimeSettingsStore.Save(settings);
+            LlmStatusText.Text = "LLM endpoint 연결을 테스트하는 중입니다…";
+            TestLlmEndpointButton.IsEnabled = false;
+            ScanRecentMonthButton.IsEnabled = false;
+            await Dispatcher.Yield(DispatcherPriority.Background);
+
+            var result = await LlmEndpointProbe.ProbeAsync(settings.ToLlmEndpointSettings());
+            LlmStatusText.Text = result.ToKoreanStatus();
+            DiagnosticsText.Text = JsonSerializer.Serialize(new
+            {
+                llmProbe = new
+                {
+                    success = result.Success,
+                    code = result.Code,
+                    provider = result.Provider,
+                    model = result.Model,
+                    durationMs = Math.Round(result.Duration.TotalMilliseconds)
+                }
+            }, new JsonSerializerOptions { WriteIndented = true });
+            StatusText.Text = result.Success
+                ? "LLM 연결 테스트가 성공했습니다."
+                : "LLM 연결 테스트가 실패했습니다. endpoint/model/provider를 확인하세요.";
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("LLM 연결 테스트 실패", ex);
+        }
+        finally
+        {
+            if (!_scanInProgress)
+            {
+                TestLlmEndpointButton.IsEnabled = true;
+                ScanRecentMonthButton.IsEnabled = true;
+            }
+        }
+    }
+
     private async void AddManualTask_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -135,6 +195,7 @@ public partial class MainWindow : Window
         }
 
         _scanInProgress = true;
+        SetScanBusy(true, "스캔 준비 중입니다…");
         try
         {
             if (refreshSettingsFromControls)
@@ -143,7 +204,8 @@ public partial class MainWindow : Window
                 WindowsRuntimeSettingsStore.Save(_settings);
             }
 
-            StatusText.Text = "최근 메일을 읽고 Action item을 분석하는 중입니다…";
+            StatusText.Text = "최근 1개월 메일을 읽고 Action item을 분석하는 중입니다…";
+            await Dispatcher.Yield(DispatcherPriority.Background);
 
             var store = await GetStoreAsync();
             var beforeCandidateIds = (await store.ListReviewCandidatesAsync())
@@ -157,8 +219,12 @@ public partial class MainWindow : Window
                 _settings.RecentScanMaxItems,
                 IncludeBody: true,
                 now.AddDays(-_settings.RecentScanDays));
+            var progress = new Progress<MailScanProgress>(UpdateScanProgress);
 
-            var summary = await scanner.ScanAsync(request);
+            var summary = await scanner.ScanAsync(request, progress);
+            _lastAnalysisTelemetry = analyzer is IAnalysisTelemetrySource telemetrySource
+                ? telemetrySource.GetTelemetrySnapshot()
+                : AnalysisTelemetry.Empty;
             var smokeGateRecorded = showSummaryNotification && MarkSmokeGatePassedAfterManualScan(summary);
             if (showSummaryNotification && smokeGateRecorded)
             {
@@ -171,17 +237,22 @@ public partial class MainWindow : Window
 
             await RefreshTasksAsync();
             var reviewCandidates = await RefreshReviewCandidatesAsync();
-            await NotifyDueRemindersAsync();
-            EnqueueReviewCandidateToasts(reviewCandidates.Where(candidate => !beforeCandidateIds.Contains(candidate.Id)));
+            if (!showSummaryNotification)
+            {
+                await NotifyDueRemindersAsync();
+            }
+            var newReviewCandidateCount = reviewCandidates.Count(candidate => !beforeCandidateIds.Contains(candidate.Id));
 
-            StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 검토 후보 {summary.ReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건"
+            var llmSummary = _lastAnalysisTelemetry.ToKoreanSummary();
+            LlmStatusText.Text = llmSummary;
+            StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 새 검토 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {llmSummary}"
                 + (smokeGateRecorded ? " · smoke gate 통과" : string.Empty);
             if (showSummaryNotification)
             {
                 await _notificationSink.ShowAsync(new UserNotification(
                     UserNotificationKind.ScanSummary,
                     "최근 메일 스캔 완료",
-                    $"할 일 {summary.TaskCreatedCount}건, 검토 후보 {summary.ReviewCandidateCount}건을 찾았습니다.",
+                    $"할 일 {summary.TaskCreatedCount}건, 새 검토 후보 {newReviewCandidateCount}건을 찾았습니다. 검토는 MailWhere 보드에서 확인하세요.",
                     "scan-summary"));
             }
 
@@ -190,6 +261,7 @@ public partial class MainWindow : Window
         finally
         {
             _scanInProgress = false;
+            SetScanBusy(false, "대기 중입니다.");
         }
     }
 
@@ -389,71 +461,6 @@ public partial class MainWindow : Window
         StatusText.Text = "오늘의 업무 보드를 표시했습니다.";
     }
 
-    private void EnqueueReviewCandidateToasts(IEnumerable<ReviewCandidate> candidates)
-    {
-        foreach (var candidate in candidates)
-        {
-            _pendingReviewToasts.Enqueue(candidate);
-        }
-
-        ShowNextPendingReviewCandidateToast();
-    }
-
-    private async void ShowNextPendingReviewCandidateToast()
-    {
-        if (_reviewCandidateToast is not null || _reviewCandidateToastOpening || _pendingReviewToasts.Count == 0)
-        {
-            return;
-        }
-
-        ReviewCandidate? candidate = null;
-        try
-        {
-            _reviewCandidateToastOpening = true;
-            var store = await GetStoreAsync();
-            while (_pendingReviewToasts.Count > 0)
-            {
-                var queuedCandidate = _pendingReviewToasts.Dequeue();
-                candidate = await store.GetReviewCandidateAsync(queuedCandidate.Id);
-                if (candidate is not null)
-                {
-                    break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _pendingReviewToasts.Clear();
-            _reviewCandidateToast = null;
-            await ShowErrorAsync("확인 필요 후보 알림 표시 실패", ex);
-            return;
-        }
-        finally
-        {
-            _reviewCandidateToastOpening = false;
-        }
-
-        if (candidate is null)
-        {
-            return;
-        }
-
-        var activeCandidate = candidate;
-        _reviewCandidateToast = new ReviewCandidateToastWindow(
-            activeCandidate,
-            () => ApproveReviewCandidateAsync(activeCandidate),
-            () => IgnoreReviewCandidateAsync(activeCandidate))
-        {
-            Owner = this
-        };
-        _reviewCandidateToast.Closed += (_, _) =>
-        {
-            _reviewCandidateToast = null;
-            ShowNextPendingReviewCandidateToast();
-        };
-        _reviewCandidateToast.Show();
-    }
-
     private async Task ApproveReviewCandidateAsync(ReviewCandidate candidate)
     {
         try
@@ -537,7 +544,7 @@ public partial class MainWindow : Window
         }
 
         var client = LlmClientFactory.Create(settings.ToLlmEndpointSettings());
-        return new LlmBackedFollowUpAnalyzer(client, rule);
+        return new LlmBackedFollowUpAnalyzer(client, rule, settings.LlmFallbackPolicy);
     }
 
     private static CapabilityProbeResult ProbeLlmSettings(RuntimeSettings settings)
@@ -586,6 +593,7 @@ public partial class MainWindow : Window
             LlmModel: LlmModelText.Text,
             LlmApiKeyEnvironmentVariable: LlmApiKeyEnvText.Text,
             LlmTimeoutSeconds: defaults.LlmTimeoutSeconds,
+            LlmFallbackPolicy: ParseFallbackPolicy(((ComboBoxItem?)LlmFallbackPolicyBox.SelectedItem)?.Tag?.ToString()),
             RecentScanDays: ParseInt(ScanDaysText.Text, defaults.RecentScanDays),
             RecentScanMaxItems: ParseInt(MaxItemsText.Text, defaults.RecentScanMaxItems),
             ReminderLookAheadHours: ParseInt(ReminderLookAheadText.Text, defaults.ReminderLookAheadHours),
@@ -600,26 +608,67 @@ public partial class MainWindow : Window
         LlmModelText.Text = settings.LlmModel;
         LlmApiKeyEnvText.Text = settings.LlmApiKeyEnvironmentVariable ?? string.Empty;
         ScanDaysText.Text = settings.RecentScanDays.ToString();
-        MaxItemsText.Text = settings.RecentScanMaxItems.ToString();
+        MaxItemsText.Text = settings.RecentScanMaxItems == 0 ? string.Empty : settings.RecentScanMaxItems.ToString();
         ReminderLookAheadText.Text = settings.ReminderLookAheadHours.ToString();
         DailyBoardTimeText.Text = settings.DailyBoardTime;
+        LlmStatusText.Text = "LLM 연결 테스트 전입니다.";
+        LlmProviderBox.SelectedItem = null;
         foreach (ComboBoxItem item in LlmProviderBox.Items)
         {
             if (string.Equals(item.Tag?.ToString(), settings.LlmProvider.ToString(), StringComparison.OrdinalIgnoreCase))
             {
                 LlmProviderBox.SelectedItem = item;
-                return;
+                break;
             }
         }
 
-        LlmProviderBox.SelectedIndex = 0;
+        if (LlmProviderBox.SelectedItem is null)
+        {
+            LlmProviderBox.SelectedIndex = 0;
+        }
+
+        ApplyFallbackPolicyToControls(settings.LlmFallbackPolicy);
     }
 
     private static LlmProviderKind ParseProvider(string? value) =>
         Enum.TryParse<LlmProviderKind>(value, ignoreCase: true, out var parsed) ? parsed : LlmProviderKind.Disabled;
 
+    private static LlmFallbackPolicy ParseFallbackPolicy(string? value) =>
+        Enum.TryParse<LlmFallbackPolicy>(value, ignoreCase: true, out var parsed) ? parsed : LlmFallbackPolicy.LlmThenRules;
+
+    private void ApplyFallbackPolicyToControls(LlmFallbackPolicy fallbackPolicy)
+    {
+        LlmFallbackPolicyBox.SelectedItem = null;
+        foreach (ComboBoxItem item in LlmFallbackPolicyBox.Items)
+        {
+            if (string.Equals(item.Tag?.ToString(), fallbackPolicy.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                LlmFallbackPolicyBox.SelectedItem = item;
+                return;
+            }
+        }
+
+        LlmFallbackPolicyBox.SelectedIndex = 1;
+    }
+
     private static int ParseInt(string? value, int fallback) =>
         int.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private void SetScanBusy(bool busy, string message)
+    {
+        ScanRecentMonthButton.IsEnabled = !busy;
+        TestLlmEndpointButton.IsEnabled = !busy;
+        ScanProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        ScanProgressText.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        ScanProgressText.Text = message;
+    }
+
+    private void UpdateScanProgress(MailScanProgress progress)
+    {
+        ScanProgressText.Text = progress.Total is null
+            ? progress.Message
+            : $"{progress.Message} · {progress.Processed}/{progress.Total}";
+    }
 
     private static DateTimeOffset? ParseManualDueAt(string? value)
     {

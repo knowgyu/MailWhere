@@ -32,7 +32,8 @@
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Click="RunDiagnostics_Click">진단 실행</Button>
-                    <Button Click="ScanRecentMonth_Click" Background="#2458F2" Foreground="White">최근 1개월 스캔</Button>
+                    <Button Click="OpenDailyBoard_Click">업무 보드</Button>
+                    <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Background="#2458F2" Foreground="White">최근 1개월 스캔</Button>
                     <Button Click="TestNotification_Click">알림 테스트</Button>
                 </StackPanel>
             </DockPanel>
@@ -49,6 +50,8 @@
                     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
                         <TextBlock Text="오늘 봐야 할 항목" FontSize="18" FontWeight="Bold"/>
                         <TextBlock x:Name="StatusText" Text="대기 중입니다. 관리형 PC에서는 진단 후 최근 1개월 스캔부터 시작하세요." Foreground="#667085" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                        <ProgressBar x:Name="ScanProgressBar" Height="4" IsIndeterminate="True" Visibility="Collapsed" Margin="0,10,0,4"/>
+                        <TextBlock x:Name="ScanProgressText" Text="대기 중입니다." Visibility="Collapsed" Foreground="#2458F2" FontWeight="SemiBold" FontSize="12"/>
                     </StackPanel>
                     <TabControl>
                         <TabItem Header="할 일 / 일정">
@@ -112,11 +115,20 @@
                         <TextBox x:Name="LlmModelText"/>
                         <TextBlock Text="API key 환경 변수(선택)" FontWeight="SemiBold"/>
                         <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: OPENAI_API_KEY. 값 자체는 앱 설정에 저장하지 않는 것을 권장합니다."/>
+                        <TextBlock Text="LLM 실패 시 처리" FontWeight="SemiBold"/>
+                        <ComboBox x:Name="LlmFallbackPolicyBox" Margin="0,4,12,12" Padding="8,6">
+                            <ComboBoxItem Tag="LlmOnly" Content="LLM만 사용: 실패하면 검토함에 남김"/>
+                            <ComboBoxItem Tag="LlmThenRules" Content="LLM 우선 + 실패 시 rule fallback"/>
+                        </ComboBox>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button x:Name="TestLlmEndpointButton" Click="TestLlmEndpoint_Click">LLM 연결 테스트</Button>
+                            <TextBlock x:Name="LlmStatusText" Text="LLM 연결 테스트 전입니다." VerticalAlignment="Center" Foreground="#667085" TextWrapping="Wrap"/>
+                        </StackPanel>
 
                         <TextBlock Text="최근 스캔 기간(일)" FontWeight="SemiBold"/>
                         <TextBox x:Name="ScanDaysText"/>
-                        <TextBlock Text="최대 메일 수" FontWeight="SemiBold"/>
-                        <TextBox x:Name="MaxItemsText"/>
+                        <TextBlock Text="최대 메일 수(고급, 비우면 최근 1개월 전체)" FontWeight="SemiBold"/>
+                        <TextBox x:Name="MaxItemsText" ToolTip="기본은 비워두며 최근 1개월 안의 메일을 갯수 제한 없이 읽습니다. 문제 진단 때만 숫자를 넣으세요."/>
                         <TextBlock Text="알림 look-ahead(시간)" FontWeight="SemiBold"/>
                         <TextBox x:Name="ReminderLookAheadText"/>
                         <TextBlock Text="오늘의 업무 보드 시간" FontWeight="SemiBold"/>

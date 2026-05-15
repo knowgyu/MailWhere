@@ -35,6 +35,7 @@ public sealed class TrayHost : IDisposable, IUserNotificationSink
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("열기", null, (_, _) => ShowWindow());
+        menu.Items.Add("오늘의 업무 보드", null, async (_, _) => await ShowDailyBoardAsync());
         menu.Items.Add("알림 테스트", null, async (_, _) => await ShowAsync(new UserNotification(UserNotificationKind.Reminder, "MailWhere", "트레이 알림이 정상 동작합니다.")));
         menu.Items.Add("종료", null, (_, _) => System.Windows.Application.Current.Shutdown());
         return menu;
@@ -45,6 +46,15 @@ public sealed class TrayHost : IDisposable, IUserNotificationSink
         _window.Show();
         _window.WindowState = WindowState.Normal;
         _window.Activate();
+    }
+
+    private async Task ShowDailyBoardAsync()
+    {
+        ShowWindow();
+        if (_window is MainWindow mainWindow)
+        {
+            await mainWindow.OpenDailyBoardAsync();
+        }
     }
 
     private static Icon LoadIcon()

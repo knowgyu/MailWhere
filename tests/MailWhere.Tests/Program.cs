@@ -31,11 +31,17 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Runtime diagnostics export includes safe gate codes", RuntimeDiagnosticsExportIncludesSafeGateCodes),
     ("Partial runtime settings keep safe defaults", PartialRuntimeSettingsKeepSafeDefaults),
     ("Runtime settings map Ollama endpoint", RuntimeSettingsMapOllamaEndpoint),
+    ("Runtime settings default unlimited recent scan", RuntimeSettingsDefaultUnlimitedRecentScan),
     ("Runtime settings default daily board time", RuntimeSettingsDefaultDailyBoardTime),
     ("Daily board planner schedules next whole hour", DailyBoardPlannerSchedulesNextWholeHour),
     ("LLM JSON creates calendar task", LlmJsonCreatesCalendarTask),
+    ("LLM success does not pre-run fallback rules", LlmSuccessDoesNotPreRunFallbackRules),
     ("Invalid LLM JSON falls back to rules", InvalidLlmJsonFallsBackToRules),
+    ("LLM only failure creates review candidate", LlmOnlyFailureCreatesReviewCandidate),
+    ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
     ("Recent mail scan honors request window", RecentMailScanHonorsRequestWindow),
+    ("Recent mail scan supports unlimited count", RecentMailScanSupportsUnlimitedCount),
+    ("Mail scan reports progress", MailScanReportsProgress),
     ("Reminder planner emits lookahead notifications", ReminderPlannerEmitsLookaheadNotifications),
     ("SQLite store truncates source-derived fields", SqliteStoreTruncatesSourceDerivedFields),
     ("SQLite review candidates can be listed", SqliteReviewCandidatesCanBeListed),
@@ -323,7 +329,7 @@ static Task RuntimeSettingsMapOllamaEndpoint()
         Assert(endpoint.Provider == LlmProviderKind.Ollama, "Expected Ollama provider.");
         Assert(endpoint.ApiKey == "test-token", "Expected API key to resolve from environment variable.");
         Assert(settings.RecentScanDays == 31, "Expected scan days clamp.");
-        Assert(settings.RecentScanMaxItems == 2000, "Expected max items clamp.");
+        Assert(settings.RecentScanMaxItems == 5000, "Expected explicit max items to be preserved.");
         Assert(settings.ReminderLookAheadHours == 24 * 14, "Expected lookahead clamp.");
         return Task.CompletedTask;
     }
@@ -331,6 +337,19 @@ static Task RuntimeSettingsMapOllamaEndpoint()
     {
         Environment.SetEnvironmentVariable("OAS_TEST_KEY", null);
     }
+}
+
+static Task RuntimeSettingsDefaultUnlimitedRecentScan()
+{
+    var defaults = RuntimeSettingsSerializer.ParseOrDefault("{}");
+    Assert(defaults.RecentScanDays == 30, "Expected recent scan days default.");
+    Assert(defaults.RecentScanMaxItems == 0, "Expected default scan max to mean unlimited.");
+    Assert(defaults.LlmFallbackPolicy == LlmFallbackPolicy.LlmThenRules, "Expected safe LLM fallback default.");
+
+    var explicitUnlimited = RuntimeSettingsSerializer.ParseOrDefault("""{"RecentScanMaxItems":0,"LlmFallbackPolicy":"LlmOnly"}""");
+    Assert(explicitUnlimited.RecentScanMaxItems == 0, "Expected explicit unlimited scan max.");
+    Assert(explicitUnlimited.LlmFallbackPolicy == LlmFallbackPolicy.LlmOnly, "Expected explicit LLM-only policy.");
+    return Task.CompletedTask;
 }
 
 static Task RuntimeSettingsDefaultDailyBoardTime()
@@ -397,6 +416,30 @@ static async Task LlmJsonCreatesCalendarTask()
     Assert(llm.LastUserPayload?.Contains("디자인 리뷰", StringComparison.Ordinal) == true, "Expected mail payload to be sent to LLM client.");
 }
 
+static async Task LlmSuccessDoesNotPreRunFallbackRules()
+{
+    var llm = new FakeLlmClient("""
+        {
+          "kind": "actionRequested",
+          "disposition": "review",
+          "confidence": 0.71,
+          "suggestedTitle": "LLM 우선 후보",
+          "reason": "LLM이 먼저 판단",
+          "evidenceSnippet": "확인 부탁",
+          "dueAt": null,
+          "summary": "LLM 성공"
+        }
+        """);
+
+    var fallback = new ThrowingAnalyzer();
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, fallback, LlmFallbackPolicy.LlmThenRules);
+    var result = await analyzer.AnalyzeAsync(Mail("확인", "확인 부탁드립니다."));
+
+    Assert(result.SuggestedTitle == "LLM 우선 후보", "Expected LLM result.");
+    Assert(!fallback.Called, "Fallback rules should not run before successful LLM output.");
+    Assert(analyzer.GetTelemetrySnapshot().LlmSuccessCount == 1, "Expected LLM success telemetry.");
+}
+
 static async Task InvalidLlmJsonFallsBackToRules()
 {
     var analyzer = new LlmBackedFollowUpAnalyzer(new FakeLlmClient("not-json"));
@@ -404,6 +447,34 @@ static async Task InvalidLlmJsonFallsBackToRules()
 
     Assert(result.Kind == FollowUpKind.Deadline, "Expected fallback rule classification.");
     Assert(result.Disposition == AnalysisDisposition.AutoCreateTask, "Expected fallback auto task.");
+}
+
+static async Task LlmOnlyFailureCreatesReviewCandidate()
+{
+    var analyzer = new LlmBackedFollowUpAnalyzer(new FakeLlmClient("not-json"), new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
+    var result = await analyzer.AnalyzeAsync(Mail("자료 요청", "내일까지 검토 후 회신 부탁드립니다."));
+
+    Assert(result.Disposition == AnalysisDisposition.Review, "LLM-only failure should not silently auto-create from rules.");
+    Assert(result.Kind == FollowUpKind.ReviewNeeded, "Expected review-needed failure result.");
+    Assert(result.Reason.Contains("LLM 분석 실패", StringComparison.Ordinal), "Expected visible LLM failure reason.");
+}
+
+static async Task LlmEndpointProbeValidatesJsonObject()
+{
+    var settings = new LlmEndpointSettings(
+        LlmProviderKind.Ollama,
+        Enabled: true,
+        Endpoint: "http://localhost:11434",
+        Model: "probe-model",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+
+    var success = await LlmEndpointProbe.ProbeAsync(settings, new FakeLlmClient("""{"ok":true}"""));
+    var invalid = await LlmEndpointProbe.ProbeAsync(settings, new FakeLlmClient("not-json"));
+
+    Assert(success.Success, "Expected valid JSON probe success.");
+    Assert(success.Code == "ok", "Expected ok code.");
+    Assert(!invalid.Success && invalid.Code == "invalid-json", "Expected invalid JSON probe failure.");
 }
 
 static async Task RecentMailScanHonorsRequestWindow()
@@ -427,6 +498,39 @@ static async Task RecentMailScanHonorsRequestWindow()
     Assert(summary.TaskCreatedCount == 1, "Expected one auto-created task.");
     Assert(summary.ReviewCandidateCount == 1, "Expected one review candidate.");
     Assert(summary.IgnoredCount == 1, "Expected one ignored message.");
+}
+
+static async Task RecentMailScanSupportsUnlimitedCount()
+{
+    var now = new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9));
+    var source = new SequenceEmailSource(new[]
+    {
+        Mail("자료 요청 1", "내일까지 검토 후 회신 부탁드립니다.", "scan-unlimited-1"),
+        Mail("자료 요청 2", "내일까지 검토 후 회신 부탁드립니다.", "scan-unlimited-2"),
+        Mail("자료 요청 3", "내일까지 검토 후 회신 부탁드립니다.", "scan-unlimited-3")
+    });
+    var scanner = new MailActionScanner(source, new FollowUpPipeline(new RuleBasedFollowUpAnalyzer(), new FakeStore()));
+    var summary = await scanner.ScanAsync(new MailScanRequest(0, IncludeBody: true, now.AddDays(-30)));
+
+    Assert(source.LastRequest?.MaxItems == 0, "Expected unlimited marker passed to source.");
+    Assert(summary.ReadCount == 3, "Expected all recent messages when MaxItems is zero.");
+}
+
+static async Task MailScanReportsProgress()
+{
+    var source = new SequenceEmailSource(new[]
+    {
+        Mail("자료 요청", "내일까지 검토 후 회신 부탁드립니다.", "scan-progress-1"),
+        Mail("공지", "FYI 참고용입니다.", "scan-progress-2")
+    });
+    var scanner = new MailActionScanner(source, new FollowUpPipeline(new RuleBasedFollowUpAnalyzer(), new FakeStore()));
+    var progressEvents = new List<MailScanProgress>();
+
+    await scanner.ScanAsync(new MailScanRequest(0, IncludeBody: true, DateTimeOffset.Now.AddDays(-30)), new InlineProgress<MailScanProgress>(progressEvents.Add));
+
+    Assert(progressEvents.Any(item => item.Phase == "reading"), "Expected reading progress.");
+    Assert(progressEvents.Any(item => item.Phase == "analyzing" && item.Total == 2), "Expected analyzing progress with total.");
+    Assert(progressEvents.Any(item => item.Phase == "completed"), "Expected completed progress.");
 }
 
 static Task ReminderPlannerEmitsLookaheadNotifications()
@@ -971,6 +1075,29 @@ sealed class FakeLlmClient : ILlmClient
     }
 }
 
+sealed class ThrowingAnalyzer : IFollowUpAnalyzer
+{
+    public bool Called { get; private set; }
+
+    public Task<FollowUpAnalysis> AnalyzeAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
+    {
+        Called = true;
+        throw new InvalidOperationException("Fallback should not be called.");
+    }
+}
+
+sealed class InlineProgress<T> : IProgress<T>
+{
+    private readonly Action<T> _onReport;
+
+    public InlineProgress(Action<T> onReport)
+    {
+        _onReport = onReport;
+    }
+
+    public void Report(T value) => _onReport(value);
+}
+
 sealed class SequenceEmailSource : IEmailSource
 {
     private readonly IReadOnlyList<EmailSnapshot> _messages;
@@ -985,6 +1112,7 @@ sealed class SequenceEmailSource : IEmailSource
     public Task<EmailReadResult> ReadAsync(MailReadRequest request, CancellationToken cancellationToken = default)
     {
         LastRequest = request;
-        return Task.FromResult(new EmailReadResult(_messages.Take(request.MaxItems).ToArray(), Array.Empty<MailReadWarning>(), 0));
+        var messages = request.MaxItems <= 0 ? _messages : _messages.Take(request.MaxItems).ToArray();
+        return Task.FromResult(new EmailReadResult(messages.ToArray(), Array.Empty<MailReadWarning>(), 0));
     }
 }

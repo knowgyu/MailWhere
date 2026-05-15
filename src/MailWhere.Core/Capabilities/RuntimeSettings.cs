@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using MailWhere.Core.Analysis;
 using MailWhere.Core.LLM;
 using MailWhere.Core.Scheduling;
 
@@ -17,6 +18,7 @@ public sealed record RuntimeSettings(
     string? LlmApiKey,
     string? LlmApiKeyEnvironmentVariable,
     int LlmTimeoutSeconds,
+    LlmFallbackPolicy LlmFallbackPolicy,
     int RecentScanDays,
     int RecentScanMaxItems,
     int ReminderLookAheadHours,
@@ -34,8 +36,9 @@ public sealed record RuntimeSettings(
         LlmApiKey: null,
         LlmApiKeyEnvironmentVariable: null,
         LlmTimeoutSeconds: 30,
+        LlmFallbackPolicy: LlmFallbackPolicy.LlmThenRules,
         RecentScanDays: 30,
-        RecentScanMaxItems: 200,
+        RecentScanMaxItems: 0,
         ReminderLookAheadHours: 24,
         DailyBoardTime: DailyBoardPlanner.DefaultDailyBoardTime);
 
@@ -76,6 +79,7 @@ public sealed record PartialRuntimeSettings(
     string? LlmApiKey = null,
     string? LlmApiKeyEnvironmentVariable = null,
     int? LlmTimeoutSeconds = null,
+    LlmFallbackPolicy? LlmFallbackPolicy = null,
     int? RecentScanDays = null,
     int? RecentScanMaxItems = null,
     int? ReminderLookAheadHours = null,
@@ -126,8 +130,9 @@ public static class RuntimeSettingsSerializer
             LlmApiKey: string.IsNullOrWhiteSpace(partial?.LlmApiKey) ? defaults.LlmApiKey : partial!.LlmApiKey,
             LlmApiKeyEnvironmentVariable: string.IsNullOrWhiteSpace(partial?.LlmApiKeyEnvironmentVariable) ? defaults.LlmApiKeyEnvironmentVariable : partial!.LlmApiKeyEnvironmentVariable,
             LlmTimeoutSeconds: Clamp(partial?.LlmTimeoutSeconds, 5, 180, defaults.LlmTimeoutSeconds),
+            LlmFallbackPolicy: partial?.LlmFallbackPolicy ?? defaults.LlmFallbackPolicy,
             RecentScanDays: Clamp(partial?.RecentScanDays, 1, 31, defaults.RecentScanDays),
-            RecentScanMaxItems: Clamp(partial?.RecentScanMaxItems, 10, 2000, defaults.RecentScanMaxItems),
+            RecentScanMaxItems: Clamp(partial?.RecentScanMaxItems, 0, 100000, defaults.RecentScanMaxItems),
             ReminderLookAheadHours: Clamp(partial?.ReminderLookAheadHours, 1, 24 * 14, defaults.ReminderLookAheadHours),
             DailyBoardTime: DailyBoardPlanner.NormalizeDailyBoardTime(partial?.DailyBoardTime));
     }

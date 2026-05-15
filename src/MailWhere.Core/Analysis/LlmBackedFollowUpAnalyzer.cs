@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -7,29 +8,66 @@ using MailWhere.Core.LLM;
 
 namespace MailWhere.Core.Analysis;
 
-public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer
+public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer, IAnalysisTelemetrySource
 {
     private const int MaxPromptBodyChars = 6000;
     private readonly ILlmClient _llmClient;
     private readonly IFollowUpAnalyzer _fallback;
+    private readonly LlmFallbackPolicy _fallbackPolicy;
+    private readonly object _telemetryLock = new();
+    private int _llmAttemptCount;
+    private int _llmSuccessCount;
+    private int _llmFallbackCount;
+    private int _llmFailureCount;
+    private TimeSpan _totalLlmDuration = TimeSpan.Zero;
+    private string? _lastFailureCode;
 
-    public LlmBackedFollowUpAnalyzer(ILlmClient llmClient, IFollowUpAnalyzer? fallback = null)
+    public LlmBackedFollowUpAnalyzer(
+        ILlmClient llmClient,
+        IFollowUpAnalyzer? fallback = null,
+        LlmFallbackPolicy fallbackPolicy = LlmFallbackPolicy.LlmThenRules)
     {
         _llmClient = llmClient;
         _fallback = fallback ?? new RuleBasedFollowUpAnalyzer();
+        _fallbackPolicy = fallbackPolicy;
     }
 
     public async Task<FollowUpAnalysis> AnalyzeAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
     {
-        var fallback = await _fallback.AnalyzeAsync(email, cancellationToken).ConfigureAwait(false);
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             var raw = await _llmClient.CompleteJsonAsync(SystemPrompt, BuildPayload(email), cancellationToken).ConfigureAwait(false);
-            return TryParse(raw, email, fallback, out var parsed) ? parsed : fallback;
+            stopwatch.Stop();
+            if (TryParse(raw, email, out var parsed))
+            {
+                RecordSuccess(stopwatch.Elapsed);
+                return parsed;
+            }
+
+            RecordFailure("invalid-json", stopwatch.Elapsed);
+            return await HandleLlmFailureAsync(email, "invalid-json", cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return fallback;
+            stopwatch.Stop();
+            var failureCode = SanitizeFailureCode(ex);
+            RecordFailure(failureCode, stopwatch.Elapsed);
+            return await HandleLlmFailureAsync(email, failureCode, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public AnalysisTelemetry GetTelemetrySnapshot()
+    {
+        lock (_telemetryLock)
+        {
+            return new AnalysisTelemetry(
+                _llmAttemptCount,
+                _llmSuccessCount,
+                _llmFallbackCount,
+                _llmFailureCount,
+                _totalLlmDuration,
+                _lastFailureCode);
         }
     }
 
@@ -57,9 +95,35 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer
             });
     }
 
-    private static bool TryParse(string raw, EmailSnapshot email, FollowUpAnalysis fallback, out FollowUpAnalysis parsed)
+    private async Task<FollowUpAnalysis> HandleLlmFailureAsync(EmailSnapshot email, string failureCode, CancellationToken cancellationToken)
     {
-        parsed = fallback;
+        if (_fallbackPolicy == LlmFallbackPolicy.LlmThenRules)
+        {
+            var fallback = await _fallback.AnalyzeAsync(email, cancellationToken).ConfigureAwait(false);
+            RecordFallback();
+            return fallback;
+        }
+
+        return BuildFailureReview(email, failureCode);
+    }
+
+    private static FollowUpAnalysis BuildFailureReview(EmailSnapshot email, string failureCode)
+    {
+        var title = EvidencePolicy.Truncate($"LLM 분석 확인 필요: {email.Subject}") ?? "LLM 분석 확인 필요";
+        return new FollowUpAnalysis(
+            FollowUpKind.ReviewNeeded,
+            AnalysisDisposition.Review,
+            0.2,
+            title,
+            $"LLM 분석 실패({failureCode})로 자동 등록하지 않았습니다.",
+            null,
+            null,
+            "LLM endpoint 상태를 확인한 뒤 다시 스캔하세요.");
+    }
+
+    private static bool TryParse(string raw, EmailSnapshot email, out FollowUpAnalysis parsed)
+    {
+        parsed = BuildFailureReview(email, "empty-response");
         if (string.IsNullOrWhiteSpace(raw))
         {
             return false;
@@ -77,14 +141,18 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer
                 return false;
             }
 
-            var confidence = Math.Clamp(response.Confidence ?? fallback.Confidence, 0, 1);
-            var disposition = response.Disposition ?? fallback.Disposition;
-            var kind = response.Kind ?? fallback.Kind;
-            var dueAt = TryParseDate(response.DueAt) ?? fallback.DueAt;
-            var title = EvidencePolicy.Truncate(response.SuggestedTitle) ?? fallback.SuggestedTitle;
+            var confidence = Math.Clamp(response.Confidence ?? 0.5, 0, 1);
+            var disposition = response.Disposition ?? AnalysisDisposition.Review;
+            var kind = response.Kind ?? FollowUpKind.ReviewNeeded;
+            var dueAt = TryParseDate(response.DueAt);
+            var title = EvidencePolicy.Truncate(response.SuggestedTitle);
             if (string.IsNullOrWhiteSpace(title) && disposition != AnalysisDisposition.Ignore)
             {
                 title = EvidencePolicy.Truncate($"메일 확인: {email.Subject}") ?? "메일 확인";
+            }
+            else if (string.IsNullOrWhiteSpace(title))
+            {
+                title = "후속 조치 없음";
             }
 
             parsed = new FollowUpAnalysis(
@@ -92,10 +160,10 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer
                 disposition,
                 confidence,
                 title,
-                EvidencePolicy.Truncate(response.Reason) ?? fallback.Reason,
-                EvidencePolicy.Truncate(response.EvidenceSnippet) ?? fallback.EvidenceSnippet,
+                EvidencePolicy.Truncate(response.Reason) ?? "LLM 분석 결과",
+                EvidencePolicy.Truncate(response.EvidenceSnippet),
                 dueAt,
-                EvidencePolicy.Truncate(response.Summary) ?? fallback.Summary);
+                EvidencePolicy.Truncate(response.Summary));
             return true;
         }
         catch
@@ -106,6 +174,45 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpAnalyzer
 
     private static DateTimeOffset? TryParseDate(string? value) =>
         DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed) ? parsed : null;
+
+    private void RecordSuccess(TimeSpan elapsed)
+    {
+        lock (_telemetryLock)
+        {
+            _llmAttemptCount++;
+            _llmSuccessCount++;
+            _totalLlmDuration += elapsed;
+        }
+    }
+
+    private void RecordFailure(string failureCode, TimeSpan elapsed)
+    {
+        lock (_telemetryLock)
+        {
+            _llmAttemptCount++;
+            _llmFailureCount++;
+            _totalLlmDuration += elapsed;
+            _lastFailureCode = failureCode;
+        }
+    }
+
+    private void RecordFallback()
+    {
+        lock (_telemetryLock)
+        {
+            _llmFallbackCount++;
+        }
+    }
+
+    private static string SanitizeFailureCode(Exception ex) =>
+        ex switch
+        {
+            TaskCanceledException => "timeout",
+            HttpRequestException => "http-error",
+            JsonException => "invalid-json",
+            InvalidOperationException => "invalid-settings",
+            _ => ex.GetType().Name
+        };
 
     private const string SystemPrompt = """
         당신은 한국어 업무 메일에서 사용자가 해야 할 action item, 회의/일정성 항목, 답장 필요 여부, 마감일을 추출하는 로컬 비서입니다.
