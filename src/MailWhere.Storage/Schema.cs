@@ -28,6 +28,7 @@ internal static class Schema
             evidence_snippet TEXT NULL,
             due_at TEXT NULL,
             created_at TEXT NOT NULL,
+            snooze_until TEXT NULL,
             suppressed INTEGER NOT NULL DEFAULT 0,
             resolved_at TEXT NULL,
             resolution TEXT NULL
@@ -50,6 +51,7 @@ internal static class Schema
         CREATE INDEX IF NOT EXISTS idx_tasks_source_hash ON tasks(source_id_hash);
         CREATE INDEX IF NOT EXISTS idx_review_source_hash ON review_candidates(source_id_hash);
         CREATE INDEX IF NOT EXISTS idx_review_active ON review_candidates(suppressed, resolved_at, created_at);
+        CREATE INDEX IF NOT EXISTS idx_review_active_snooze ON review_candidates(suppressed, resolved_at, snooze_until, created_at);
         """;
 
     public const string Sql = TablesSql + IndexesSql;

@@ -9,7 +9,7 @@ Included:
 - Classic Outlook COM read-only mail scan.
 - Recent-month mail scan with optional advanced max-count cap.
 - Rule-based + optional LLM analyzer.
-- Ollama `/api/chat` and OpenAI-compatible `/v1/chat/completions` providers.
+- Ollama native `/api/chat` and OpenAI-compatible `/v1/chat/completions` providers.
 - Local SQLite task storage with source-derived redaction.
 - Review candidate list display for low-confidence items.
 - D-day labels and D-7/D-1/D-day reminder planning.
@@ -38,10 +38,14 @@ Included:
 - LLM endpoint test sends a non-mail JSON probe and reports sanitized success/failure.
 - LLM-enabled analysis is LLM-first, with explicit `LlmOnly` or `LlmThenRules` fallback policy.
 - Scan status includes LLM attempts, success, fallback, failure, and average response time.
+- Provider naming is protocol-first: `OllamaNative`, `OpenAiChatCompletions`, `OpenAiResponses`, with legacy config strings kept compatible.
+- Review candidates can be snoozed from 검토함 and are hidden until the snooze time.
+- Daily board has card-like list items and can jump directly to 검토함.
+- Tray balloon click opens the actionable board instead of being a dead-end notification.
 
 Not included yet:
 
-- Bulk triage edit/snooze controls.
+- Bulk triage edit controls.
 - Native Action Center click actions.
 - Reply drafts or agentic mail mutation.
 
@@ -49,7 +53,7 @@ Not included yet:
 
 Priority: high.
 
-- Rich triage queue: card mode, bulk selection, snooze, due-date edit, and keyboard hints on visible buttons.
+- Rich triage queue: bulk selection, due-date edit, and richer keyboard hints on visible buttons.
 - Conservative automatic scan timer after smoke gate so new review candidates surface while the app stays in tray.
 - Review tab: approve as task, dismiss as not-a-task, edit title/due date.
 - “왜 이게 떴는지” panel: summary/reason/evidence/confidence/fallback source.
@@ -92,11 +96,11 @@ Acceptance:
 - Meeting-like mails create local date-aware candidates.
 - Document search handoff does not store full mail body in another index.
 
-## Phase 0.5 — Enterprise LLM profiles
+## Phase 0.5 — approved non-local LLM profiles
 
 Priority: medium, only when approved endpoint details are known.
 
-- Provider profiles: local Ollama, vLLM/OpenAI-compatible, OpenAI API, Azure/OpenAI-compatible gateway.
+- Provider profiles: local Ollama, OpenAI-compatible Chat Completions/Responses, and only-approved remote/internal gateways.
 - Per-profile data policy: endpoint, retention assumption, region, auth source, max prompt size, allowed fields.
 - Structured-output schema validation for providers that support it.
 - Redaction/preflight layer before remote calls.

@@ -32,6 +32,12 @@ public abstract class HttpJsonLlmClient : ILlmClient
             return new Uri(trimmed, UriKind.Absolute);
         }
 
+        if (suffix.StartsWith("/v1/", StringComparison.OrdinalIgnoreCase)
+            && trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Uri(trimmed + suffix[3..], UriKind.Absolute);
+        }
+
         return new Uri(trimmed + suffix, UriKind.Absolute);
     }
 
@@ -75,9 +81,9 @@ public sealed class OllamaLlmClient : HttpJsonLlmClient
     }
 }
 
-public sealed class OpenAiCompatibleLlmClient : HttpJsonLlmClient
+public sealed class OpenAiChatCompletionsLlmClient : HttpJsonLlmClient
 {
-    public OpenAiCompatibleLlmClient(HttpClient httpClient, LlmEndpointSettings settings) : base(httpClient, settings)
+    public OpenAiChatCompletionsLlmClient(HttpClient httpClient, LlmEndpointSettings settings) : base(httpClient, settings)
     {
         if (!string.IsNullOrWhiteSpace(settings.ApiKey))
         {
@@ -110,6 +116,79 @@ public sealed class OpenAiCompatibleLlmClient : HttpJsonLlmClient
     }
 }
 
+public sealed class OpenAiResponsesLlmClient : HttpJsonLlmClient
+{
+    public OpenAiResponsesLlmClient(HttpClient httpClient, LlmEndpointSettings settings) : base(httpClient, settings)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.ApiKey))
+        {
+            HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.ApiKey);
+        }
+    }
+
+    public override async Task<string> CompleteJsonAsync(string systemPrompt, string userPayload, CancellationToken cancellationToken = default)
+    {
+        if (!Settings.CanCall)
+        {
+            throw new InvalidOperationException("LLM 설정이 비활성화되어 있습니다.");
+        }
+
+        var body = new
+        {
+            model = Settings.Model,
+            store = false,
+            temperature = 0.1,
+            text = new
+            {
+                format = new
+                {
+                    type = "json_object"
+                }
+            },
+            input = new object[]
+            {
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = userPayload }
+            }
+        };
+
+        using var response = await HttpClient.PostAsJsonAsync(BuildUri(Settings.Endpoint, "/v1/responses"), body, JsonOptions, cancellationToken).ConfigureAwait(false);
+        using var json = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
+        return ExtractOutputText(json.RootElement);
+    }
+
+    private static string ExtractOutputText(JsonElement root)
+    {
+        if (root.TryGetProperty("output_text", out var outputText) && outputText.ValueKind == JsonValueKind.String)
+        {
+            return outputText.GetString() ?? string.Empty;
+        }
+
+        if (!root.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Array)
+        {
+            return string.Empty;
+        }
+
+        foreach (var item in output.EnumerateArray())
+        {
+            if (!item.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var part in content.EnumerateArray())
+            {
+                if (part.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                {
+                    return text.GetString() ?? string.Empty;
+                }
+            }
+        }
+
+        return string.Empty;
+    }
+}
+
 public static class LlmClientFactory
 {
     public static ILlmClient Create(LlmEndpointSettings settings, HttpClient? httpClient = null)
@@ -122,8 +201,9 @@ public static class LlmClientFactory
         var client = httpClient ?? new HttpClient();
         return settings.Provider switch
         {
-            LlmProviderKind.Ollama => new OllamaLlmClient(client, settings),
-            LlmProviderKind.OpenAiCompatible => new OpenAiCompatibleLlmClient(client, settings),
+            LlmProviderKind.OllamaNative => new OllamaLlmClient(client, settings),
+            LlmProviderKind.OpenAiChatCompletions => new OpenAiChatCompletionsLlmClient(client, settings),
+            LlmProviderKind.OpenAiResponses => new OpenAiResponsesLlmClient(client, settings),
             _ => new DisabledLlmClient()
         };
     }

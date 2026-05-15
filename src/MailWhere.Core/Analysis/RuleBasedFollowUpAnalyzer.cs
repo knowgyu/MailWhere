@@ -18,7 +18,11 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex IgnoreKeyword = new(
-        "(참고|공지|newsletter|no action|FYI|for your information|광고|구독)",
+        "(참고|공지|뉴스레터|시스템 알림|자동 발송|newsletter|no action|FYI|for your information|advertisement|unsubscribe|광고|구독)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex AutomatedSender = new(
+        "(no-?reply|noreply|do-?not-?reply|notification|newsletter|mailer-daemon)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public Task<FollowUpAnalysis> AnalyzeAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
@@ -33,9 +37,10 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
         var due = DueKeyword.Match(text);
         var meeting = MeetingKeyword.Match(text);
         var ignore = IgnoreKeyword.Match(text);
+        var automatedSender = AutomatedSender.Match(email.SenderDisplay);
         var dueAt = SimpleDueDateParser.TryParse(text, email.ReceivedAt);
 
-        if (ignore.Success && !action.Success)
+        if ((ignore.Success || automatedSender.Success) && !action.Success && !due.Success)
         {
             return Task.FromResult(new FollowUpAnalysis(
                 FollowUpKind.None,
@@ -43,7 +48,7 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
                 0.15,
                 string.Empty,
                 "Looks informational and has no clear action keyword.",
-                EvidencePolicy.Truncate(ignore.Value),
+                EvidencePolicy.Truncate(ignore.Success ? ignore.Value : automatedSender.Value),
                 null));
         }
 

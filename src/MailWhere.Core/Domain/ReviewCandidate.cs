@@ -5,7 +5,8 @@ public sealed record ReviewCandidate(
     string SourceIdHash,
     FollowUpAnalysis Analysis,
     DateTimeOffset CreatedAt,
-    bool Suppressed = false)
+    bool Suppressed = false,
+    DateTimeOffset? SnoozeUntil = null)
 {
     public static ReviewCandidate FromAnalysis(EmailSnapshot source, FollowUpAnalysis analysis, DateTimeOffset now) =>
         new(Guid.NewGuid(), source.SourceHash, analysis with { SuggestedTitle = EvidencePolicy.Truncate(analysis.SuggestedTitle) ?? string.Empty, Reason = EvidencePolicy.Truncate(analysis.Reason) ?? "Review candidate", EvidenceSnippet = EvidencePolicy.Truncate(analysis.EvidenceSnippet) }, now);

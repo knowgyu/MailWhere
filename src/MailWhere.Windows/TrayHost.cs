@@ -21,6 +21,7 @@ public sealed class TrayHost : IDisposable, IUserNotificationSink
             ContextMenuStrip = BuildMenu()
         };
         _notifyIcon.DoubleClick += (_, _) => ShowWindow();
+        _notifyIcon.BalloonTipClicked += async (_, _) => await ShowDailyBoardAsync();
     }
 
     public Task ShowAsync(UserNotification notification, CancellationToken cancellationToken = default)

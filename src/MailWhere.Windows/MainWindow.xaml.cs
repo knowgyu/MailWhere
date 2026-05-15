@@ -101,6 +101,14 @@ public partial class MainWindow : Window
         await ShowDailyBoardAsync(DateTimeOffset.Now, _settings.DailyBoardTime);
     }
 
+    public void OpenReviewTab()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        MainTabs.SelectedItem = ReviewTab;
+        Activate();
+    }
+
     private async void TestLlmEndpoint_Click(object sender, RoutedEventArgs e)
     {
         if (_scanInProgress)
@@ -388,6 +396,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void SnoozeSelectedReview_Click(object sender, RoutedEventArgs e)
+    {
+        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
+        {
+            await SnoozeReviewCandidateAsync(item.Candidate);
+        }
+    }
+
     private async void MainWindow_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if ((Keyboard.Modifiers & ModifierKeys.Alt) != ModifierKeys.Alt)
@@ -409,6 +425,14 @@ public partial class MainWindow : Window
             if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem ignoreItem)
             {
                 await IgnoreReviewCandidateAsync(ignoreItem.Candidate);
+            }
+        }
+        else if (e.Key == Key.S)
+        {
+            e.Handled = true;
+            if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem snoozeItem)
+            {
+                await SnoozeReviewCandidateAsync(snoozeItem.Candidate);
             }
         }
     }
@@ -520,6 +544,25 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             await ShowErrorAsync("확인 필요 후보 무시 실패", ex);
+        }
+    }
+
+    private async Task SnoozeReviewCandidateAsync(ReviewCandidate candidate)
+    {
+        try
+        {
+            var store = await GetStoreAsync();
+            var now = DateTimeOffset.UtcNow;
+            var until = now.AddDays(1);
+            var snoozed = await store.SnoozeReviewCandidateAsync(candidate.Id, until, now);
+            await RefreshReviewCandidatesAsync();
+            StatusText.Text = snoozed
+                ? "확인 필요 후보를 내일까지 숨겼습니다. 필요하면 다음 스캔/보드에서 다시 표시됩니다."
+                : "이미 처리된 확인 필요 후보입니다.";
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("확인 필요 후보 나중에 보기 실패", ex);
         }
     }
 

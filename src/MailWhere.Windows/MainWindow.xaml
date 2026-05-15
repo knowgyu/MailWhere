@@ -17,6 +17,33 @@
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="#20304F"/>
         </Style>
+        <Style TargetType="ListBox">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+        <Style TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="Background" Value="#F8FAFF"/>
+            <Setter Property="BorderBrush" Value="#E8EDF7"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Card" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="12" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Card" Property="Background" Value="#EEF3FF"/>
+                                <Setter TargetName="Card" Property="BorderBrush" Value="#2458F2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="18">
@@ -54,8 +81,8 @@
                         <ProgressBar x:Name="ScanProgressBar" Height="4" IsIndeterminate="True" Visibility="Collapsed" Margin="0,10,0,4"/>
                         <TextBlock x:Name="ScanProgressText" Text="대기 중입니다." Visibility="Collapsed" Foreground="#2458F2" FontWeight="SemiBold" FontSize="12"/>
                     </StackPanel>
-                    <TabControl>
-                        <TabItem Header="할 일 / 일정">
+                    <TabControl x:Name="MainTabs">
+                        <TabItem x:Name="TasksTab" Header="할 일 / 일정">
                             <DockPanel Margin="8">
                                 <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
                                     <TextBlock Text="빠른 할 일 추가" FontWeight="SemiBold"/>
@@ -74,12 +101,13 @@
                                 <ListBox x:Name="TasksList" FontSize="14"/>
                             </DockPanel>
                         </TabItem>
-                        <TabItem Header="검토함">
+                        <TabItem x:Name="ReviewTab" Header="검토함">
                             <DockPanel Margin="8">
                                 <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
                                     <TextBlock Text="확신이 낮아 자동 등록하지 않은 후보입니다. 메일 원문 없이 짧은 근거만 보여주며, 선택한 후보를 바로 할 일로 등록하거나 무시할 수 있습니다." TextWrapping="Wrap" Foreground="#667085" Margin="0,0,0,10"/>
                                     <StackPanel Orientation="Horizontal">
                                         <Button Click="ApproveSelectedReview_Click" Background="#2458F2" Foreground="White">선택 항목 등록 (Alt+A)</Button>
+                                        <Button Click="SnoozeSelectedReview_Click">나중에 보기 (Alt+S)</Button>
                                         <Button Click="IgnoreSelectedReview_Click">선택 항목 무시 (Alt+I)</Button>
                                     </StackPanel>
                                 </StackPanel>
@@ -101,21 +129,26 @@
 
                         <CheckBox x:Name="StartupToggle" Content="Windows 시작 시 실행" Click="StartupToggle_Click" Margin="0,0,0,10"/>
                         <CheckBox x:Name="AutoWatcherToggle" Content="자동 watcher 요청(운영 smoke gate 후 활성)" Margin="0,0,0,10"/>
-                        <CheckBox x:Name="LlmEnabledToggle" Content="LLM endpoint 사용" Margin="0,0,0,10"/>
+                        <CheckBox x:Name="LlmEnabledToggle" Content="로컬 LLM 분석 사용" Margin="0,0,0,10"/>
 
-                        <TextBlock Text="LLM Provider" FontWeight="SemiBold"/>
+                        <TextBlock Text="LLM 실행 방식" FontWeight="SemiBold"/>
                         <ComboBox x:Name="LlmProviderBox" Margin="0,4,12,12" Padding="8,6">
                             <ComboBoxItem Tag="Disabled" Content="사용 안 함 / rule-only"/>
-                            <ComboBoxItem Tag="Ollama" Content="Ollama (/api/chat)"/>
-                            <ComboBoxItem Tag="OpenAiCompatible" Content="OpenAI-compatible / vLLM"/>
+                            <ComboBoxItem Tag="OllamaNative" Content="Ollama 로컬 - native /api/chat"/>
+                            <ComboBoxItem Tag="OpenAiChatCompletions" Content="OpenAI 호환 로컬 - Chat Completions"/>
+                            <ComboBoxItem Tag="OpenAiResponses" Content="OpenAI 호환 로컬 - Responses"/>
                         </ComboBox>
 
-                        <TextBlock Text="Endpoint" FontWeight="SemiBold"/>
+                        <TextBlock Text="로컬 endpoint" FontWeight="SemiBold"/>
                         <TextBox x:Name="LlmEndpointText"/>
-                        <TextBlock Text="Model" FontWeight="SemiBold"/>
+                        <TextBlock Text="모델" FontWeight="SemiBold"/>
                         <TextBox x:Name="LlmModelText"/>
-                        <TextBlock Text="API key 환경 변수(선택)" FontWeight="SemiBold"/>
-                        <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: OPENAI_API_KEY. 값 자체는 앱 설정에 저장하지 않는 것을 권장합니다."/>
+                        <Expander Header="고급: 내부 서버 Bearer token 환경 변수(선택)" Margin="0,0,12,12">
+                            <StackPanel Margin="0,8,0,0">
+                                <TextBlock Text="브라우저 로그인/Enterprise 계정 재사용은 지원하지 않습니다. 로컬 또는 내부 OpenAI-compatible 서버가 Bearer token을 요구할 때만 환경 변수 이름을 넣으세요." TextWrapping="Wrap" Foreground="#667085" FontSize="12"/>
+                                <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: LOCAL_LLM_TOKEN. 값 자체는 앱 설정에 저장하지 않는 것을 권장합니다."/>
+                            </StackPanel>
+                        </Expander>
                         <TextBlock Text="LLM 실패 시 처리" FontWeight="SemiBold"/>
                         <ComboBox x:Name="LlmFallbackPolicyBox" Margin="0,4,12,12" Padding="8,6">
                             <ComboBoxItem Tag="LlmOnly" Content="LLM만 사용: 실패하면 검토함에 남김"/>

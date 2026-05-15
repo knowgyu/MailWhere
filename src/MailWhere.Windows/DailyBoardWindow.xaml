@@ -12,6 +12,29 @@
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="FontSize" Value="13"/>
         </Style>
+        <Style TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="Background" Value="#F8FAFF"/>
+            <Setter Property="BorderBrush" Value="#E8EDF7"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Card" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="12" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Card" Property="Background" Value="#EEF3FF"/>
+                                <Setter TargetName="Card" Property="BorderBrush" Value="#2458F2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="Button">
             <Setter Property="Padding" Value="14,8"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -81,7 +104,10 @@
 
         <DockPanel Grid.Row="2" Margin="0,14,0,0">
             <TextBlock DockPanel.Dock="Left" Text="메일 원본은 수정하지 않습니다. 이 보드는 로컬 SQLite에 저장된 후속조치만 표시합니다." Foreground="#667085" VerticalAlignment="Center"/>
-            <Button DockPanel.Dock="Right" Click="Close_Click" HorizontalAlignment="Right" Background="#14213D" Foreground="White">확인</Button>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Click="OpenReview_Click" Margin="0,0,8,0">검토함 열기</Button>
+                <Button Click="Close_Click" Background="#14213D" Foreground="White">확인</Button>
+            </StackPanel>
         </DockPanel>
     </Grid>
 </Window>

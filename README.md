@@ -12,15 +12,16 @@
 - 최근 1개월 스캔(기본은 갯수 제한 없이 날짜 기준)
 - rule-based action item 탐지와 선택형 fallback
 - 선택형 LLM endpoint 분석
-  - Ollama `/api/chat`
-  - OpenAI-compatible/vLLM `/v1/chat/completions`
+  - Ollama native `/api/chat`
+  - OpenAI-compatible local server `/v1/chat/completions`
+  - OpenAI-compatible local server `/v1/responses`
 - LLM 연결 테스트와 스캔별 LLM 시도/성공/fallback/실패 요약
 - SQLite 로컬 task 저장
 - 낮은 확신 후보를 검토함에 표시
 - 기본 08:00 오늘의 업무 보드 창 표시(이후 실행 시 다음 정시)
 - 상단 버튼 또는 tray 우클릭에서 오늘의 업무 보드 다시 열기
 - 초기/대량 스캔 시 후보별 팝업 폭탄 대신 scan summary 1회 + 검토함/보드 중심 처리
-- 검토 후보 버튼 처리와 충돌 적은 Alt+A 등록 / Alt+I 무시 단축키
+- 검토 후보 버튼 처리와 충돌 적은 Alt+A 등록 / Alt+S 나중에 보기 / Alt+I 무시 단축키
 - 스캔 중 진행 상태 표시와 스캔 버튼 잠금
 - D-day 표시와 D-7/D-1/D-day reminder planning
 - tray 상주 + tray notification fallback
@@ -68,14 +69,14 @@ artifacts/MailWhere-win-x64-portable.zip
 ```json
 {
   "ExternalLlmEnabled": true,
-  "LlmProvider": "Ollama",
+  "LlmProvider": "OllamaNative",
   "LlmEndpoint": "http://localhost:11434",
   "LlmModel": "qwen3.6",
   "LlmFallbackPolicy": "LlmThenRules"
 }
 ```
 
-vLLM/OpenAI-compatible endpoint는 `LlmProvider`를 `OpenAiCompatible`로 설정합니다. 앱의 **LLM 연결 테스트** 버튼은 메일 내용이 아닌 작은 JSON probe만 보내므로 endpoint/model/인증 문제를 먼저 확인할 수 있습니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
+vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 예전 설정값인 `Ollama`, `OpenAiCompatible`도 계속 읽지만 새 설정에서는 protocol 이름을 쓰는 것을 권장합니다. 앱의 **LLM 연결 테스트** 버튼은 메일 내용이 아닌 작은 JSON probe만 보내므로 endpoint/model/provider 문제를 먼저 확인할 수 있습니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
 
 ## 문서
 

@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using MailWhere.Core.Analysis;
 using MailWhere.Core.Capabilities;
@@ -31,6 +33,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Runtime diagnostics export includes safe gate codes", RuntimeDiagnosticsExportIncludesSafeGateCodes),
     ("Partial runtime settings keep safe defaults", PartialRuntimeSettingsKeepSafeDefaults),
     ("Runtime settings map Ollama endpoint", RuntimeSettingsMapOllamaEndpoint),
+    ("Runtime settings map legacy OpenAI-compatible endpoint", RuntimeSettingsMapLegacyOpenAiCompatibleEndpoint),
+    ("Runtime settings map OpenAI Responses endpoint", RuntimeSettingsMapOpenAiResponsesEndpoint),
+    ("Runtime settings serialize canonical provider names", RuntimeSettingsSerializeCanonicalProviderNames),
     ("Runtime settings default unlimited recent scan", RuntimeSettingsDefaultUnlimitedRecentScan),
     ("Runtime settings default daily board time", RuntimeSettingsDefaultDailyBoardTime),
     ("Daily board planner schedules next whole hour", DailyBoardPlannerSchedulesNextWholeHour),
@@ -39,6 +44,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Invalid LLM JSON falls back to rules", InvalidLlmJsonFallsBackToRules),
     ("LLM only failure creates review candidate", LlmOnlyFailureCreatesReviewCandidate),
     ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
+    ("OpenAI Responses client extracts output text", OpenAiResponsesClientExtractsOutputText),
     ("Recent mail scan honors request window", RecentMailScanHonorsRequestWindow),
     ("Recent mail scan supports unlimited count", RecentMailScanSupportsUnlimitedCount),
     ("Mail scan reports progress", MailScanReportsProgress),
@@ -47,6 +53,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("SQLite review candidates can be listed", SqliteReviewCandidatesCanBeListed),
     ("SQLite review candidate can be resolved as task", SqliteReviewCandidateCanBeResolvedAsTask),
     ("SQLite double review approval is idempotent", SqliteDoubleReviewApprovalIsIdempotent),
+    ("SQLite review candidate snooze hides until due", SqliteReviewCandidateSnoozeHidesUntilDue),
     ("SQLite stale review ignore does not redact approved task", SqliteStaleReviewIgnoreDoesNotRedactApprovedTask),
     ("SQLite migrates pre daily board schema", SqliteMigratesPreDailyBoardSchema),
     ("SQLite delete source-derived data redacts task and candidate", SqliteDeleteSourceDerivedDataRedactsTaskAndCandidate),
@@ -326,7 +333,7 @@ static Task RuntimeSettingsMapOllamaEndpoint()
         var endpoint = settings.ToLlmEndpointSettings();
 
         Assert(endpoint.CanCall, "Expected callable LLM endpoint.");
-        Assert(endpoint.Provider == LlmProviderKind.Ollama, "Expected Ollama provider.");
+        Assert(endpoint.Provider == LlmProviderKind.OllamaNative, "Expected Ollama-native provider.");
         Assert(endpoint.ApiKey == "test-token", "Expected API key to resolve from environment variable.");
         Assert(settings.RecentScanDays == 31, "Expected scan days clamp.");
         Assert(settings.RecentScanMaxItems == 5000, "Expected explicit max items to be preserved.");
@@ -337,6 +344,53 @@ static Task RuntimeSettingsMapOllamaEndpoint()
     {
         Environment.SetEnvironmentVariable("OAS_TEST_KEY", null);
     }
+}
+
+static Task RuntimeSettingsMapLegacyOpenAiCompatibleEndpoint()
+{
+    var json = """
+        {
+          "ExternalLlmEnabled": true,
+          "LlmProvider": "OpenAiCompatible",
+          "LlmEndpoint": "http://localhost:8000",
+          "LlmModel": "qwen-local"
+        }
+        """;
+    var settings = RuntimeSettingsSerializer.ParseOrDefault(json);
+    Assert(settings.LlmProvider == LlmProviderKind.OpenAiChatCompletions, "Expected legacy OpenAiCompatible to map to Chat Completions.");
+    Assert(settings.ToLlmEndpointSettings().CanCall, "Expected legacy OpenAI-compatible endpoint to remain callable.");
+    return Task.CompletedTask;
+}
+
+static Task RuntimeSettingsMapOpenAiResponsesEndpoint()
+{
+    var json = """
+        {
+          "ExternalLlmEnabled": true,
+          "LlmProvider": "OpenAiResponses",
+          "LlmEndpoint": "http://localhost:8000",
+          "LlmModel": "qwen-local"
+        }
+        """;
+    var settings = RuntimeSettingsSerializer.ParseOrDefault(json);
+    Assert(settings.LlmProvider == LlmProviderKind.OpenAiResponses, "Expected Responses provider.");
+    Assert(settings.ToLlmEndpointSettings().CanCall, "Expected Responses endpoint to be callable.");
+    return Task.CompletedTask;
+}
+
+static Task RuntimeSettingsSerializeCanonicalProviderNames()
+{
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "http://localhost:8000",
+        LlmModel = "qwen-local"
+    };
+    var json = RuntimeSettingsSerializer.Serialize(settings);
+    Assert(json.Contains("\"LlmProvider\": \"OpenAiChatCompletions\"", StringComparison.Ordinal), "Expected canonical provider name in saved settings.");
+    Assert(!json.Contains("\"OpenAiCompatible\"", StringComparison.Ordinal), "Expected legacy provider alias not to be used when saving settings.");
+    return Task.CompletedTask;
 }
 
 static Task RuntimeSettingsDefaultUnlimitedRecentScan()
@@ -462,7 +516,7 @@ static async Task LlmOnlyFailureCreatesReviewCandidate()
 static async Task LlmEndpointProbeValidatesJsonObject()
 {
     var settings = new LlmEndpointSettings(
-        LlmProviderKind.Ollama,
+        LlmProviderKind.OllamaNative,
         Enabled: true,
         Endpoint: "http://localhost:11434",
         Model: "probe-model",
@@ -475,6 +529,37 @@ static async Task LlmEndpointProbeValidatesJsonObject()
     Assert(success.Success, "Expected valid JSON probe success.");
     Assert(success.Code == "ok", "Expected ok code.");
     Assert(!invalid.Success && invalid.Code == "invalid-json", "Expected invalid JSON probe failure.");
+}
+
+static async Task OpenAiResponsesClientExtractsOutputText()
+{
+    var settings = new LlmEndpointSettings(
+        LlmProviderKind.OpenAiResponses,
+        Enabled: true,
+        Endpoint: "http://localhost:8000/v1",
+        Model: "qwen-local",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+    var handler = new StubHttpMessageHandler("""
+        {
+          "output": [
+            {
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "{\"ok\":true}"
+                }
+              ]
+            }
+          ]
+        }
+        """);
+    var client = new OpenAiResponsesLlmClient(new HttpClient(handler), settings);
+
+    var result = await client.CompleteJsonAsync("system", "user");
+
+    Assert(result == """{"ok":true}""", "Expected Responses output text to be extracted.");
+    Assert(handler.LastRequestUri?.AbsolutePath == "/v1/responses", "Expected Responses endpoint path.");
 }
 
 static async Task RecentMailScanHonorsRequestWindow()
@@ -685,6 +770,48 @@ static async Task SqliteDoubleReviewApprovalIsIdempotent()
     }
 }
 
+static async Task SqliteReviewCandidateSnoozeHidesUntilDue()
+{
+    var (store, dbPath, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var mail = Mail("검토 요청", "가능하면 검토 부탁드립니다.", "review-snooze");
+        var analysis = new FollowUpAnalysis(
+            FollowUpKind.ReviewNeeded,
+            AnalysisDisposition.Review,
+            0.61,
+            "나중에 볼 후보",
+            "확인 필요 후보",
+            "검토 부탁",
+            null);
+        var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
+
+        await store.SaveReviewCandidateAsync(candidate);
+        var snoozed = await store.SnoozeReviewCandidateAsync(candidate.Id, DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow);
+        var hidden = await store.ListReviewCandidatesAsync();
+
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "UPDATE review_candidates SET snooze_until = $past WHERE id = $id";
+            command.Parameters.AddWithValue("$past", DateTimeOffset.UtcNow.AddMinutes(-1).ToString("O"));
+            command.Parameters.AddWithValue("$id", candidate.Id.ToString());
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var visibleAgain = await store.ListReviewCandidatesAsync();
+
+        Assert(snoozed, "Expected candidate snooze update.");
+        Assert(hidden.Count == 0, "Expected snoozed candidate hidden before due.");
+        Assert(visibleAgain.Count == 1, "Expected candidate visible again after snooze time.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
 static async Task SqliteStaleReviewIgnoreDoesNotRedactApprovedTask()
 {
     var (store, _, cleanup) = await CreateTempStoreAsync();
@@ -752,9 +879,11 @@ static async Task SqliteMigratesPreDailyBoardSchema()
         var columns = await QueryColumnAsync(dbPath, "SELECT name FROM pragma_table_info('review_candidates')");
         Assert(columns.Contains("resolved_at"), "Expected migration to add resolved_at.");
         Assert(columns.Contains("resolution"), "Expected migration to add resolution.");
+        Assert(columns.Contains("snooze_until"), "Expected migration to add snooze_until.");
 
         var indexes = await QueryColumnAsync(dbPath, "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'review_candidates'");
         Assert(indexes.Contains("idx_review_active"), "Expected active review index after migration.");
+        Assert(indexes.Contains("idx_review_active_snooze"), "Expected active review snooze index after migration.");
     }
     finally
     {
@@ -953,10 +1082,15 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         Task.FromResult<IReadOnlyList<LocalTaskItem>>(Tasks.Where(task => task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed).ToList());
 
     public Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<ReviewCandidate>>(Candidates.Where(candidate => !candidate.Suppressed).ToList());
+        Task.FromResult<IReadOnlyList<ReviewCandidate>>(Candidates
+            .Where(candidate => !candidate.Suppressed && (candidate.SnoozeUntil is null || candidate.SnoozeUntil <= DateTimeOffset.UtcNow))
+            .ToList());
 
     public Task<ReviewCandidate?> GetReviewCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default) =>
-        Task.FromResult<ReviewCandidate?>(Candidates.FirstOrDefault(candidate => candidate.Id == candidateId && !candidate.Suppressed));
+        Task.FromResult<ReviewCandidate?>(Candidates.FirstOrDefault(candidate =>
+            candidate.Id == candidateId
+            && !candidate.Suppressed
+            && (candidate.SnoozeUntil is null || candidate.SnoozeUntil <= DateTimeOffset.UtcNow)));
 
     public Task<LocalTaskItem?> ResolveReviewCandidateAsTaskAsync(Guid candidateId, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
@@ -982,6 +1116,18 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         Tasks.Add(task);
         Candidates[index] = candidate with { Suppressed = true };
         return Task.FromResult<LocalTaskItem?>(task);
+    }
+
+    public Task<bool> SnoozeReviewCandidateAsync(Guid candidateId, DateTimeOffset until, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = Candidates.FindIndex(candidate => candidate.Id == candidateId && !candidate.Suppressed);
+        if (index < 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        Candidates[index] = Candidates[index] with { SnoozeUntil = until };
+        return Task.FromResult(true);
     }
 
     public Task<bool> ResolveReviewCandidateAsNotTaskAsync(Guid candidateId, DateTimeOffset now, CancellationToken cancellationToken = default)
@@ -1083,6 +1229,27 @@ sealed class ThrowingAnalyzer : IFollowUpAnalyzer
     {
         Called = true;
         throw new InvalidOperationException("Fallback should not be called.");
+    }
+}
+
+sealed class StubHttpMessageHandler : HttpMessageHandler
+{
+    private readonly string _response;
+
+    public StubHttpMessageHandler(string response)
+    {
+        _response = response;
+    }
+
+    public Uri? LastRequestUri { get; private set; }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        LastRequestUri = request.RequestUri;
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(_response, Encoding.UTF8, "application/json")
+        });
     }
 }
 

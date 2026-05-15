@@ -7,36 +7,53 @@
 | Provider | 용도 | Endpoint 예시 |
 | --- | --- | --- |
 | `Disabled` | rule-only 안전 모드 | 없음 |
-| `Ollama` | Ollama `/api/chat` | `http://localhost:11434` |
-| `OpenAiCompatible` | vLLM/OpenAI-compatible `/v1/chat/completions` | `http://localhost:8000` |
+| `OllamaNative` | Ollama native `/api/chat` | `http://localhost:11434` |
+| `OpenAiChatCompletions` | OpenAI-compatible `/v1/chat/completions` | `http://localhost:8000` |
+| `OpenAiResponses` | OpenAI-compatible `/v1/responses` | `http://localhost:8000` |
+
+기존 설정 파일의 `Ollama`, `OpenAiCompatible` 문자열은 각각 `OllamaNative`, `OpenAiChatCompletions`로 계속 호환됩니다.
 
 ## Ollama 예시
 
 ```json
 {
   "ExternalLlmEnabled": true,
-  "LlmProvider": "Ollama",
+  "LlmProvider": "OllamaNative",
   "LlmEndpoint": "http://localhost:11434",
   "LlmModel": "qwen3.6",
   "LlmFallbackPolicy": "LlmThenRules"
 }
 ```
 
-## vLLM/OpenAI-compatible 예시
+## OpenAI-compatible Chat Completions 예시
 
 ```json
 {
   "ExternalLlmEnabled": true,
-  "LlmProvider": "OpenAiCompatible",
+  "LlmProvider": "OpenAiChatCompletions",
   "LlmEndpoint": "http://localhost:8000",
   "LlmModel": "qwen3.6",
   "LlmApiKey": null,
-  "LlmApiKeyEnvironmentVariable": "OPENAI_API_KEY",
+  "LlmApiKeyEnvironmentVariable": null,
   "LlmFallbackPolicy": "LlmOnly"
 }
 ```
 
-`LlmApiKeyEnvironmentVariable`를 쓰면 설정 파일에 토큰을 직접 쓰지 않고 Windows 환경 변수에서 읽습니다.
+## OpenAI-compatible Responses 예시
+
+```json
+{
+  "ExternalLlmEnabled": true,
+  "LlmProvider": "OpenAiResponses",
+  "LlmEndpoint": "http://localhost:8000",
+  "LlmModel": "qwen3.6",
+  "LlmApiKey": null,
+  "LlmApiKeyEnvironmentVariable": null,
+  "LlmFallbackPolicy": "LlmOnly"
+}
+```
+
+`LlmApiKeyEnvironmentVariable`는 브라우저 로그인이나 Enterprise 계정 재사용 기능이 아닙니다. 로컬/내부 서버가 Bearer token을 요구할 때만 설정 파일에 토큰 값을 직접 쓰지 않고 Windows 환경 변수 이름으로 참조하기 위한 고급 옵션입니다.
 
 ## Fallback 정책
 
@@ -61,5 +78,5 @@
 
 - prompt와 raw mail body는 저장하지 않습니다.
 - SQLite에는 source hash, 짧은 제목/사유/근거 snippet만 저장합니다.
-- 외부 네트워크 LLM은 승인된 보안 정책이 허용할 때만 켭니다.
+- 외부 네트워크 LLM은 기본 사용 시나리오가 아닙니다. 승인된 보안 정책이 허용할 때만 켭니다.
 - LLM JSON 파싱이 실패하면 선택한 `LlmFallbackPolicy`에 따라 검토함에 남기거나 rule-based analyzer로 fallback합니다.

@@ -34,6 +34,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 
         await EnsureColumnAsync(connection, "review_candidates", "resolved_at", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "review_candidates", "resolution", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "review_candidates", "snooze_until", "TEXT NULL", cancellationToken).ConfigureAwait(false);
 
         command.CommandText = Schema.IndexesSql;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -64,8 +65,8 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         var command = connection.CreateCommand();
         command.CommandText = """
             INSERT OR REPLACE INTO review_candidates
-            (id, source_id_hash, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed)
-            VALUES ($id, $source, $kind, $confidence, $title, $reason, $evidence, $dueAt, $created, $suppressed)
+            (id, source_id_hash, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, snooze_until, suppressed)
+            VALUES ($id, $source, $kind, $confidence, $title, $reason, $evidence, $dueAt, $created, $snoozeUntil, $suppressed)
             """;
         command.Parameters.AddWithValue("$id", candidate.Id.ToString());
         command.Parameters.AddWithValue("$source", candidate.SourceIdHash);
@@ -76,6 +77,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         command.Parameters.AddWithValue("$evidence", (object?)EvidencePolicy.Truncate(candidate.Analysis.EvidenceSnippet) ?? DBNull.Value);
         command.Parameters.AddWithValue("$dueAt", (object?)candidate.Analysis.DueAt?.ToString("O") ?? DBNull.Value);
         command.Parameters.AddWithValue("$created", candidate.CreatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$snoozeUntil", (object?)candidate.SnoozeUntil?.ToUniversalTime().ToString("O") ?? DBNull.Value);
         command.Parameters.AddWithValue("$suppressed", candidate.Suppressed ? 1 : 0);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -113,12 +115,15 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, source_id_hash, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed
+            SELECT id, source_id_hash, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed, snooze_until
             FROM review_candidates
-            WHERE suppressed = 0 AND resolved_at IS NULL
+            WHERE suppressed = 0
+              AND resolved_at IS NULL
+              AND (snooze_until IS NULL OR snooze_until <= $now)
             ORDER BY created_at DESC
             LIMIT 100
             """;
+        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
         var candidates = new List<ReviewCandidate>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -186,6 +191,24 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return task;
+    }
+
+    public async Task<bool> SnoozeReviewCandidateAsync(Guid candidateId, DateTimeOffset until, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        var update = connection.CreateCommand();
+        update.CommandText = """
+            UPDATE review_candidates
+            SET snooze_until = $snoozeUntil
+            WHERE id = $id AND suppressed = 0 AND resolved_at IS NULL
+            """;
+        update.Parameters.AddWithValue("$id", candidateId.ToString());
+        var effectiveUntil = until <= now ? now.AddHours(1) : until;
+        update.Parameters.AddWithValue("$snoozeUntil", effectiveUntil.ToUniversalTime().ToString("O"));
+        var rows = await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        return rows > 0;
     }
 
     public async Task<bool> ResolveReviewCandidateAsNotTaskAsync(Guid candidateId, DateTimeOffset now, CancellationToken cancellationToken = default)
@@ -338,12 +361,16 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         var lookup = connection.CreateCommand();
         lookup.Transaction = transaction;
         lookup.CommandText = """
-            SELECT id, source_id_hash, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed
+            SELECT id, source_id_hash, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed, snooze_until
             FROM review_candidates
-            WHERE id = $id AND suppressed = 0 AND resolved_at IS NULL
+            WHERE id = $id
+              AND suppressed = 0
+              AND resolved_at IS NULL
+              AND (snooze_until IS NULL OR snooze_until <= $now)
             LIMIT 1
             """;
         lookup.Parameters.AddWithValue("$id", candidateId.ToString());
+        lookup.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
 
         await using var reader = await lookup.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadCandidate(reader) : null;
@@ -416,6 +443,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             reader.GetString(1),
             analysis,
             DateTimeOffset.Parse(reader.GetString(8)),
-            reader.GetInt32(9) == 1);
+            reader.GetInt32(9) == 1,
+            MaybeDate(reader.GetValue(10)));
     }
 }

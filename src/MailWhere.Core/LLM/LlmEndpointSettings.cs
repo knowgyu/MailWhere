@@ -2,9 +2,14 @@ namespace MailWhere.Core.LLM;
 
 public enum LlmProviderKind
 {
-    Disabled,
-    Ollama,
-    OpenAiCompatible
+    Disabled = 0,
+    OllamaNative = 1,
+    OpenAiChatCompletions = 2,
+    OpenAiResponses = 3,
+
+    // Backward-compatible aliases for config files saved by older builds.
+    Ollama = OllamaNative,
+    OpenAiCompatible = OpenAiChatCompletions
 }
 
 public sealed record LlmEndpointSettings(

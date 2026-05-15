@@ -69,5 +69,15 @@ public partial class DailyBoardWindow : Window
         }
     }
 
+    private void OpenReview_Click(object sender, RoutedEventArgs e)
+    {
+        if (Owner is MainWindow mainWindow)
+        {
+            mainWindow.OpenReviewTab();
+        }
+
+        Close();
+    }
+
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 }
