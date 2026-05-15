@@ -7,6 +7,7 @@ using OutlookAiSecretary.Core.Mail;
 using OutlookAiSecretary.Core.Notifications;
 using OutlookAiSecretary.Core.Pipeline;
 using OutlookAiSecretary.Core.Reminders;
+using OutlookAiSecretary.Core.Scheduling;
 using OutlookAiSecretary.Core.Scanning;
 using OutlookAiSecretary.Core.Storage;
 using OutlookAiSecretary.Storage;
@@ -23,19 +24,25 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Ambiguous mail does not auto create", AmbiguousMailDoesNotAutoCreate),
     ("Pipeline suppresses duplicate source", PipelineSuppressesDuplicateSource),
     ("Manual task can be created", ManualTaskCanBeCreated),
-    ("Not-a-task feedback persists", NotATaskFeedbackPersists),
+    ("Review candidate ignore persists", ReviewCandidateIgnorePersists),
     ("Notification throttle suppresses repeat alerts", NotificationThrottleSuppressesRepeatAlerts),
     ("Diagnostics exporter drops sensitive detail keys", DiagnosticsExporterDropsSensitiveDetailKeys),
     ("Diagnostics exporter sanitizes allowed detail values", DiagnosticsExporterSanitizesAllowedDetailValues),
     ("Runtime diagnostics export includes safe gate codes", RuntimeDiagnosticsExportIncludesSafeGateCodes),
     ("Partial runtime settings keep safe defaults", PartialRuntimeSettingsKeepSafeDefaults),
     ("Runtime settings map Ollama endpoint", RuntimeSettingsMapOllamaEndpoint),
+    ("Runtime settings default daily board time", RuntimeSettingsDefaultDailyBoardTime),
+    ("Daily board planner schedules next whole hour", DailyBoardPlannerSchedulesNextWholeHour),
     ("LLM JSON creates calendar task", LlmJsonCreatesCalendarTask),
     ("Invalid LLM JSON falls back to rules", InvalidLlmJsonFallsBackToRules),
     ("Recent mail scan honors request window", RecentMailScanHonorsRequestWindow),
     ("Reminder planner emits lookahead notifications", ReminderPlannerEmitsLookaheadNotifications),
     ("SQLite store truncates source-derived fields", SqliteStoreTruncatesSourceDerivedFields),
     ("SQLite review candidates can be listed", SqliteReviewCandidatesCanBeListed),
+    ("SQLite review candidate can be resolved as task", SqliteReviewCandidateCanBeResolvedAsTask),
+    ("SQLite double review approval is idempotent", SqliteDoubleReviewApprovalIsIdempotent),
+    ("SQLite stale review ignore does not redact approved task", SqliteStaleReviewIgnoreDoesNotRedactApprovedTask),
+    ("SQLite migrates pre daily board schema", SqliteMigratesPreDailyBoardSchema),
     ("SQLite delete source-derived data redacts task and candidate", SqliteDeleteSourceDerivedDataRedactsTaskAndCandidate),
     ("SQLite schema avoids raw mail columns", SqliteSchemaAvoidsRawMailColumns)
 };
@@ -169,11 +176,29 @@ static async Task ManualTaskCanBeCreated()
     Assert(store.Tasks.Count == 1, "Expected persisted manual task.");
 }
 
-static async Task NotATaskFeedbackPersists()
+static async Task ReviewCandidateIgnorePersists()
 {
     var store = new FakeStore();
-    await store.MarkNotATaskAsync("abc");
-    Assert(store.NotTaskSources.Contains("abc"), "Expected not-a-task source recorded.");
+    var mail = Mail("검토 후보", "검토만 부탁드립니다.", "fake-ignore");
+    var candidate = ReviewCandidate.FromAnalysis(
+        mail,
+        new FollowUpAnalysis(
+            FollowUpKind.ReviewNeeded,
+            AnalysisDisposition.Review,
+            0.5,
+            "검토 후보",
+            "확인 필요",
+            "검토",
+            null),
+        DateTimeOffset.UtcNow);
+
+    await store.SaveReviewCandidateAsync(candidate);
+    var ignored = await store.ResolveReviewCandidateAsNotTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
+    var activeCandidates = await store.ListReviewCandidatesAsync();
+
+    Assert(ignored, "Expected candidate ignore to be recorded.");
+    Assert(activeCandidates.Count == 0, "Expected ignored candidate to be hidden.");
+    Assert(store.Candidates.Single().Analysis.SuggestedTitle == LocalTaskItem.RedactedTitle, "Expected ignored candidate source-derived title redacted.");
 }
 
 static Task NotificationThrottleSuppressesRepeatAlerts()
@@ -306,6 +331,44 @@ static Task RuntimeSettingsMapOllamaEndpoint()
     {
         Environment.SetEnvironmentVariable("OAS_TEST_KEY", null);
     }
+}
+
+static Task RuntimeSettingsDefaultDailyBoardTime()
+{
+    var defaults = RuntimeSettingsSerializer.ParseOrDefault("{}");
+    Assert(defaults.DailyBoardTime == "08:00", "Expected default daily board time.");
+
+    var invalid = RuntimeSettingsSerializer.ParseOrDefault("""{"DailyBoardTime":"not-time"}""");
+    Assert(invalid.DailyBoardTime == "08:00", "Expected invalid board time to fall back.");
+
+    var valid = RuntimeSettingsSerializer.ParseOrDefault("""{"DailyBoardTime":"9:30"}""");
+    Assert(valid.DailyBoardTime == "09:30", "Expected board time normalization.");
+    return Task.CompletedTask;
+}
+
+static Task DailyBoardPlannerSchedulesNextWholeHour()
+{
+    var before = new DateTimeOffset(2026, 5, 15, 7, 30, 0, TimeSpan.FromHours(9));
+    var beforePlan = DailyBoardPlanner.Plan(before, "08:00", lastShownDateKey: null);
+    Assert(!beforePlan.ShouldShowNow, "Before 08:00 should not show immediately.");
+    Assert(beforePlan.NextShowAt == new DateTimeOffset(2026, 5, 15, 8, 0, 0, TimeSpan.FromHours(9)), "Expected 08:00 schedule.");
+
+    var after = new DateTimeOffset(2026, 5, 15, 8, 13, 0, TimeSpan.FromHours(9));
+    var afterPlan = DailyBoardPlanner.Plan(after, "08:00", lastShownDateKey: null);
+    Assert(!afterPlan.ShouldShowNow, "After 08:00 but not top-of-hour should wait.");
+    Assert(afterPlan.NextShowAt == new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)), "Expected next whole hour.");
+
+    var topOfHour = new DateTimeOffset(2026, 5, 15, 9, 0, 30, TimeSpan.FromHours(9));
+    var duePlan = DailyBoardPlanner.Plan(topOfHour, "08:00", lastShownDateKey: null);
+    Assert(duePlan.ShouldShowNow, "Top-of-hour after 08:00 should show.");
+
+    var customMinute = new DateTimeOffset(2026, 5, 15, 8, 30, 20, TimeSpan.FromHours(9));
+    var customPlan = DailyBoardPlanner.Plan(customMinute, "08:30", lastShownDateKey: null);
+    Assert(customPlan.ShouldShowNow, "Custom board time should show during its scheduled minute.");
+
+    var alreadyShown = DailyBoardPlanner.Plan(topOfHour, "08:00", DailyBoardPlanner.ToDateKey(topOfHour));
+    Assert(!alreadyShown.ShouldShowNow, "Already-shown date should not show again.");
+    return Task.CompletedTask;
 }
 
 static async Task LlmJsonCreatesCalendarTask()
@@ -450,6 +513,155 @@ static async Task SqliteReviewCandidatesCanBeListed()
     finally
     {
         cleanup();
+    }
+}
+
+static async Task SqliteReviewCandidateCanBeResolvedAsTask()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var mail = Mail("승인 요청", "내일까지 승인 부탁드립니다.", "review-approve");
+        var dueAt = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.FromHours(9));
+        var analysis = new FollowUpAnalysis(
+            FollowUpKind.ActionRequested,
+            AnalysisDisposition.Review,
+            0.72,
+            "승인 요청 처리",
+            "확인 필요 후보",
+            "승인 부탁",
+            dueAt);
+        var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
+
+        await store.SaveReviewCandidateAsync(candidate);
+        var task = await store.ResolveReviewCandidateAsTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
+        var openTasks = await store.ListOpenTasksAsync();
+        var activeCandidates = await store.ListReviewCandidatesAsync();
+
+        Assert(task is not null, "Expected candidate to resolve into task.");
+        Assert(openTasks.Count == 1, "Expected one created task.");
+        Assert(openTasks[0].SourceIdHash == mail.SourceHash, "Expected source hash to carry over.");
+        Assert(openTasks[0].DueAt == dueAt, "Expected due date to carry over.");
+        Assert(activeCandidates.Count == 0, "Expected resolved candidate hidden from active list.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteDoubleReviewApprovalIsIdempotent()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var mail = Mail("승인 요청", "내일까지 승인 부탁드립니다.", "review-double-approve");
+        var analysis = new FollowUpAnalysis(
+            FollowUpKind.ActionRequested,
+            AnalysisDisposition.Review,
+            0.72,
+            "승인 요청 처리",
+            "확인 필요 후보",
+            "승인 부탁",
+            null);
+        var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
+
+        await store.SaveReviewCandidateAsync(candidate);
+        var first = await store.ResolveReviewCandidateAsTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
+        var second = await store.ResolveReviewCandidateAsTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
+        var openTasks = await store.ListOpenTasksAsync();
+
+        Assert(first is not null, "Expected first approval to create a task.");
+        Assert(second is null, "Expected second approval to be a no-op.");
+        Assert(openTasks.Count == 1, "Expected only one task after double approval.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteStaleReviewIgnoreDoesNotRedactApprovedTask()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var mail = Mail("승인 요청", "내일까지 승인 부탁드립니다.", "review-stale-ignore");
+        var analysis = new FollowUpAnalysis(
+            FollowUpKind.ActionRequested,
+            AnalysisDisposition.Review,
+            0.72,
+            "승인 요청 처리",
+            "확인 필요 후보",
+            "승인 부탁",
+            null);
+        var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
+
+        await store.SaveReviewCandidateAsync(candidate);
+        var task = await store.ResolveReviewCandidateAsTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
+        var ignored = await store.ResolveReviewCandidateAsNotTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
+        var openTasks = await store.ListOpenTasksAsync();
+
+        Assert(task is not null, "Expected candidate to be approved first.");
+        Assert(!ignored, "Expected stale ignore to be a no-op.");
+        Assert(openTasks.Count == 1, "Expected approved task to remain.");
+        Assert(openTasks[0].Title == "승인 요청 처리", "Expected approved task title not to be redacted.");
+        Assert(!openTasks[0].SourceDerivedDataDeleted, "Expected approved task source-derived data to remain.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteMigratesPreDailyBoardSchema()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "OutlookAiSecretary.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var dbPath = Path.Combine(directory, "legacy.db");
+    try
+    {
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE review_candidates (
+                    id TEXT PRIMARY KEY,
+                    source_id_hash TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    suggested_title TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    evidence_snippet TEXT NULL,
+                    due_at TEXT NULL,
+                    created_at TEXT NOT NULL,
+                    suppressed INTEGER NOT NULL DEFAULT 0
+                );
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var store = new SqliteFollowUpStore(dbPath);
+        await store.InitializeAsync();
+
+        var columns = await QueryColumnAsync(dbPath, "SELECT name FROM pragma_table_info('review_candidates')");
+        Assert(columns.Contains("resolved_at"), "Expected migration to add resolved_at.");
+        Assert(columns.Contains("resolution"), "Expected migration to add resolution.");
+
+        var indexes = await QueryColumnAsync(dbPath, "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'review_candidates'");
+        Assert(indexes.Contains("idx_review_active"), "Expected active review index after migration.");
+    }
+    finally
+    {
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+        catch
+        {
+            // Test cleanup is best-effort.
+        }
     }
 }
 
@@ -605,12 +817,12 @@ static void Assert(bool condition, string message)
     }
 }
 
-sealed class FakeStore : IFollowUpStore
+sealed class FakeStore : IFollowUpStore, IAppStateStore
 {
     public List<LocalTaskItem> Tasks { get; } = [];
     public List<ReviewCandidate> Candidates { get; } = [];
     public HashSet<string> Processed { get; } = [];
-    public HashSet<string> NotTaskSources { get; } = [];
+    public Dictionary<string, string> AppState { get; } = new(StringComparer.Ordinal);
 
     public Task<bool> HasProcessedSourceAsync(string sourceIdHash, CancellationToken cancellationToken = default) =>
         Task.FromResult(Processed.Contains(sourceIdHash));
@@ -639,10 +851,55 @@ sealed class FakeStore : IFollowUpStore
     public Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<ReviewCandidate>>(Candidates.Where(candidate => !candidate.Suppressed).ToList());
 
-    public Task MarkNotATaskAsync(string sourceIdHash, CancellationToken cancellationToken = default)
+    public Task<ReviewCandidate?> GetReviewCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<ReviewCandidate?>(Candidates.FirstOrDefault(candidate => candidate.Id == candidateId && !candidate.Suppressed));
+
+    public Task<LocalTaskItem?> ResolveReviewCandidateAsTaskAsync(Guid candidateId, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
-        NotTaskSources.Add(sourceIdHash);
-        return DeleteSourceDerivedDataForSourceAsync(sourceIdHash, cancellationToken);
+        var index = Candidates.FindIndex(candidate => candidate.Id == candidateId && !candidate.Suppressed);
+        if (index < 0)
+        {
+            return Task.FromResult<LocalTaskItem?>(null);
+        }
+
+        var candidate = Candidates[index];
+        var task = new LocalTaskItem(
+            Guid.NewGuid(),
+            candidate.Analysis.SuggestedTitle,
+            candidate.Analysis.DueAt,
+            candidate.SourceIdHash,
+            candidate.Analysis.Confidence,
+            candidate.Analysis.Reason,
+            candidate.Analysis.EvidenceSnippet,
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now);
+        Tasks.Add(task);
+        Candidates[index] = candidate with { Suppressed = true };
+        return Task.FromResult<LocalTaskItem?>(task);
+    }
+
+    public Task<bool> ResolveReviewCandidateAsNotTaskAsync(Guid candidateId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = Candidates.FindIndex(candidate => candidate.Id == candidateId && !candidate.Suppressed);
+        if (index < 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        var candidate = Candidates[index];
+        Candidates[index] = candidate with
+        {
+            Suppressed = true,
+            Analysis = candidate.Analysis with
+            {
+                SuggestedTitle = LocalTaskItem.RedactedTitle,
+                Reason = LocalTaskItem.RedactedReason,
+                EvidenceSnippet = null
+            }
+        };
+        return Task.FromResult(true);
     }
 
     public Task DeleteSourceDerivedDataAsync(Guid taskId, CancellationToken cancellationToken = default)
@@ -681,6 +938,15 @@ sealed class FakeStore : IFollowUpStore
             }
         }
 
+        return Task.CompletedTask;
+    }
+
+    public Task<string?> GetAppStateAsync(string key, CancellationToken cancellationToken = default) =>
+        Task.FromResult(AppState.TryGetValue(key, out var value) ? value : null);
+
+    public Task SetAppStateAsync(string key, string value, CancellationToken cancellationToken = default)
+    {
+        AppState[key] = value;
         return Task.CompletedTask;
     }
 }

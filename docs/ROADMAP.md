@@ -29,9 +29,12 @@ Not included yet:
 
 Priority: high.
 
+- Daily board: default 08:00 board window, or the next top-of-hour when the app starts after the daily time.
+- Lightweight review popup: new review candidates can be accepted/ignored from the popup, with Ctrl+Y/Ctrl+N enabled only after deliberate popup focus.
+- Conservative automatic scan timer after smoke gate so new review candidates surface while the app stays in tray.
 - Review tab: approve as task, dismiss as not-a-task, edit title/due date.
 - “왜 이게 떴는지” panel: summary/reason/evidence/confidence/fallback source.
-- Feedback loop: not-a-task source hash suppresses duplicate future candidates.
+- Feedback loop: candidate-id not-a-task decisions suppress the current candidate; future duplicate suppression should stay non-destructive and avoid source-wide redaction.
 - Scan result grouping: task created / review / ignored / duplicate / warning.
 - LLM quality counters: invalid JSON, timeout, fallback rate.
 
@@ -39,6 +42,7 @@ Acceptance:
 
 - A non-developer can clear all review candidates without opening a database.
 - False positives can be dismissed permanently without raw body retention.
+- Daily board appears once per local day without spamming repeated popups.
 
 ## Phase 0.3 — safer always-on behavior
 

@@ -16,6 +16,8 @@
   - OpenAI-compatible/vLLM `/v1/chat/completions`
 - SQLite 로컬 task 저장
 - 낮은 확신 후보를 검토함에 표시
+- 기본 08:00 오늘의 업무 보드 창 표시(이후 실행 시 다음 정시)
+- 확인 필요 후보 우측 하단 팝업 + 버튼 처리 + 초점 상태 Ctrl+Y 등록 / Ctrl+N 무시(후보 단위 처리)
 - D-day 표시와 D-7/D-1/D-day reminder planning
 - tray 상주 + tray notification fallback
 - GitHub Actions Windows portable zip 빌드

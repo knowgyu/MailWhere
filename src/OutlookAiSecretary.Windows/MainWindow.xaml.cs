@@ -5,11 +5,14 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using OutlookAiSecretary.Core.Analysis;
 using OutlookAiSecretary.Core.Capabilities;
+using OutlookAiSecretary.Core.Domain;
 using OutlookAiSecretary.Core.LLM;
 using OutlookAiSecretary.Core.Localization;
+using OutlookAiSecretary.Core.Mail;
 using OutlookAiSecretary.Core.Notifications;
 using OutlookAiSecretary.Core.Pipeline;
 using OutlookAiSecretary.Core.Reminders;
+using OutlookAiSecretary.Core.Scheduling;
 using OutlookAiSecretary.Core.Scanning;
 using OutlookAiSecretary.Storage;
 using OutlookAiSecretary.OutlookCom;
@@ -21,8 +24,15 @@ public partial class MainWindow : Window
     private SqliteFollowUpStore? _store;
     private IUserNotificationSink _notificationSink = new NullNotificationSink();
     private readonly NotificationThrottle _notificationThrottle = new(TimeSpan.FromHours(1));
+    private readonly Queue<ReviewCandidate> _pendingReviewToasts = new();
     private RuntimeSettings _settings;
     private DispatcherTimer? _reminderTimer;
+    private DispatcherTimer? _dailyBoardTimer;
+    private DispatcherTimer? _automaticScanTimer;
+    private bool _scanInProgress;
+    private DailyBoardWindow? _dailyBoardWindow;
+    private ReviewCandidateToastWindow? _reviewCandidateToast;
+    private bool _reviewCandidateToastOpening;
 
     public MainWindow()
     {
@@ -109,49 +119,78 @@ public partial class MainWindow : Window
 
         if (_settings.AutomaticWatcherRequested && _settings.SmokeGatePassed)
         {
-            await ScanRecentMailAsync(showSummaryNotification: false);
+            await ScanRecentMailAsync(showSummaryNotification: false, refreshSettingsFromControls: false);
+            StartAutomaticScanTimer();
         }
+
+        StartDailyBoardTimer();
+        await MaybeShowDailyBoardAsync();
     }
 
-    private async Task<MailScanSummary> ScanRecentMailAsync(bool showSummaryNotification)
+    private async Task<MailScanSummary> ScanRecentMailAsync(bool showSummaryNotification, bool refreshSettingsFromControls = true)
     {
-        _settings = ReadSettingsFromControls();
-        WindowsRuntimeSettingsStore.Save(_settings);
-        StatusText.Text = "최근 메일을 읽고 Action item을 분석하는 중입니다…";
-
-        var store = await GetStoreAsync();
-        var analyzer = BuildAnalyzer(_settings);
-        var pipeline = new FollowUpPipeline(analyzer, store);
-        var scanner = new MailActionScanner(new OutlookComMailSource(), pipeline);
-        var now = DateTimeOffset.Now;
-        var request = new MailScanRequest(
-            _settings.RecentScanMaxItems,
-            IncludeBody: true,
-            now.AddDays(-_settings.RecentScanDays));
-
-        var summary = await scanner.ScanAsync(request);
-        var smokeGateRecorded = showSummaryNotification && MarkSmokeGatePassedAfterManualScan(summary);
-        if (showSummaryNotification && smokeGateRecorded)
+        if (_scanInProgress)
         {
-            StatusText.Text = "수동 스캔이 성공해 자동 watcher smoke gate를 통과 처리했습니다.";
+            return new MailScanSummary(0, 0, 0, 0, 0, 0, Array.Empty<MailReadWarning>());
         }
 
-        await RefreshTasksAsync();
-        await RefreshReviewCandidatesAsync();
-        await NotifyDueRemindersAsync();
-
-        StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 검토 후보 {summary.ReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건"
-            + (smokeGateRecorded ? " · smoke gate 통과" : string.Empty);
-        if (showSummaryNotification)
+        _scanInProgress = true;
+        try
         {
-            await _notificationSink.ShowAsync(new UserNotification(
-                UserNotificationKind.ScanSummary,
-                "최근 메일 스캔 완료",
-                $"할 일 {summary.TaskCreatedCount}건, 검토 후보 {summary.ReviewCandidateCount}건을 찾았습니다.",
-                "scan-summary"));
-        }
+            if (refreshSettingsFromControls)
+            {
+                _settings = ReadSettingsFromControls();
+                WindowsRuntimeSettingsStore.Save(_settings);
+            }
 
-        return summary;
+            StatusText.Text = "최근 메일을 읽고 Action item을 분석하는 중입니다…";
+
+            var store = await GetStoreAsync();
+            var beforeCandidateIds = (await store.ListReviewCandidatesAsync())
+                .Select(candidate => candidate.Id)
+                .ToHashSet();
+            var analyzer = BuildAnalyzer(_settings);
+            var pipeline = new FollowUpPipeline(analyzer, store);
+            var scanner = new MailActionScanner(new OutlookComMailSource(), pipeline);
+            var now = DateTimeOffset.Now;
+            var request = new MailScanRequest(
+                _settings.RecentScanMaxItems,
+                IncludeBody: true,
+                now.AddDays(-_settings.RecentScanDays));
+
+            var summary = await scanner.ScanAsync(request);
+            var smokeGateRecorded = showSummaryNotification && MarkSmokeGatePassedAfterManualScan(summary);
+            if (showSummaryNotification && smokeGateRecorded)
+            {
+                StatusText.Text = "수동 스캔이 성공해 자동 watcher smoke gate를 통과 처리했습니다.";
+                if (_settings.AutomaticWatcherRequested)
+                {
+                    StartAutomaticScanTimer();
+                }
+            }
+
+            await RefreshTasksAsync();
+            var reviewCandidates = await RefreshReviewCandidatesAsync();
+            await NotifyDueRemindersAsync();
+            EnqueueReviewCandidateToasts(reviewCandidates.Where(candidate => !beforeCandidateIds.Contains(candidate.Id)));
+
+            StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 검토 후보 {summary.ReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건"
+                + (smokeGateRecorded ? " · smoke gate 통과" : string.Empty);
+            if (showSummaryNotification)
+            {
+                await _notificationSink.ShowAsync(new UserNotification(
+                    UserNotificationKind.ScanSummary,
+                    "최근 메일 스캔 완료",
+                    $"할 일 {summary.TaskCreatedCount}건, 검토 후보 {summary.ReviewCandidateCount}건을 찾았습니다.",
+                    "scan-summary"));
+            }
+
+            return summary;
+        }
+        finally
+        {
+            _scanInProgress = false;
+        }
     }
 
     private void StartReminderTimer()
@@ -179,6 +218,61 @@ public partial class MainWindow : Window
         _reminderTimer.Start();
     }
 
+    private void StartDailyBoardTimer()
+    {
+        if (_dailyBoardTimer is not null)
+        {
+            return;
+        }
+
+        _dailyBoardTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMinutes(1)
+        };
+        _dailyBoardTimer.Tick += async (_, _) =>
+        {
+            try
+            {
+                await MaybeShowDailyBoardAsync();
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"오늘의 업무 보드 점검 실패: {ex.GetType().Name}";
+            }
+        };
+        _dailyBoardTimer.Start();
+    }
+
+    private void StartAutomaticScanTimer()
+    {
+        if (_automaticScanTimer is not null)
+        {
+            return;
+        }
+
+        _automaticScanTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMinutes(15)
+        };
+        _automaticScanTimer.Tick += async (_, _) =>
+        {
+            if (!_settings.AutomaticWatcherRequested || !_settings.SmokeGatePassed)
+            {
+                return;
+            }
+
+            try
+            {
+                await ScanRecentMailAsync(showSummaryNotification: false, refreshSettingsFromControls: false);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"자동 메일 확인 실패: {ex.GetType().Name}";
+            }
+        };
+        _automaticScanTimer.Start();
+    }
+
     private async void TestNotification_Click(object sender, RoutedEventArgs e)
     {
         await _notificationSink.ShowAsync(new UserNotification(
@@ -192,12 +286,33 @@ public partial class MainWindow : Window
     {
         _settings = ReadSettingsFromControls();
         WindowsRuntimeSettingsStore.Save(_settings);
+        if (_settings.AutomaticWatcherRequested && _settings.SmokeGatePassed)
+        {
+            StartAutomaticScanTimer();
+        }
+
         StatusText.Text = "설정을 저장했습니다.";
     }
 
     private void StartupToggle_Click(object sender, RoutedEventArgs e)
     {
         SetStartupRegistration(StartupToggle.IsChecked == true);
+    }
+
+    private async void ApproveSelectedReview_Click(object sender, RoutedEventArgs e)
+    {
+        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
+        {
+            await ApproveReviewCandidateAsync(item.Candidate);
+        }
+    }
+
+    private async void IgnoreSelectedReview_Click(object sender, RoutedEventArgs e)
+    {
+        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
+        {
+            await IgnoreReviewCandidateAsync(item.Candidate);
+        }
     }
 
     private async Task RefreshTasksAsync()
@@ -218,7 +333,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RefreshReviewCandidatesAsync()
+    private async Task<IReadOnlyList<ReviewCandidate>> RefreshReviewCandidatesAsync()
     {
         var store = await GetStoreAsync();
         var candidates = await store.ListReviewCandidatesAsync();
@@ -226,12 +341,152 @@ public partial class MainWindow : Window
         foreach (var candidate in candidates)
         {
             var due = candidate.Analysis.DueAt is null ? "마감 불명" : $"{DdayFormatter.Format(candidate.Analysis.DueAt.Value, DateTimeOffset.Now)} · {candidate.Analysis.DueAt.Value:MM/dd HH:mm}";
-            ReviewCandidatesList.Items.Add($"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {candidate.Analysis.Confidence:P0} · {due}  |  {candidate.Analysis.SuggestedTitle}  |  {candidate.Analysis.Reason}");
+            ReviewCandidatesList.Items.Add(new ReviewCandidateListItem(
+                candidate,
+                $"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {candidate.Analysis.Confidence:P0} · {due}  |  {candidate.Analysis.SuggestedTitle}  |  {candidate.Analysis.Reason}"));
         }
 
         if (candidates.Count == 0)
         {
             ReviewCandidatesList.Items.Add("검토 대기 후보가 없습니다.");
+        }
+
+        return candidates;
+    }
+
+    private async Task MaybeShowDailyBoardAsync()
+    {
+        var store = await GetStoreAsync();
+        var now = DateTimeOffset.Now;
+        var lastShownDate = await store.GetAppStateAsync(DailyBoardPlanner.LastShownDateKey);
+        var plan = DailyBoardPlanner.Plan(now, _settings.DailyBoardTime, lastShownDate);
+        if (!plan.ShouldShowNow)
+        {
+            return;
+        }
+
+        await ShowDailyBoardAsync(now, plan.DailyBoardTime);
+        await store.SetAppStateAsync(DailyBoardPlanner.LastShownDateKey, plan.TodayKey);
+    }
+
+    private async Task ShowDailyBoardAsync(DateTimeOffset now, string dailyBoardTime)
+    {
+        if (_dailyBoardWindow?.IsVisible == true)
+        {
+            _dailyBoardWindow.Activate();
+            return;
+        }
+
+        var store = await GetStoreAsync();
+        var tasks = await store.ListOpenTasksAsync();
+        var candidates = await store.ListReviewCandidatesAsync();
+        _dailyBoardWindow = new DailyBoardWindow(tasks, candidates, now, dailyBoardTime)
+        {
+            Owner = this
+        };
+        _dailyBoardWindow.Closed += (_, _) => _dailyBoardWindow = null;
+        _dailyBoardWindow.Show();
+        StatusText.Text = "오늘의 업무 보드를 표시했습니다.";
+    }
+
+    private void EnqueueReviewCandidateToasts(IEnumerable<ReviewCandidate> candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            _pendingReviewToasts.Enqueue(candidate);
+        }
+
+        ShowNextPendingReviewCandidateToast();
+    }
+
+    private async void ShowNextPendingReviewCandidateToast()
+    {
+        if (_reviewCandidateToast is not null || _reviewCandidateToastOpening || _pendingReviewToasts.Count == 0)
+        {
+            return;
+        }
+
+        ReviewCandidate? candidate = null;
+        try
+        {
+            _reviewCandidateToastOpening = true;
+            var store = await GetStoreAsync();
+            while (_pendingReviewToasts.Count > 0)
+            {
+                var queuedCandidate = _pendingReviewToasts.Dequeue();
+                candidate = await store.GetReviewCandidateAsync(queuedCandidate.Id);
+                if (candidate is not null)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _pendingReviewToasts.Clear();
+            _reviewCandidateToast = null;
+            await ShowErrorAsync("확인 필요 후보 알림 표시 실패", ex);
+            return;
+        }
+        finally
+        {
+            _reviewCandidateToastOpening = false;
+        }
+
+        if (candidate is null)
+        {
+            return;
+        }
+
+        var activeCandidate = candidate;
+        _reviewCandidateToast = new ReviewCandidateToastWindow(
+            activeCandidate,
+            () => ApproveReviewCandidateAsync(activeCandidate),
+            () => IgnoreReviewCandidateAsync(activeCandidate))
+        {
+            Owner = this
+        };
+        _reviewCandidateToast.Closed += (_, _) =>
+        {
+            _reviewCandidateToast = null;
+            ShowNextPendingReviewCandidateToast();
+        };
+        _reviewCandidateToast.Show();
+    }
+
+    private async Task ApproveReviewCandidateAsync(ReviewCandidate candidate)
+    {
+        try
+        {
+            var store = await GetStoreAsync();
+            var task = await store.ResolveReviewCandidateAsTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
+            await RefreshTasksAsync();
+            await RefreshReviewCandidatesAsync();
+            StatusText.Text = task is null
+                ? "이미 처리된 확인 필요 후보입니다."
+                : $"확인 필요 후보를 할 일로 등록했습니다: {task.Title}";
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("확인 필요 후보 등록 실패", ex);
+        }
+    }
+
+    private async Task IgnoreReviewCandidateAsync(ReviewCandidate candidate)
+    {
+        try
+        {
+            var store = await GetStoreAsync();
+            var ignored = await store.ResolveReviewCandidateAsNotTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
+            await RefreshTasksAsync();
+            await RefreshReviewCandidatesAsync();
+            StatusText.Text = ignored
+                ? "확인 필요 후보를 무시 처리했습니다."
+                : "이미 처리된 확인 필요 후보입니다.";
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("확인 필요 후보 무시 실패", ex);
         }
     }
 
@@ -333,7 +588,8 @@ public partial class MainWindow : Window
             LlmTimeoutSeconds: defaults.LlmTimeoutSeconds,
             RecentScanDays: ParseInt(ScanDaysText.Text, defaults.RecentScanDays),
             RecentScanMaxItems: ParseInt(MaxItemsText.Text, defaults.RecentScanMaxItems),
-            ReminderLookAheadHours: ParseInt(ReminderLookAheadText.Text, defaults.ReminderLookAheadHours)));
+            ReminderLookAheadHours: ParseInt(ReminderLookAheadText.Text, defaults.ReminderLookAheadHours),
+            DailyBoardTime: DailyBoardTimeText.Text));
     }
 
     private void ApplySettingsToControls(RuntimeSettings settings)
@@ -346,6 +602,7 @@ public partial class MainWindow : Window
         ScanDaysText.Text = settings.RecentScanDays.ToString();
         MaxItemsText.Text = settings.RecentScanMaxItems.ToString();
         ReminderLookAheadText.Text = settings.ReminderLookAheadHours.ToString();
+        DailyBoardTimeText.Text = settings.DailyBoardTime;
         foreach (ComboBoxItem item in LlmProviderBox.Items)
         {
             if (string.Equals(item.Tag?.ToString(), settings.LlmProvider.ToString(), StringComparison.OrdinalIgnoreCase))
@@ -428,5 +685,10 @@ public partial class MainWindow : Window
         }
 
         return string.Equals(configured.Trim().Trim('"'), currentPath.Trim().Trim('"'), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed record ReviewCandidateListItem(ReviewCandidate Candidate, string Display)
+    {
+        public override string ToString() => Display;
     }
 }

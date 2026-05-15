@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using OutlookAiSecretary.Core.LLM;
+using OutlookAiSecretary.Core.Scheduling;
 
 namespace OutlookAiSecretary.Core.Capabilities;
 
@@ -18,7 +19,8 @@ public sealed record RuntimeSettings(
     int LlmTimeoutSeconds,
     int RecentScanDays,
     int RecentScanMaxItems,
-    int ReminderLookAheadHours)
+    int ReminderLookAheadHours,
+    string DailyBoardTime)
 {
     public static RuntimeSettings ManagedSafeDefault { get; } = new(
         ManagedMode: true,
@@ -34,7 +36,8 @@ public sealed record RuntimeSettings(
         LlmTimeoutSeconds: 30,
         RecentScanDays: 30,
         RecentScanMaxItems: 200,
-        ReminderLookAheadHours: 24);
+        ReminderLookAheadHours: 24,
+        DailyBoardTime: DailyBoardPlanner.DefaultDailyBoardTime);
 
     public LlmEndpointSettings ToLlmEndpointSettings() => new(
         LlmProvider,
@@ -75,7 +78,8 @@ public sealed record PartialRuntimeSettings(
     int? LlmTimeoutSeconds = null,
     int? RecentScanDays = null,
     int? RecentScanMaxItems = null,
-    int? ReminderLookAheadHours = null);
+    int? ReminderLookAheadHours = null,
+    string? DailyBoardTime = null);
 
 public static class RuntimeSettingsSerializer
 {
@@ -124,7 +128,8 @@ public static class RuntimeSettingsSerializer
             LlmTimeoutSeconds: Clamp(partial?.LlmTimeoutSeconds, 5, 180, defaults.LlmTimeoutSeconds),
             RecentScanDays: Clamp(partial?.RecentScanDays, 1, 31, defaults.RecentScanDays),
             RecentScanMaxItems: Clamp(partial?.RecentScanMaxItems, 10, 2000, defaults.RecentScanMaxItems),
-            ReminderLookAheadHours: Clamp(partial?.ReminderLookAheadHours, 1, 24 * 14, defaults.ReminderLookAheadHours));
+            ReminderLookAheadHours: Clamp(partial?.ReminderLookAheadHours, 1, 24 * 14, defaults.ReminderLookAheadHours),
+            DailyBoardTime: DailyBoardPlanner.NormalizeDailyBoardTime(partial?.DailyBoardTime));
     }
 
     private static int Clamp(int? value, int min, int max, int fallback) =>
