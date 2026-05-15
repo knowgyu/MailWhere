@@ -82,6 +82,51 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<bool> HasOpenLlmFailureReviewCandidateForSourceAsync(string sourceIdHash, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1
+            FROM review_candidates
+            WHERE source_id_hash = $source
+              AND suppressed = 0
+              AND resolved_at IS NULL
+              AND reason LIKE 'LLM 분석 실패(%'
+            LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$source", sourceIdHash);
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return result is not null;
+    }
+
+    public async Task<int> SuppressOpenLlmFailureReviewCandidatesForSourceAsync(string sourceIdHash, DateTimeOffset now, string resolution, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE review_candidates
+            SET suggested_title = $title,
+                reason = $reason,
+                evidence_snippet = NULL,
+                suppressed = 1,
+                resolved_at = $resolvedAt,
+                resolution = $resolution
+            WHERE source_id_hash = $source
+              AND suppressed = 0
+              AND resolved_at IS NULL
+              AND reason LIKE 'LLM 분석 실패(%'
+            """;
+        command.Parameters.AddWithValue("$source", sourceIdHash);
+        command.Parameters.AddWithValue("$title", LocalTaskItem.RedactedTitle);
+        command.Parameters.AddWithValue("$reason", "LLM 재분석으로 검토 후보를 정리했습니다.");
+        command.Parameters.AddWithValue("$resolvedAt", now.ToString("O"));
+        command.Parameters.AddWithValue("$resolution", string.IsNullOrWhiteSpace(resolution) ? "Suppressed" : resolution);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task MarkSourceProcessedAsync(string sourceIdHash, CancellationToken cancellationToken = default)
     {
         await using var connection = new SqliteConnection(_connectionString);

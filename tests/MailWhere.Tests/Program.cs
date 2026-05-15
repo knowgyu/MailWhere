@@ -50,6 +50,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM payload includes thread and owner context", LlmPayloadIncludesThreadAndOwnerContext),
     ("Invalid LLM JSON falls back to rules", InvalidLlmJsonFallsBackToRules),
     ("LLM only failure creates review candidate", LlmOnlyFailureCreatesReviewCandidate),
+    ("LLM failure review candidate retries after recovery", LlmFailureReviewCandidateRetriesAfterRecovery),
+    ("Repeated LLM failure does not duplicate review candidate", RepeatedLlmFailureDoesNotDuplicateReviewCandidate),
     ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
     ("OpenAI Responses client extracts output text", OpenAiResponsesClientExtractsOutputText),
     ("LLM model catalog loads Ollama models", LlmModelCatalogLoadsOllamaModels),
@@ -512,6 +514,7 @@ static Task RuntimeSettingsDefaultUnlimitedRecentScan()
     Assert(defaults.RecentScanDays == 30, "Expected recent scan days default.");
     Assert(defaults.RecentScanMaxItems == 0, "Expected default scan max to mean unlimited.");
     Assert(defaults.LlmFallbackPolicy == LlmFallbackPolicy.LlmOnly, "Expected default LLM failure handling to require explicit fallback consent.");
+    Assert(defaults.LlmModel.Length == 0, "Expected default LLM model to stay empty until model discovery or user input.");
 
     var explicitUnlimited = RuntimeSettingsSerializer.ParseOrDefault("""{"RecentScanMaxItems":0,"LlmFallbackPolicy":"LlmThenRules"}""");
     Assert(explicitUnlimited.RecentScanMaxItems == 0, "Expected explicit unlimited scan max.");
@@ -665,6 +668,61 @@ static async Task LlmOnlyFailureCreatesReviewCandidate()
     Assert(result.Kind == FollowUpKind.ReviewNeeded, "Expected review-needed failure result.");
     Assert(result.Reason.Contains("LLM 분석 실패", StringComparison.Ordinal), "Expected visible LLM failure reason.");
 }
+
+static async Task LlmFailureReviewCandidateRetriesAfterRecovery()
+{
+    var store = new FakeStore();
+    var mail = Mail("자료 요청", "내일까지 검토 후 회신 부탁드립니다.", "llm-retry-source");
+    var pipeline = new FollowUpPipeline(new SequenceAnalyzer(
+        LlmFailureAnalysis(mail),
+        new FollowUpAnalysis(
+            FollowUpKind.Deadline,
+            AnalysisDisposition.AutoCreateTask,
+            0.92,
+            "자료 검토 후 회신",
+            "LLM 재분석으로 내 업무 Action item을 확인했습니다.",
+            "내일까지 검토 후 회신",
+            new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)))),
+        store);
+
+    var first = await pipeline.ProcessAsync(mail);
+    var second = await pipeline.ProcessAsync(mail);
+
+    Assert(first.Kind == PipelineOutcomeKind.ReviewCandidateCreated, "Expected initial LLM failure to create review candidate.");
+    Assert(second.Kind == PipelineOutcomeKind.TaskCreated, "Expected recovered LLM analysis to create task.");
+    Assert(store.Tasks.Count == 1, "Expected one recovered task.");
+    Assert(store.Candidates.Count == 1, "Expected stale failure candidate to be preserved only as resolved history.");
+    Assert(store.Candidates.Single().Suppressed, "Expected stale LLM failure candidate to be suppressed after reanalysis.");
+    Assert(store.Processed.Contains(mail.SourceHash), "Expected successfully reanalyzed source to be marked processed.");
+}
+
+static async Task RepeatedLlmFailureDoesNotDuplicateReviewCandidate()
+{
+    var store = new FakeStore();
+    var mail = Mail("자료 요청", "내일까지 검토 후 회신 부탁드립니다.", "llm-repeat-failure-source");
+    var pipeline = new FollowUpPipeline(new SequenceAnalyzer(
+        LlmFailureAnalysis(mail),
+        LlmFailureAnalysis(mail)),
+        store);
+
+    var first = await pipeline.ProcessAsync(mail);
+    var second = await pipeline.ProcessAsync(mail);
+
+    Assert(first.Kind == PipelineOutcomeKind.ReviewCandidateCreated, "Expected initial LLM failure candidate.");
+    Assert(second.Kind == PipelineOutcomeKind.Duplicate, "Expected repeated failure to be deduplicated.");
+    Assert(store.Candidates.Count == 1, "Expected one open LLM failure candidate only.");
+    Assert(!store.Processed.Contains(mail.SourceHash), "Expected source to remain retryable while only LLM failure exists.");
+}
+
+static FollowUpAnalysis LlmFailureAnalysis(EmailSnapshot mail) => new(
+    FollowUpKind.ReviewNeeded,
+    AnalysisDisposition.Review,
+    0.2,
+    $"LLM 분석 확인 필요: {mail.Subject}",
+    "LLM 분석 실패(invalid-json)로 자동 등록하지 않았습니다.",
+    null,
+    null,
+    "LLM endpoint 상태를 확인한 뒤 다시 스캔하세요.");
 
 static async Task LlmEndpointProbeValidatesJsonObject()
 {
@@ -1274,6 +1332,39 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         return Task.CompletedTask;
     }
 
+    public Task<bool> HasOpenLlmFailureReviewCandidateForSourceAsync(string sourceIdHash, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Candidates.Any(candidate =>
+            candidate.SourceIdHash == sourceIdHash
+            && !candidate.Suppressed
+            && candidate.Analysis.IsTransientLlmFailureReview));
+
+    public Task<int> SuppressOpenLlmFailureReviewCandidatesForSourceAsync(string sourceIdHash, DateTimeOffset now, string resolution, CancellationToken cancellationToken = default)
+    {
+        var rows = 0;
+        for (var index = 0; index < Candidates.Count; index++)
+        {
+            var candidate = Candidates[index];
+            if (candidate.SourceIdHash != sourceIdHash || candidate.Suppressed || !candidate.Analysis.IsTransientLlmFailureReview)
+            {
+                continue;
+            }
+
+            Candidates[index] = candidate with
+            {
+                Suppressed = true,
+                Analysis = candidate.Analysis with
+                {
+                    SuggestedTitle = LocalTaskItem.RedactedTitle,
+                    Reason = "LLM 재분석으로 검토 후보를 정리했습니다.",
+                    EvidenceSnippet = null
+                }
+            };
+            rows++;
+        }
+
+        return Task.FromResult(rows);
+    }
+
     public Task MarkSourceProcessedAsync(string sourceIdHash, CancellationToken cancellationToken = default)
     {
         Processed.Add(sourceIdHash);
@@ -1431,6 +1522,26 @@ sealed class ThrowingAnalyzer : IFollowUpAnalyzer
     {
         Called = true;
         throw new InvalidOperationException("Fallback should not be called.");
+    }
+}
+
+sealed class SequenceAnalyzer : IFollowUpAnalyzer
+{
+    private readonly Queue<FollowUpAnalysis> _analyses;
+
+    public SequenceAnalyzer(params FollowUpAnalysis[] analyses)
+    {
+        _analyses = new Queue<FollowUpAnalysis>(analyses);
+    }
+
+    public Task<FollowUpAnalysis> AnalyzeAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
+    {
+        if (_analyses.Count == 0)
+        {
+            throw new InvalidOperationException("No analysis result queued.");
+        }
+
+        return Task.FromResult(_analyses.Dequeue());
     }
 }
 

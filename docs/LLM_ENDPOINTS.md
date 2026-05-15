@@ -1,17 +1,16 @@
 # LLM endpoint 설정
 
-기본값은 `Disabled`입니다. 관리형 환경 모드에서는 사용자가 명시적으로 켜기 전까지 LLM을 호출하지 않습니다. LLM을 켠 경우에는 rule-based 분석보다 LLM을 먼저 시도합니다.
+기본값은 LLM OFF입니다. 사용자가 명시적으로 켜기 전까지 LLM을 호출하지 않습니다. LLM을 켠 경우에는 규칙 기반 분석보다 LLM을 먼저 시도합니다. 앱 UI에서는 토글로 ON/OFF를 정하고, provider 드롭다운에는 실제 endpoint 방식만 표시합니다.
 
 ## Provider
 
 | Provider | 용도 | Endpoint 예시 |
 | --- | --- | --- |
-| `Disabled` | rule-only 안전 모드 | 없음 |
 | `OllamaNative` | Ollama native `/api/chat` | `http://localhost:11434` |
 | `OpenAiChatCompletions` | OpenAI-compatible `/v1/chat/completions` | `http://localhost:8000` |
 | `OpenAiResponses` | OpenAI-compatible `/v1/responses` | `http://localhost:8000` |
 
-기존 설정 파일의 `Ollama`, `OpenAiCompatible` 문자열은 각각 `OllamaNative`, `OpenAiChatCompletions`로 계속 호환됩니다.
+설정 파일 내부의 `Disabled`는 LLM OFF 상태를 뜻합니다. 기존 설정 파일의 `Ollama`, `OpenAiCompatible` 문자열은 각각 `OllamaNative`, `OpenAiChatCompletions`로 계속 호환됩니다.
 
 ## Ollama 예시
 
@@ -20,7 +19,7 @@
   "ExternalLlmEnabled": true,
   "LlmProvider": "OllamaNative",
   "LlmEndpoint": "http://localhost:11434",
-  "LlmModel": "qwen3.6",
+  "LlmModel": "",
   "LlmFallbackPolicy": "LlmOnly"
 }
 ```
@@ -32,7 +31,7 @@
   "ExternalLlmEnabled": true,
   "LlmProvider": "OpenAiChatCompletions",
   "LlmEndpoint": "http://localhost:8000",
-  "LlmModel": "qwen3.6",
+  "LlmModel": "",
   "LlmApiKey": null,
   "LlmApiKeyEnvironmentVariable": null,
   "LlmFallbackPolicy": "LlmOnly"
@@ -46,7 +45,7 @@
   "ExternalLlmEnabled": true,
   "LlmProvider": "OpenAiResponses",
   "LlmEndpoint": "http://localhost:8000",
-  "LlmModel": "qwen3.6",
+  "LlmModel": "",
   "LlmApiKey": null,
   "LlmApiKeyEnvironmentVariable": null,
   "LlmFallbackPolicy": "LlmOnly"
@@ -60,11 +59,11 @@
 | 값 | 의미 | 추천 상황 |
 | --- | --- | --- |
 | `LlmOnly` | LLM이 실패하면 자동 등록하지 않고 검토함에 “LLM 분석 실패” 후보로 남김 | 기본값. rule 오탐 없이 endpoint 품질을 먼저 확인하려는 경우 |
-| `LlmThenRules` | LLM을 먼저 호출하고 실패/invalid JSON/timeout이면 rule-based analyzer로 fallback | 사용자가 명시적으로 fallback을 허용한 경우 |
+| `LlmThenRules` | LLM을 먼저 호출하고 실패/invalid JSON/timeout이면 규칙 기반 analyzer로 fallback | 사용자가 명시적으로 fallback을 허용한 경우 |
 
 스캔 후 앱 상태에는 `LLM 시도/성공/fallback/실패/평균 응답시간`이 표시됩니다. 이 통계에는 메일 제목/본문/prompt가 들어가지 않습니다.
 
-LLM 연결 테스트나 스캔 중 LLM 실패가 발생하고 현재 정책이 `LlmOnly`이면, 앱이 “다음 스캔부터 rule fallback을 사용할지”를 한 번 물어봅니다. 동의하지 않으면 계속 LLM 실패 후보를 검토함에 남깁니다.
+LLM 연결 테스트나 스캔 중 LLM 실패가 발생하고 현재 정책이 `LlmOnly`이면, 앱이 “다음 스캔부터 규칙 기반 fallback을 사용할지”를 한 번 물어봅니다. 동의하지 않으면 계속 LLM 실패 후보를 검토함에 남깁니다. 이 후보는 같은 source에 중복 생성되지 않으며, LLM 연결이 복구되어 재분석이 성공하면 자동으로 정리됩니다.
 
 ## 모델 목록 불러오기
 

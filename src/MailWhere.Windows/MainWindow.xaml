@@ -129,14 +129,13 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <TextBlock Text="설정" FontSize="18" FontWeight="Bold"/>
-                        <TextBlock Text="LLM을 켜고 endpoint를 넣은 뒤 모델을 불러오세요." Foreground="#667085" TextWrapping="Wrap" Margin="0,4,0,14"/>
+                        <TextBlock Text="LLM endpoint를 연결하면 새 메일을 먼저 LLM으로 분석합니다." Foreground="#667085" TextWrapping="Wrap" Margin="0,4,0,14"/>
 
                         <CheckBox x:Name="StartupToggle" Content="Windows 시작 시 실행" Click="StartupToggle_Click" Margin="0,0,0,10"/>
-                        <CheckBox x:Name="LlmEnabledToggle" Content="로컬 LLM 분석 사용" Margin="0,0,0,10"/>
+                        <CheckBox x:Name="LlmEnabledToggle" Content="로컬 LLM 분석 사용" Click="LlmEnabledToggle_Click" Margin="0,0,0,10"/>
 
-                        <TextBlock Text="실행 방식" FontWeight="SemiBold"/>
+                        <TextBlock Text="Endpoint 방식" FontWeight="SemiBold"/>
                         <ComboBox x:Name="LlmProviderBox">
-                            <ComboBoxItem Tag="Disabled" Content="사용 안 함 / rule-only"/>
                             <ComboBoxItem Tag="OllamaNative" Content="Ollama 로컬"/>
                             <ComboBoxItem Tag="OpenAiChatCompletions" Content="OpenAI 호환 - Chat Completions"/>
                             <ComboBoxItem Tag="OpenAiResponses" Content="OpenAI 호환 - Responses"/>
@@ -154,11 +153,6 @@
                             <Button x:Name="LoadLlmModelsButton" Grid.Column="1" Click="LoadLlmModels_Click" Margin="8,0,0,0" MinHeight="36">모델 불러오기</Button>
                         </Grid>
 
-                        <TextBlock Text="LLM 실패 시" FontWeight="SemiBold"/>
-                        <ComboBox x:Name="LlmFallbackPolicyBox">
-                            <ComboBoxItem Tag="LlmOnly" Content="검토함에 남김 (기본)"/>
-                            <ComboBoxItem Tag="LlmThenRules" Content="rule fallback 사용 (명시 선택)"/>
-                        </ComboBox>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <Button x:Name="TestLlmEndpointButton" Click="TestLlmEndpoint_Click" Background="#2458F2" Foreground="White">연결 테스트</Button>
                             <TextBlock x:Name="LlmStatusText" Text="LLM 연결 테스트 전입니다." VerticalAlignment="Center" Foreground="#667085" TextWrapping="Wrap"/>
@@ -180,12 +174,14 @@
                                 <TextBox x:Name="DailyBoardTimeText" ToolTip="기본 08:00. 이 시간이 지난 뒤 앱이 켜지면 다음 정시에 한 번 표시합니다."/>
                                 <TextBlock Text="Bearer token 환경 변수(선택)" FontWeight="SemiBold"/>
                                 <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: LOCAL_LLM_TOKEN. 토큰 값 자체는 앱 설정에 저장하지 마세요."/>
+                                <TextBlock Text="LLM 분석 실패 처리" FontWeight="SemiBold"/>
+                                <ComboBox x:Name="LlmFallbackPolicyBox">
+                                    <ComboBoxItem Tag="LlmOnly" Content="검토함에 보관"/>
+                                    <ComboBoxItem Tag="LlmThenRules" Content="규칙 기반 fallback 허용"/>
+                                </ComboBox>
+                                <TextBlock Text="기본값은 검토함 보관입니다. 규칙 fallback은 LLM이 안 될 때도 후보를 계속 만들고 싶을 때만 켜세요." Foreground="#667085" FontSize="12" TextWrapping="Wrap" Margin="0,-6,12,10"/>
                             </StackPanel>
                         </Expander>
-
-                        <Border CornerRadius="14" Background="#F5F7FB" Padding="12" Margin="0,18,0,0">
-                            <TextBlock Text="메일은 읽기만 합니다. 발송/삭제/이동/답장/첨부 자동 분석은 하지 않습니다." TextWrapping="Wrap" Foreground="#4C5874"/>
-                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Border>

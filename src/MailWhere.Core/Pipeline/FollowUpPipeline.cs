@@ -36,6 +36,20 @@ public sealed class FollowUpPipeline
 
         var analysis = await _analyzer.AnalyzeAsync(email, cancellationToken).ConfigureAwait(false);
         var now = _timeProvider.GetUtcNow();
+
+        if (analysis.IsTransientLlmFailureReview)
+        {
+            if (await _store.HasOpenLlmFailureReviewCandidateForSourceAsync(email.SourceHash, cancellationToken).ConfigureAwait(false))
+            {
+                return new PipelineOutcome(PipelineOutcomeKind.Duplicate, analysis);
+            }
+
+            var transientCandidate = ReviewCandidate.FromAnalysis(email, analysis, now);
+            await _store.SaveReviewCandidateAsync(transientCandidate, cancellationToken).ConfigureAwait(false);
+            return new PipelineOutcome(PipelineOutcomeKind.ReviewCandidateCreated, analysis, transientCandidate.Id);
+        }
+
+        await _store.SuppressOpenLlmFailureReviewCandidatesForSourceAsync(email.SourceHash, now, "Reanalyzed", cancellationToken).ConfigureAwait(false);
         var actionSignature = FollowUpActionSignature.Create(email, analysis);
         if (actionSignature is not null
             && await _store.HasProcessedSourceAsync(actionSignature, cancellationToken).ConfigureAwait(false))

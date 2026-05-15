@@ -2,7 +2,7 @@
 
 ## Release 0.1.0 — portable read-only secretary
 
-Goal: 집에서 빌드한 portable zip을 Windows 11에서 실행해 Outlook read-only scan, LLM/rule 분석, local task, tray reminder를 검증한다.
+Goal: 집에서 빌드한 portable zip을 Windows 11에서 실행해 Outlook read-only scan, LLM/규칙 기반 분석, local task, tray reminder를 검증한다.
 
 Included:
 
@@ -43,12 +43,27 @@ Included:
 - Provider naming is protocol-first: `OllamaNative`, `OpenAiChatCompletions`, `OpenAiResponses`, with legacy config strings kept compatible.
 - Review candidates can be snoozed from 검토함 and are hidden until the snooze time.
 - Daily board has card-like list items and can jump directly to 검토함.
-- Tray balloon click opens the actionable board instead of being a dead-end notification.
+- MailWhere 알림 클릭은 dead-end가 아니라 업무 보드/검토함으로 이어진다.
+
+## Release 0.1.4 — app-owned toast and retryable LLM failures
+
+Goal: Windows 기본 풍선 알림에 기대지 않고 MailWhere 자체 toast로 “놓치지 않는” 알림 UX를 제공하며, LLM endpoint가 복구되면 실패 후보를 다시 분석한다.
+
+Included:
+
+- 우하단 MailWhere toast stack: scan summary/reminder/error를 카드형으로 누적 표시.
+- Toast primary/secondary actions: 업무 보드, 검토함, 앱 열기.
+- LLM 설정 UI 정리: ON/OFF는 토글, provider는 실제 endpoint 방식만 표시.
+- 기본 LLM model은 빈 값이며 모델 불러오기 후 선택하는 흐름.
+- LLM fallback 정책은 고급 설정으로 이동.
+- LLM 실패 review candidate는 source별 중복 생성하지 않고 processed 처리하지 않아 재시도 가능.
+- 재분석 성공 시 stale LLM failure candidate를 suppressed 처리.
+- Portable artifact 이름에 `vX.Y.Z` 버전 포함.
 
 Not included yet:
 
 - Bulk triage edit controls.
-- Native Action Center click actions.
+- Toast notification history/quiet hours.
 - Reply drafts or agentic mail mutation.
 
 ## Phase 0.2 — false positive control and daily-use inbox
@@ -76,7 +91,7 @@ Priority: high after 0.2.
 - Outlook event subscription or conservative polling behind smoke gate.
 - Startup auto scan when `AutomaticWatcherRequested && SmokeGatePassed`.
 - Quiet hours and notification frequency settings.
-- Native Windows app notification track if packaging identity is available.
+- Toast notification history and quiet hours; native Windows app notification track only if packaging identity is useful.
 - Local reminder history to prevent duplicate notifications across app restarts.
 
 Acceptance:

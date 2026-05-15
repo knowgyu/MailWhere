@@ -24,9 +24,20 @@ function Invoke-Native {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
+$version = "unknown"
+try {
+    $version = (& dotnet msbuild .\src\MailWhere.Windows\MailWhere.Windows.csproj -nologo -getProperty:Version).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet msbuild -getProperty:Version failed with exit code $LASTEXITCODE"
+    }
+} catch {
+    Write-Warning "Could not read project version for artifact name: $($_.Exception.Message)"
+}
+
+$versionLabel = if ($version -and $version -ne "unknown" -and $version.StartsWith("v")) { $version } elseif ($version -and $version -ne "unknown") { "v$version" } else { "vunknown" }
 $artifactRoot = Join-Path $repoRoot $OutputRoot
 $publishRoot = Join-Path $artifactRoot "publish"
-$appName = "MailWhere-$RuntimeIdentifier"
+$appName = "MailWhere-$versionLabel-$RuntimeIdentifier"
 $publishDir = Join-Path $publishRoot $appName
 $zipPath = Join-Path $artifactRoot "$appName-portable.zip"
 
@@ -78,16 +89,6 @@ try {
     }
 } catch {
     Write-Warning "Could not read git commit for build manifest: $($_.Exception.Message)"
-}
-
-$version = "unknown"
-try {
-    $version = (& dotnet msbuild .\src\MailWhere.Windows\MailWhere.Windows.csproj -nologo -getProperty:Version).Trim()
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet msbuild -getProperty:Version failed with exit code $LASTEXITCODE"
-    }
-} catch {
-    Write-Warning "Could not read project version for build manifest: $($_.Exception.Message)"
 }
 
 $manifest = [ordered]@{

@@ -32,7 +32,7 @@ public sealed record RuntimeSettings(
         RuleOnlyModeAccepted: true,
         LlmProvider: LlmProviderKind.Disabled,
         LlmEndpoint: "http://localhost:11434",
-        LlmModel: "qwen3.6",
+        LlmModel: string.Empty,
         LlmApiKey: null,
         LlmApiKeyEnvironmentVariable: null,
         LlmTimeoutSeconds: 30,

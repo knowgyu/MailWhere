@@ -17,6 +17,7 @@
   - OpenAI-compatible local server `/v1/responses`
 - endpoint에서 모델 목록 불러오기 + LLM 연결 테스트
 - 스캔별 LLM 시도/성공/fallback/실패 요약
+- LLM 실패 후보는 중복 생성하지 않고, endpoint 복구 후 같은 메일을 다시 분석
 - RE/FW 제목 정규화와 현재 작성부/전달 맥락/인용 히스토리 분리
 - 같은 스레드에서 반복되는 동일 action item 중복 생성 억제
 - 명시적으로 다른 사람에게 배정된 요청은 내 업무로 자동 등록하지 않음
@@ -28,7 +29,7 @@
 - 검토 후보 버튼 처리와 충돌 적은 Alt+A 등록 / Alt+S 나중에 보기 / Alt+I 무시 단축키
 - 스캔 중 진행 상태 표시와 스캔 버튼 잠금
 - D-day 표시와 D-7/D-1/D-day reminder planning
-- tray 상주 + tray notification fallback
+- tray 상주 + 앱 자체 우하단 토스트 알림 스택
 - GitHub Actions Windows portable zip 빌드
 
 ## 안전 기본값
@@ -60,27 +61,27 @@ cd MailWhere
 출력:
 
 ```text
-artifacts/MailWhere-win-x64-portable.zip
+artifacts/MailWhere-v0.1.4-win-x64-portable.zip
 ```
 
 ## LLM endpoint
 
-기본은 rule-only입니다. LLM을 켜면 **LLM이 먼저 분석**하고, 실패하면 기본적으로 검토함에 남깁니다. Rule fallback은 사용자가 명시적으로 선택하거나 실패 후 모달에서 동의한 경우에만 켭니다.
+기본은 LLM OFF라 로컬 규칙 기반 분석만 사용합니다. LLM을 켜면 **LLM이 먼저 분석**하고, 실패하면 기본적으로 검토함에 남깁니다. 규칙 기반 fallback은 사용자가 명시적으로 선택하거나 실패 후 모달에서 동의한 경우에만 켭니다.
 
 - `LlmOnly`: LLM 실패 시 자동 등록하지 않고 검토함에 남김(기본)
-- `LlmThenRules`: LLM 실패 시 rule-based analyzer로 fallback
+- `LlmThenRules`: LLM 실패 시 규칙 기반 analyzer로 fallback
 
 ```json
 {
   "ExternalLlmEnabled": true,
   "LlmProvider": "OllamaNative",
   "LlmEndpoint": "http://localhost:11434",
-  "LlmModel": "qwen3.6",
+  "LlmModel": "",
   "LlmFallbackPolicy": "LlmOnly"
 }
 ```
 
-vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 예전 설정값인 `Ollama`, `OpenAiCompatible`도 계속 읽지만 새 설정에서는 protocol 이름을 쓰는 것을 권장합니다. 앱의 **모델 불러오기** 버튼은 `/api/tags` 또는 `/v1/models`에서 모델 목록을 가져오고, **연결 테스트**는 메일 내용이 아닌 작은 JSON probe만 보냅니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
+vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 기본 모델명은 비워두고, 앱의 **모델 불러오기** 버튼으로 `/api/tags` 또는 `/v1/models`에서 목록을 가져와 선택하는 흐름을 권장합니다. **연결 테스트**는 메일 내용이 아닌 작은 JSON probe만 보냅니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
 
 ## 문서
 

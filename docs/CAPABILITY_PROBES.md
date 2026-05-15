@@ -22,3 +22,5 @@ Required Phase 0 probes:
 Diagnostics use an allowlist (`count`, `skippedCount`, `version`, `feature`, `enabled`, `mode`, `errorClass`, `statusCode`) with per-key value validation and safe gate reason codes. Probe messages are intentionally not exported.
 
 Managed mode gates automatic watching until the real Windows smoke gate passes. If automatic watching is not explicitly requested, the runtime gate reports `manual` mode even when probes pass.
+
+`notification-capability` currently means the app can show MailWhere-owned in-app toast notifications and has tray fallback available; it does not imply native Action Center activation.

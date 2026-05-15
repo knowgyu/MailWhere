@@ -29,6 +29,11 @@ public sealed record FollowUpAnalysis(
     DateTimeOffset? DueAt,
     string? Summary = null)
 {
+    public bool IsTransientLlmFailureReview =>
+        Kind == FollowUpKind.ReviewNeeded
+        && Disposition == AnalysisDisposition.Review
+        && Reason.StartsWith("LLM 분석 실패(", StringComparison.Ordinal);
+
     public static FollowUpAnalysis Ignore(string reason) => new(
         FollowUpKind.None,
         AnalysisDisposition.Ignore,

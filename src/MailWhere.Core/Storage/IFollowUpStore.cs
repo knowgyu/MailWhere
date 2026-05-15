@@ -7,6 +7,8 @@ public interface IFollowUpStore
     Task<bool> HasProcessedSourceAsync(string sourceIdHash, CancellationToken cancellationToken = default);
     Task SaveTaskAsync(LocalTaskItem task, CancellationToken cancellationToken = default);
     Task SaveReviewCandidateAsync(ReviewCandidate candidate, CancellationToken cancellationToken = default);
+    Task<bool> HasOpenLlmFailureReviewCandidateForSourceAsync(string sourceIdHash, CancellationToken cancellationToken = default);
+    Task<int> SuppressOpenLlmFailureReviewCandidatesForSourceAsync(string sourceIdHash, DateTimeOffset now, string resolution, CancellationToken cancellationToken = default);
     Task MarkSourceProcessedAsync(string sourceIdHash, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LocalTaskItem>> ListOpenTasksAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default);

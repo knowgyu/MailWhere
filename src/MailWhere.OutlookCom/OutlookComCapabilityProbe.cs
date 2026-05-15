@@ -90,7 +90,7 @@ public sealed class OutlookComCapabilityProbe
 
     private static CapabilityReport WithStaticProbes(List<CapabilityProbeResult> results)
     {
-        results.Add(CapabilityProbeResult.Passed("notification-capability", "TrayNotificationAvailable", new Dictionary<string, string> { ["feature"] = "tray-notification", ["enabled"] = "true" }));
+        results.Add(CapabilityProbeResult.Passed("notification-capability", "InAppToastAvailable", new Dictionary<string, string> { ["feature"] = "in-app-toast", ["enabled"] = "true" }));
         results.Add(CapabilityProbeResult.Passed("rule-only-mode", "RuleOnlyModeAvailable", new Dictionary<string, string> { ["feature"] = "rule-only", ["enabled"] = "true" }));
         results.Add(CapabilityProbeResult.Warning("llm-endpoint", "EndpointNotConfigured", new Dictionary<string, string> { ["feature"] = "llm-endpoint", ["enabled"] = "false" }));
         return new CapabilityReport(DateTimeOffset.UtcNow, results);

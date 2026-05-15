@@ -144,7 +144,7 @@ public partial class MainWindow : Window
             StatusText.Text = result.Success
                 ? "LLM 연결 테스트가 성공했습니다."
                 : "LLM 연결 테스트가 실패했습니다. endpoint/model/provider를 확인하세요.";
-            if (!result.Success)
+            if (!result.Success && !string.Equals(result.Code, "not-configured", StringComparison.OrdinalIgnoreCase))
             {
                 OfferRuleFallbackAfterLlmFailure();
             }
@@ -160,6 +160,7 @@ public partial class MainWindow : Window
                 TestLlmEndpointButton.IsEnabled = true;
                 LoadLlmModelsButton.IsEnabled = true;
                 ScanRecentMonthButton.IsEnabled = true;
+                UpdateLlmControlAvailability();
             }
         }
     }
@@ -210,6 +211,7 @@ public partial class MainWindow : Window
             {
                 LoadLlmModelsButton.IsEnabled = true;
                 TestLlmEndpointButton.IsEnabled = true;
+                UpdateLlmControlAvailability();
             }
         }
     }
@@ -419,8 +421,8 @@ public partial class MainWindow : Window
     {
         await _notificationSink.ShowAsync(new UserNotification(
             UserNotificationKind.Reminder,
-            "MailWhere 알림 테스트",
-            "이런 식으로 마감 전 리마인드가 표시됩니다.",
+            "내일 마감 · 비용 자료 회신",
+            "09:00까지 검토 후 회신이 필요합니다. 토스트 버튼으로 업무 보드를 바로 열 수 있습니다.",
             "notification-test"));
     }
 
@@ -439,6 +441,11 @@ public partial class MainWindow : Window
     private void StartupToggle_Click(object sender, RoutedEventArgs e)
     {
         SetStartupRegistration(StartupToggle.IsChecked == true);
+    }
+
+    private void LlmEnabledToggle_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateLlmControlAvailability();
     }
 
     private async void ApproveSelectedReview_Click(object sender, RoutedEventArgs e)
@@ -710,11 +717,14 @@ public partial class MainWindow : Window
 
     private RuntimeSettings ReadSettingsFromControls()
     {
-        var provider = ParseProvider(((ComboBoxItem?)LlmProviderBox.SelectedItem)?.Tag?.ToString());
+        var llmEnabled = LlmEnabledToggle.IsChecked == true;
+        var provider = llmEnabled
+            ? ParseVisibleProvider(((ComboBoxItem?)LlmProviderBox.SelectedItem)?.Tag?.ToString())
+            : LlmProviderKind.Disabled;
         var defaults = RuntimeSettings.ManagedSafeDefault;
         return RuntimeSettingsSerializer.Merge(new PartialRuntimeSettings(
             ManagedMode: true,
-            ExternalLlmEnabled: LlmEnabledToggle.IsChecked == true,
+            ExternalLlmEnabled: llmEnabled,
             AutomaticWatcherRequested: AutoWatcherToggle.IsChecked == true,
             SmokeGatePassed: _settings.SmokeGatePassed,
             RuleOnlyModeAccepted: true,
@@ -742,10 +752,13 @@ public partial class MainWindow : Window
         ReminderLookAheadText.Text = settings.ReminderLookAheadHours.ToString();
         DailyBoardTimeText.Text = settings.DailyBoardTime;
         LlmStatusText.Text = "LLM 연결 테스트 전입니다.";
+        var visibleProvider = settings.LlmProvider == LlmProviderKind.Disabled
+            ? LlmProviderKind.OllamaNative
+            : settings.LlmProvider;
         LlmProviderBox.SelectedItem = null;
         foreach (ComboBoxItem item in LlmProviderBox.Items)
         {
-            if (string.Equals(item.Tag?.ToString(), settings.LlmProvider.ToString(), StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(item.Tag?.ToString(), visibleProvider.ToString(), StringComparison.OrdinalIgnoreCase))
             {
                 LlmProviderBox.SelectedItem = item;
                 break;
@@ -758,10 +771,13 @@ public partial class MainWindow : Window
         }
 
         ApplyFallbackPolicyToControls(settings.LlmFallbackPolicy);
+        UpdateLlmControlAvailability();
     }
 
-    private static LlmProviderKind ParseProvider(string? value) =>
-        Enum.TryParse<LlmProviderKind>(value, ignoreCase: true, out var parsed) ? parsed : LlmProviderKind.Disabled;
+    private static LlmProviderKind ParseVisibleProvider(string? value) =>
+        Enum.TryParse<LlmProviderKind>(value, ignoreCase: true, out var parsed) && parsed != LlmProviderKind.Disabled
+            ? parsed
+            : LlmProviderKind.OllamaNative;
 
     private static LlmFallbackPolicy ParseFallbackPolicy(string? value) =>
         Enum.TryParse<LlmFallbackPolicy>(value, ignoreCase: true, out var parsed) ? parsed : LlmFallbackPolicy.LlmOnly;
@@ -783,14 +799,15 @@ public partial class MainWindow : Window
 
     private void ApplyModelList(IReadOnlyList<string> models, string currentModel)
     {
-        var selected = string.IsNullOrWhiteSpace(currentModel) ? RuntimeSettings.ManagedSafeDefault.LlmModel : currentModel;
+        var selected = string.IsNullOrWhiteSpace(currentModel) ? string.Empty : currentModel.Trim();
         LlmModelBox.Items.Clear();
         foreach (var model in models)
         {
             LlmModelBox.Items.Add(model);
         }
 
-        if (!models.Any(model => string.Equals(model, selected, StringComparison.OrdinalIgnoreCase)))
+        if (!string.IsNullOrWhiteSpace(selected)
+            && !models.Any(model => string.Equals(model, selected, StringComparison.OrdinalIgnoreCase)))
         {
             LlmModelBox.Items.Add(selected);
         }
@@ -811,7 +828,7 @@ public partial class MainWindow : Window
         _fallbackPromptShownThisSession = true;
         var result = System.Windows.MessageBox.Show(
             this,
-            "LLM 연결/분석이 실패했습니다.\n\n다음 스캔부터 rule-based fallback을 사용할까요?\n나중에도 오른쪽 설정의 'LLM 실패 시'에서 바꿀 수 있습니다.",
+            "LLM 연결 또는 분석이 실패했습니다.\n\n기본값은 실패한 메일을 검토함에 보관하고, LLM 연결이 복구되면 다시 분석하는 방식입니다.\n그래도 다음 스캔부터 규칙 기반 fallback을 허용할까요?\n\n나중에 고급 설정의 'LLM 분석 실패 처리'에서 바꿀 수 있습니다.",
             "LLM 실패 처리",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -823,7 +840,7 @@ public partial class MainWindow : Window
         _settings = _settings with { LlmFallbackPolicy = LlmFallbackPolicy.LlmThenRules };
         WindowsRuntimeSettingsStore.Save(_settings);
         ApplyFallbackPolicyToControls(_settings.LlmFallbackPolicy);
-        StatusText.Text = "다음 스캔부터 LLM 실패 시 rule fallback을 사용합니다.";
+        StatusText.Text = "다음 스캔부터 LLM 실패 시 규칙 기반 fallback을 허용합니다.";
     }
 
     private static int ParseInt(string? value, int fallback) =>
@@ -832,11 +849,20 @@ public partial class MainWindow : Window
     private void SetScanBusy(bool busy, string message)
     {
         ScanRecentMonthButton.IsEnabled = !busy;
-        TestLlmEndpointButton.IsEnabled = !busy;
-        LoadLlmModelsButton.IsEnabled = !busy;
         ScanProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressText.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressText.Text = message;
+        UpdateLlmControlAvailability();
+    }
+
+    private void UpdateLlmControlAvailability()
+    {
+        var enabled = !_scanInProgress && LlmEnabledToggle.IsChecked == true;
+        LlmProviderBox.IsEnabled = enabled;
+        LlmEndpointText.IsEnabled = enabled;
+        LlmModelBox.IsEnabled = enabled;
+        TestLlmEndpointButton.IsEnabled = enabled;
+        LoadLlmModelsButton.IsEnabled = enabled;
     }
 
     private void UpdateScanProgress(MailScanProgress progress)

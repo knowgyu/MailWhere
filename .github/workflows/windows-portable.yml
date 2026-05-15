@@ -34,6 +34,12 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Resolve package version
+        shell: pwsh
+        run: |
+          $version = (dotnet msbuild .\src\MailWhere.Windows\MailWhere.Windows.csproj -nologo -getProperty:Version).Trim()
+          "PACKAGE_VERSION=v$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Cache NuGet packages
         uses: actions/cache@v5.0.5
         with:
@@ -49,7 +55,7 @@ jobs:
       - name: Upload portable zip
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: MailWhere-win-x64-portable
-          path: artifacts/MailWhere-win-x64-portable.zip
+          name: MailWhere-${{ env.PACKAGE_VERSION }}-${{ env.RUNTIME_IDENTIFIER }}-portable
+          path: artifacts/MailWhere-${{ env.PACKAGE_VERSION }}-${{ env.RUNTIME_IDENTIFIER }}-portable.zip
           if-no-files-found: error
           retention-days: 14
