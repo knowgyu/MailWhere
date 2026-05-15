@@ -1,0 +1,12 @@
+{
+  "ExternalLlmEnabled": true,
+  "LlmProvider": "OllamaNative",
+  "LlmEndpoint": "http://localhost:11434",
+  "LlmModel": "",
+  "LlmTimeoutSeconds": 120,
+  "LlmFallbackPolicy": "LlmOnly",
+  "RecentScanDays": 30,
+  "RecentScanMaxItems": 0,
+  "ReminderLookAheadHours": 24,
+  "DailyBoardTime": "08:00"
+}

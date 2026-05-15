@@ -34,7 +34,10 @@ public sealed class ManualTaskService
             LocalTaskStatus.Open,
             null,
             now,
-            now);
+            now,
+            SourceSenderDisplay: "직접 추가",
+            SourceReceivedAt: now,
+            Kind: FollowUpKind.ActionRequested);
 
         await _store.SaveTaskAsync(task, cancellationToken).ConfigureAwait(false);
         return task;

@@ -80,6 +80,7 @@ Copy-Item .\docs (Join-Path $publishDir "docs") -Recurse -Force
 Copy-Item .\docs\START_HERE.ko.txt (Join-Path $publishDir "START_HERE_시작하기.txt") -Force
 Copy-Item .\assets (Join-Path $publishDir "assets") -Recurse -Force
 Copy-Item .\src\MailWhere.Windows\appsettings.sample.json (Join-Path $publishDir "appsettings.sample.json") -Force
+Copy-Item .\src\MailWhere.Windows\MailWhere.defaults.sample.json (Join-Path $publishDir "MailWhere.defaults.sample.json") -Force
 
 $commit = "unknown"
 try {

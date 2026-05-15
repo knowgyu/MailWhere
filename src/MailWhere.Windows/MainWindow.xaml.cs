@@ -109,7 +109,14 @@ public partial class MainWindow : Window
 
     private async void OpenDailyBoard_Click(object sender, RoutedEventArgs e)
     {
-        await OpenDailyBoardAsync();
+        try
+        {
+            await OpenDailyBoardAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"업무보드를 열지 못했습니다: {ex.GetType().Name}";
+        }
     }
 
     public async Task OpenDailyBoardAsync()
@@ -126,6 +133,61 @@ public partial class MainWindow : Window
         WindowState = WindowState.Normal;
         MainTabs.SelectedItem = ReviewTab;
         Activate();
+    }
+
+    private async void OpenTaskButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (GetTaskListItem(sender) is { Task: { } task })
+            {
+                await OpenTaskSourceAsync(task);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"원본 메일을 열지 못했습니다: {ex.GetType().Name}";
+        }
+    }
+
+    private async void DismissTaskButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (GetTaskListItem(sender) is { Task: { } task } && await DismissTaskWithConfirmationAsync(task))
+            {
+                await RefreshTasksAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"할 일을 삭제하지 못했습니다: {ex.GetType().Name}";
+        }
+    }
+
+    private async void SetTaskDueButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (GetTaskListItem(sender) is not { Task: { } task })
+            {
+                return;
+            }
+
+            var dialog = new DueDateDialog(DateTime.Today, task.DueAt?.DateTime)
+            {
+                Owner = this
+            };
+            if (dialog.ShowDialog() == true && dialog.SelectedDueAt is { } dueAt)
+            {
+                await SetTaskDueAsync(task, dueAt);
+                await RefreshTasksAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"기한을 설정하지 못했습니다: {ex.GetType().Name}";
+        }
     }
 
     private async void TestLlmEndpoint_Click(object sender, RoutedEventArgs e)
@@ -517,14 +579,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OpenSelectedTaskMail_DoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (TasksList.SelectedItem is TaskListItem item)
-        {
-            await OpenSourceMailAsync(item.Task.SourceId);
-        }
-    }
-
     private async void MainWindow_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if ((Keyboard.Modifiers & ModifierKeys.Alt) != ModifierKeys.Alt)
@@ -566,15 +620,12 @@ public partial class MainWindow : Window
         var now = DateTimeOffset.Now;
         foreach (var task in tasks)
         {
-            var due = task.DueAt is null ? "마감 없음" : $"{DdayFormatter.Format(task.DueAt.Value, now)} · {task.DueAt.Value:MM/dd HH:mm}";
-            var display = $"{due}\n{CompactLine(task.Title, 54)}"
-                          + (string.IsNullOrWhiteSpace(task.SourceId) ? string.Empty : "\n더블클릭: Outlook 원본 메일");
-            TasksList.Items.Add(new TaskListItem(task, display));
+            TasksList.Items.Add(TaskListItem.FromTask(task, now));
         }
 
         if (tasks.Count == 0)
         {
-            TasksList.Items.Add("아직 표시할 할 일이 없습니다. 최근 1개월 스캔을 실행해보세요.");
+            TasksList.Items.Add(TaskListItem.Empty("아직 표시할 할 일이 없습니다. 최근 1개월 스캔을 실행해보세요."));
         }
     }
 
@@ -656,7 +707,14 @@ public partial class MainWindow : Window
         var store = await GetStoreAsync();
         var tasks = await store.ListOpenTasksAsync();
         var candidates = await store.ListReviewCandidatesAsync();
-        _dailyBoardWindow = new DailyBoardWindow(tasks, candidates, now, dailyBoardTime)
+        _dailyBoardWindow = new DailyBoardWindow(
+            tasks,
+            now,
+            dailyBoardTime,
+            OpenTaskSourceAsync,
+            DismissTaskWithConfirmationAsync,
+            SetTaskDueAsync,
+            CreateManualTaskAsync)
         {
             Owner = this
         };
@@ -738,6 +796,66 @@ public partial class MainWindow : Window
                 $"{reminder.DdayLabel} · {reminder.Title}",
                 reminder.Reason,
                 reminder.ReminderKey));
+        }
+    }
+
+    private async Task OpenTaskSourceAsync(LocalTaskItem task)
+    {
+        await OpenSourceMailAsync(task.SourceId);
+    }
+
+    private async Task<bool> DismissTaskWithConfirmationAsync(LocalTaskItem task)
+    {
+        var store = await GetStoreAsync();
+        var shouldAsk = await store.GetAppStateAsync("confirm-dismiss-task") != "false";
+        if (shouldAsk)
+        {
+            var dialog = new ConfirmDismissDialog
+            {
+                Owner = this
+            };
+            if (dialog.ShowDialog() != true)
+            {
+                return false;
+            }
+
+            if (dialog.DoNotAskAgain)
+            {
+                await store.SetAppStateAsync("confirm-dismiss-task", "false");
+            }
+        }
+
+        var dismissed = await store.DismissTaskAsync(task.Id, DateTimeOffset.UtcNow);
+        StatusText.Text = dismissed
+            ? "업무보드에서 삭제했습니다. Outlook 원본 메일은 그대로 유지됩니다."
+            : "이미 처리된 항목입니다.";
+        return dismissed;
+    }
+
+    private async Task<bool> SetTaskDueAsync(LocalTaskItem task, DateTimeOffset dueAt)
+    {
+        var store = await GetStoreAsync();
+        var updated = await store.UpdateTaskDueAtAsync(task.Id, dueAt, DateTimeOffset.UtcNow);
+        StatusText.Text = updated
+            ? $"기한을 {dueAt:MM/dd}로 설정했습니다."
+            : "이미 처리된 항목이라 기한을 바꾸지 못했습니다.";
+        return updated;
+    }
+
+    private async Task<LocalTaskItem?> CreateManualTaskAsync(string title, DateTimeOffset? dueAt)
+    {
+        try
+        {
+            var store = await GetStoreAsync();
+            var created = await new ManualTaskService(store).CreateAsync(title, dueAt);
+            await RefreshTasksAsync();
+            StatusText.Text = "직접 추가한 할 일을 등록했습니다.";
+            return created;
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("직접 추가 실패", ex);
+            return null;
         }
     }
 
@@ -1033,8 +1151,36 @@ public partial class MainWindow : Window
         public override string ToString() => Display;
     }
 
-    private sealed record TaskListItem(LocalTaskItem Task, string Display)
+    private static TaskListItem? GetTaskListItem(object sender) =>
+        sender is FrameworkElement { Tag: TaskListItem item } ? item : null;
+
+    private sealed class TaskListItem
     {
-        public override string ToString() => Display;
+        private TaskListItem(LocalTaskItem? task, string title, string meta)
+        {
+            Task = task;
+            Title = title;
+            Meta = meta;
+        }
+
+        public LocalTaskItem? Task { get; }
+        public string Title { get; }
+        public string Meta { get; }
+        public bool HasTask => Task is not null;
+        public bool CanOpen => !string.IsNullOrWhiteSpace(Task?.SourceId);
+        public string DueButtonText => Task?.DueAt is null ? "기한 설정" : "기한 변경";
+        public Visibility DueButtonVisibility => Task is null ? Visibility.Collapsed : Visibility.Visible;
+
+        public static TaskListItem Empty(string message) => new(null, message, string.Empty);
+
+        public static TaskListItem FromTask(LocalTaskItem task, DateTimeOffset now)
+        {
+            var due = task.DueAt is null ? "기한 미정" : DdayFormatter.Format(task.DueAt.Value, now);
+            var sender = string.IsNullOrWhiteSpace(task.SourceSenderDisplay) ? "직접 추가" : CompactLine(task.SourceSenderDisplay, 18);
+            var received = task.SourceReceivedAt ?? task.CreatedAt;
+            return new TaskListItem(task, CompactLine(task.Title, 54), $"{due} | {sender} | {received:MM/dd HH:mm}");
+        }
+
+        public override string ToString() => Title;
     }
 }

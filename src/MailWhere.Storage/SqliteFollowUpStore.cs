@@ -36,7 +36,14 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         await EnsureColumnAsync(connection, "review_candidates", "resolution", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "review_candidates", "snooze_until", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "review_candidates", "source_id", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "review_candidates", "source_sender_display", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "review_candidates", "source_received_at", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "review_candidates", "source_recipient_role", "TEXT NOT NULL DEFAULT 'Direct'", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "tasks", "source_id", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "tasks", "source_sender_display", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "tasks", "source_received_at", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "tasks", "source_recipient_role", "TEXT NOT NULL DEFAULT 'Direct'", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "tasks", "kind", "TEXT NOT NULL DEFAULT 'ActionRequested'", cancellationToken).ConfigureAwait(false);
 
         command.CommandText = Schema.IndexesSql;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -67,8 +74,8 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         var command = connection.CreateCommand();
         command.CommandText = """
             INSERT OR REPLACE INTO review_candidates
-            (id, source_id_hash, source_id, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, snooze_until, suppressed)
-            VALUES ($id, $source, $sourceId, $kind, $confidence, $title, $reason, $evidence, $dueAt, $created, $snoozeUntil, $suppressed)
+            (id, source_id_hash, source_id, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, snooze_until, source_sender_display, source_received_at, source_recipient_role, suppressed)
+            VALUES ($id, $source, $sourceId, $kind, $confidence, $title, $reason, $evidence, $dueAt, $created, $snoozeUntil, $sender, $receivedAt, $recipientRole, $suppressed)
             """;
         command.Parameters.AddWithValue("$id", candidate.Id.ToString());
         command.Parameters.AddWithValue("$source", candidate.SourceIdHash);
@@ -81,6 +88,9 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         command.Parameters.AddWithValue("$dueAt", (object?)candidate.Analysis.DueAt?.ToString("O") ?? DBNull.Value);
         command.Parameters.AddWithValue("$created", candidate.CreatedAt.ToString("O"));
         command.Parameters.AddWithValue("$snoozeUntil", (object?)candidate.SnoozeUntil?.ToUniversalTime().ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$sender", (object?)EvidencePolicy.Truncate(candidate.SourceSenderDisplay) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$receivedAt", (object?)candidate.SourceReceivedAt?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$recipientRole", candidate.SourceRecipientRole.ToString());
         command.Parameters.AddWithValue("$suppressed", candidate.Suppressed ? 1 : 0);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -115,6 +125,9 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
                 reason = $reason,
                 evidence_snippet = NULL,
                 source_id = NULL,
+                source_sender_display = NULL,
+                source_received_at = NULL,
+                source_recipient_role = $recipientRole,
                 suppressed = 1,
                 resolved_at = $resolvedAt,
                 resolution = $resolution
@@ -126,6 +139,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         command.Parameters.AddWithValue("$source", sourceIdHash);
         command.Parameters.AddWithValue("$title", LocalTaskItem.RedactedTitle);
         command.Parameters.AddWithValue("$reason", "LLM 재분석으로 검토 후보를 정리했습니다.");
+        command.Parameters.AddWithValue("$recipientRole", MailboxRecipientRole.Other.ToString());
         command.Parameters.AddWithValue("$resolvedAt", now.ToString("O"));
         command.Parameters.AddWithValue("$resolution", string.IsNullOrWhiteSpace(resolution) ? "Suppressed" : resolution);
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -147,7 +161,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted FROM tasks WHERE status IN ('Open','Snoozed') ORDER BY due_at IS NULL, due_at, created_at";
+        command.CommandText = "SELECT id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted, source_sender_display, source_received_at, source_recipient_role, kind FROM tasks WHERE status IN ('Open','Snoozed') ORDER BY due_at IS NULL, due_at, created_at";
         var tasks = new List<LocalTaskItem>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -164,7 +178,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, source_id_hash, source_id, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed, snooze_until
+            SELECT id, source_id_hash, source_id, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed, snooze_until, source_sender_display, source_received_at, source_recipient_role
             FROM review_candidates
             WHERE suppressed = 0
               AND resolved_at IS NULL
@@ -236,7 +250,11 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             LocalTaskStatus.Open,
             null,
             now,
-            now);
+            now,
+            SourceSenderDisplay: candidate.SourceSenderDisplay,
+            SourceReceivedAt: candidate.SourceReceivedAt,
+            SourceRecipientRole: candidate.SourceRecipientRole,
+            Kind: candidate.Analysis.Kind);
 
         await SaveTaskAsync(connection, transaction, task, cancellationToken).ConfigureAwait(false);
 
@@ -276,6 +294,9 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
                 reason = $reason,
                 evidence_snippet = NULL,
                 source_id = NULL,
+                source_sender_display = NULL,
+                source_received_at = NULL,
+                source_recipient_role = $recipientRole,
                 suppressed = 1,
                 resolved_at = $resolvedAt,
                 resolution = $resolution
@@ -284,6 +305,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         update.Parameters.AddWithValue("$id", candidateId.ToString());
         update.Parameters.AddWithValue("$title", LocalTaskItem.RedactedTitle);
         update.Parameters.AddWithValue("$reason", LocalTaskItem.RedactedReason);
+        update.Parameters.AddWithValue("$recipientRole", MailboxRecipientRole.Other.ToString());
         update.Parameters.AddWithValue("$resolvedAt", now.ToString("O"));
         update.Parameters.AddWithValue("$resolution", "NotATask");
         var rows = await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -295,6 +317,44 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return true;
+    }
+
+    public async Task<bool> DismissTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE tasks
+            SET status = $status,
+                updated_at = $updatedAt
+            WHERE id = $id
+              AND status IN ('Open','Snoozed')
+            """;
+        command.Parameters.AddWithValue("$id", taskId.ToString());
+        command.Parameters.AddWithValue("$status", LocalTaskStatus.Dismissed.ToString());
+        command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
+    public async Task<bool> UpdateTaskDueAtAsync(Guid taskId, DateTimeOffset dueAt, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE tasks
+            SET due_at = $dueAt,
+                updated_at = $updatedAt,
+                status = CASE WHEN status = 'Snoozed' THEN 'Open' ELSE status END,
+                snooze_until = NULL
+            WHERE id = $id
+              AND status IN ('Open','Snoozed')
+            """;
+        command.Parameters.AddWithValue("$id", taskId.ToString());
+        command.Parameters.AddWithValue("$dueAt", dueAt.ToString("O"));
+        command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
     }
 
     public async Task<string?> GetAppStateAsync(string key, CancellationToken cancellationToken = default)
@@ -340,10 +400,11 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 
         var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "UPDATE tasks SET title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL, source_derived_data_deleted = 1, updated_at = $updated WHERE id = $id";
+        command.CommandText = "UPDATE tasks SET title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL, source_sender_display = NULL, source_received_at = NULL, source_recipient_role = $recipientRole, source_derived_data_deleted = 1, updated_at = $updated WHERE id = $id";
         command.Parameters.AddWithValue("$id", taskId.ToString());
         command.Parameters.AddWithValue("$title", LocalTaskItem.RedactedTitle);
         command.Parameters.AddWithValue("$reason", LocalTaskItem.RedactedReason);
+        command.Parameters.AddWithValue("$recipientRole", MailboxRecipientRole.Other.ToString());
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
@@ -368,19 +429,21 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
     {
         var taskCommand = connection.CreateCommand();
         taskCommand.Transaction = transaction;
-        taskCommand.CommandText = "UPDATE tasks SET title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL, source_derived_data_deleted = 1, updated_at = $updated WHERE source_id_hash = $source";
+        taskCommand.CommandText = "UPDATE tasks SET title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL, source_sender_display = NULL, source_received_at = NULL, source_recipient_role = $recipientRole, source_derived_data_deleted = 1, updated_at = $updated WHERE source_id_hash = $source";
         taskCommand.Parameters.AddWithValue("$source", sourceIdHash);
         taskCommand.Parameters.AddWithValue("$title", LocalTaskItem.RedactedTitle);
         taskCommand.Parameters.AddWithValue("$reason", LocalTaskItem.RedactedReason);
+        taskCommand.Parameters.AddWithValue("$recipientRole", MailboxRecipientRole.Other.ToString());
         taskCommand.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         await taskCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
         var candidateCommand = connection.CreateCommand();
         candidateCommand.Transaction = transaction;
-        candidateCommand.CommandText = "UPDATE review_candidates SET suggested_title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL WHERE source_id_hash = $source";
+        candidateCommand.CommandText = "UPDATE review_candidates SET suggested_title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL, source_sender_display = NULL, source_received_at = NULL, source_recipient_role = $recipientRole WHERE source_id_hash = $source";
         candidateCommand.Parameters.AddWithValue("$source", sourceIdHash);
         candidateCommand.Parameters.AddWithValue("$title", LocalTaskItem.RedactedTitle);
         candidateCommand.Parameters.AddWithValue("$reason", LocalTaskItem.RedactedReason);
+        candidateCommand.Parameters.AddWithValue("$recipientRole", MailboxRecipientRole.Other.ToString());
         await candidateCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -390,8 +453,8 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         command.Transaction = transaction;
         command.CommandText = """
             INSERT OR REPLACE INTO tasks
-            (id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted)
-            VALUES ($id, $title, $dueAt, $source, $sourceId, $confidence, $reason, $evidence, $status, $snooze, $created, $updated, $deleted)
+            (id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted, source_sender_display, source_received_at, source_recipient_role, kind)
+            VALUES ($id, $title, $dueAt, $source, $sourceId, $confidence, $reason, $evidence, $status, $snooze, $created, $updated, $deleted, $sender, $receivedAt, $recipientRole, $kind)
             """;
         command.Parameters.AddWithValue("$id", task.Id.ToString());
         command.Parameters.AddWithValue("$title", EvidencePolicy.Truncate(task.Title) ?? LocalTaskItem.RedactedTitle);
@@ -406,6 +469,10 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         command.Parameters.AddWithValue("$created", task.CreatedAt.ToString("O"));
         command.Parameters.AddWithValue("$updated", task.UpdatedAt.ToString("O"));
         command.Parameters.AddWithValue("$deleted", task.SourceDerivedDataDeleted ? 1 : 0);
+        command.Parameters.AddWithValue("$sender", (object?)EvidencePolicy.Truncate(task.SourceSenderDisplay) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$receivedAt", (object?)task.SourceReceivedAt?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$recipientRole", task.SourceRecipientRole.ToString());
+        command.Parameters.AddWithValue("$kind", task.Kind.ToString());
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -414,7 +481,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         var lookup = connection.CreateCommand();
         lookup.Transaction = transaction;
         lookup.CommandText = """
-            SELECT id, source_id_hash, source_id, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed, snooze_until
+            SELECT id, source_id_hash, source_id, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, suppressed, snooze_until, source_sender_display, source_received_at, source_recipient_role
             FROM review_candidates
             WHERE id = $id
               AND suppressed = 0
@@ -476,7 +543,11 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             MaybeDate(reader.GetValue(9)),
             DateTimeOffset.Parse(reader.GetString(10)),
             DateTimeOffset.Parse(reader.GetString(11)),
-            reader.GetInt32(12) == 1);
+            reader.GetInt32(12) == 1,
+            reader.IsDBNull(13) ? null : reader.GetString(13),
+            MaybeDate(reader.GetValue(14)),
+            Enum.TryParse<MailboxRecipientRole>(reader.IsDBNull(15) ? null : reader.GetString(15), out var role) ? role : MailboxRecipientRole.Direct,
+            Enum.TryParse<FollowUpKind>(reader.IsDBNull(16) ? null : reader.GetString(16), out var kind) ? kind : FollowUpKind.ActionRequested);
     }
 
     private static ReviewCandidate ReadCandidate(SqliteDataReader reader)
@@ -499,6 +570,9 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             analysis,
             DateTimeOffset.Parse(reader.GetString(9)),
             reader.GetInt32(10) == 1,
-            MaybeDate(reader.GetValue(11)));
+            MaybeDate(reader.GetValue(11)),
+            reader.IsDBNull(12) ? null : reader.GetString(12),
+            MaybeDate(reader.GetValue(13)),
+            Enum.TryParse<MailboxRecipientRole>(reader.IsDBNull(14) ? null : reader.GetString(14), out var role) ? role : MailboxRecipientRole.Direct);
     }
 }

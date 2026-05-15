@@ -13,7 +13,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private const int MaxCurrentMessageChars = 1300;
     private const int MaxForwardedContextChars = 900;
     private const int MaxQuotedPreviewChars = 240;
-    private const int DefaultBatchSize = 4;
+    private const int DefaultBatchSize = 8;
     private readonly ILlmClient _llmClient;
     private readonly IFollowUpAnalyzer _fallback;
     private readonly LlmFallbackPolicy _fallbackPolicy;
@@ -81,8 +81,11 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             stopwatch.Stop();
             if (TryParseBatch(raw, emails, out var parsed))
             {
-                RecordSuccess(stopwatch.Elapsed, parsed.Count);
-                return parsed;
+                var missingItemCount = parsed.Count(item => item.IsTransientLlmFailureReview);
+                RecordBatchCompletion(stopwatch.Elapsed, parsed.Count - missingItemCount, missingItemCount, "partial-batch");
+                return missingItemCount > 0
+                    ? await ApplyPartialBatchFallbackAsync(emails, parsed, cancellationToken).ConfigureAwait(false)
+                    : parsed;
             }
 
             RecordFailure("invalid-json", stopwatch.Elapsed, emails.Count);
@@ -125,6 +128,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
                 subjectCore = context.SubjectCore,
                 mailboxOwnerDisplayName = email.MailboxOwnerDisplayName,
                 recipientDisplayNames = email.RecipientDisplayNames ?? Array.Empty<string>(),
+                mailboxRecipientRole = email.MailboxRecipientRole.ToString(),
                 conversationIdPresent = !string.IsNullOrWhiteSpace(email.ConversationId),
                 contextKind = context.Kind.ToString(),
                 currentSenderDelegatesForwardedContext = context.CurrentSenderDelegatesForwardedContext,
@@ -154,6 +158,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
                 subjectCore = context.SubjectCore,
                 mailboxOwnerDisplayName = email.MailboxOwnerDisplayName,
                 recipientDisplayNames = email.RecipientDisplayNames ?? Array.Empty<string>(),
+                mailboxRecipientRole = email.MailboxRecipientRole.ToString(),
                 contextKind = context.Kind.ToString(),
                 currentSenderDelegatesForwardedContext = context.CurrentSenderDelegatesForwardedContext,
                 quotedHistoryTrimmed = context.QuotedHistoryTrimmed,
@@ -169,7 +174,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             {
                 language = "ko-KR",
                 now = DateTimeOffset.Now.ToString("O", CultureInfo.InvariantCulture),
-                instruction = "각 items[]를 독립적으로 분석하고 같은 id로 짧은 JSON 결과를 반환하세요. /no_think",
+                instruction = "각 items[]를 독립적으로 분석하고 입력과 같은 개수, 같은 id로 짧은 JSON 결과를 반환하세요. /no_think",
                 items
             },
             new JsonSerializerOptions
@@ -216,6 +221,33 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         }
 
         return emails.Select(email => BuildFailureReview(email, failureCode)).ToArray();
+    }
+
+    private async Task<IReadOnlyList<FollowUpAnalysis>> ApplyPartialBatchFallbackAsync(
+        IReadOnlyList<EmailSnapshot> emails,
+        IReadOnlyList<FollowUpAnalysis> parsed,
+        CancellationToken cancellationToken)
+    {
+        if (_fallbackPolicy != LlmFallbackPolicy.LlmThenRules)
+        {
+            return parsed;
+        }
+
+        var merged = new List<FollowUpAnalysis>(parsed.Count);
+        for (var i = 0; i < parsed.Count; i++)
+        {
+            if (parsed[i].IsTransientLlmFailureReview)
+            {
+                merged.Add(await _fallback.AnalyzeAsync(emails[i], cancellationToken).ConfigureAwait(false));
+                RecordFallback();
+            }
+            else
+            {
+                merged.Add(parsed[i]);
+            }
+        }
+
+        return merged;
     }
 
     private static FollowUpAnalysis BuildFailureReview(EmailSnapshot email, string failureCode)
@@ -275,7 +307,14 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
                 confidence = Math.Min(confidence, 0.6);
             }
 
+            var originDowngraded = false;
+            var beforeOriginDisposition = disposition;
             disposition = ApplyOriginPolicy(disposition, response, context);
+            if (beforeOriginDisposition == AnalysisDisposition.AutoCreateTask
+                && disposition == AnalysisDisposition.Review)
+            {
+                originDowngraded = true;
+            }
             var dueAt = TryParseDate(response.DueAt);
             var title = EvidencePolicy.Truncate(response.SuggestedTitle);
             if (string.IsNullOrWhiteSpace(title) && disposition != AnalysisDisposition.Ignore)
@@ -287,7 +326,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
                 title = "후속 조치 없음";
             }
 
-            parsed = new FollowUpAnalysis(
+            var analysis = new FollowUpAnalysis(
                 kind,
                 disposition,
                 confidence,
@@ -296,6 +335,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
                 EvidencePolicy.Truncate(response.EvidenceSnippet),
                 dueAt,
                 EvidencePolicy.Truncate(response.Summary));
+            parsed = originDowngraded ? analysis : RecipientTriagePolicy.Apply(email, analysis);
             return true;
         }
         catch
@@ -346,15 +386,13 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             }
             else
             {
-                var byId = items
-                    .Where(item => !string.IsNullOrWhiteSpace(item.Id))
-                    .GroupBy(item => item.Id!, StringComparer.Ordinal)
-                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+                var byId = BuildTrustedBatchIdMap(items, emails.Count);
                 for (var i = 0; i < emails.Count; i++)
                 {
-                    if (!byId.TryGetValue(i.ToString(CultureInfo.InvariantCulture), out var item))
+                    if (!byId.TryGetValue(i, out var item))
                     {
-                        return false;
+                        results.Add(BuildFailureReview(emails[i], "missing-batch-item"));
+                        continue;
                     }
 
                     results.Add(ParseResponseItem(item, emails[i]));
@@ -395,7 +433,14 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             confidence = Math.Min(confidence, 0.6);
         }
 
+        var originDowngraded = false;
+        var beforeOriginDisposition = disposition;
         disposition = ApplyOriginPolicy(disposition, response, context);
+        if (beforeOriginDisposition == AnalysisDisposition.AutoCreateTask
+            && disposition == AnalysisDisposition.Review)
+        {
+            originDowngraded = true;
+        }
         var dueAt = TryParseDate(response.DueAt);
         var title = EvidencePolicy.Truncate(response.SuggestedTitle);
         if (string.IsNullOrWhiteSpace(title) && disposition != AnalysisDisposition.Ignore)
@@ -407,7 +452,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             title = "후속 조치 없음";
         }
 
-        return new FollowUpAnalysis(
+        var analysis = new FollowUpAnalysis(
             kind,
             disposition,
             confidence,
@@ -416,7 +461,52 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             EvidencePolicy.Truncate(response.EvidenceSnippet),
             dueAt,
             EvidencePolicy.Truncate(response.Summary));
+        return originDowngraded ? analysis : RecipientTriagePolicy.Apply(email, analysis);
     }
+
+    private static IReadOnlyDictionary<int, LlmFollowUpResponse> BuildTrustedBatchIdMap(
+        IReadOnlyList<LlmFollowUpResponse> orderedItems,
+        int expectedCount)
+    {
+        var parsed = orderedItems
+            .Select((item, ordinal) => new BatchIdCandidate(item, ordinal, TryParseBatchId(item.Id)))
+            .ToArray();
+        var valid = parsed
+            .Where(candidate => candidate.ParsedId is >= 0 && candidate.ParsedId < expectedCount)
+            .ToArray();
+        var idsAreCompleteAndUnique = orderedItems.Count == expectedCount
+            && valid.Length == expectedCount
+            && valid.Select(candidate => candidate.ParsedId!.Value).Distinct().Count() == expectedCount;
+        if (idsAreCompleteAndUnique)
+        {
+            return valid.ToDictionary(candidate => candidate.ParsedId!.Value, candidate => candidate.Item);
+        }
+
+        return valid
+            .Where(candidate => candidate.ParsedId == candidate.Ordinal)
+            .GroupBy(candidate => candidate.ParsedId!.Value)
+            .ToDictionary(group => group.Key, group => group.First().Item);
+    }
+
+    private static int? TryParseBatchId(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        var normalized = id.Trim();
+        if (normalized.StartsWith('m'))
+        {
+            normalized = normalized[1..];
+        }
+
+        return int.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private sealed record BatchIdCandidate(LlmFollowUpResponse Item, int Ordinal, int? ParsedId);
 
     private static DateTimeOffset? TryParseDate(string? value) =>
         DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed) ? parsed : null;
@@ -439,6 +529,21 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             _llmFailureCount += itemCount;
             _totalLlmDuration += elapsed;
             _lastFailureCode = failureCode;
+        }
+    }
+
+    private void RecordBatchCompletion(TimeSpan elapsed, int successCount, int failureCount, string partialFailureCode)
+    {
+        lock (_telemetryLock)
+        {
+            _llmAttemptCount += successCount + failureCount;
+            _llmSuccessCount += successCount;
+            _llmFailureCount += failureCount;
+            _totalLlmDuration += elapsed;
+            if (failureCount > 0)
+            {
+                _lastFailureCode = partialFailureCode;
+            }
         }
     }
 
@@ -465,14 +570,18 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         1. currentMessage가 이번 발신자의 새 요청입니다. 기본 근거는 currentMessage입니다.
         2. forwardedContext는 현재 발신자가 아래/전달/포워드된 내용을 확인·대응·회신하라고 요구할 때만 근거로 쓰세요.
         3. quotedHistoryPreview만 있는 과거 요청은 stale history이므로 자동 등록하지 마세요.
-        4. 다른 사람에게 명시 배정된 일은 ignore입니다. 명시 대상이 mailboxOwner이면 내 업무입니다. 팀/담당자/전체처럼 불명확하면 review입니다.
-        5. 명확한 action/deadline/reply/meeting이면 autoCreateTask, 유용하지만 애매하면 review, FYI/공지/감사/단순 확인은 ignore입니다.
-        6. dueAt은 메일에 근거가 있을 때만 ISO-8601로 쓰고, 없으면 null입니다. 마감일을 상상하지 마세요.
-        7. reason/evidenceSnippet/summary는 UI 보조용이므로 각각 50자 이내로 짧게 쓰세요.
+        4. mailboxRecipientRole이 Cc이면 비일정성 요청은 보통 ignore입니다. 단 회의/참석/일정은 Cc여도 calendarEvent/meeting으로 남기세요.
+        5. mailboxRecipientRole이 Direct이고 action/deadline/reply가 있으면 review보다 autoCreateTask를 선호하세요.
+        6. 다른 사람에게 명시 배정된 일은 ignore입니다. 명시 대상이 mailboxOwner이면 내 업무입니다. 팀/담당자/전체처럼 불명확하지만 Direct 수신이면 autoCreateTask입니다.
+        7. 명확한 action/deadline/reply/meeting이면 autoCreateTask, FYI/공지/감사/단순 확인은 ignore입니다. review는 LLM이 정말 판단 불가할 때만 씁니다.
+        8. dueAt은 메일에 근거가 있을 때만 ISO-8601로 쓰고, 없으면 null입니다. 마감일을 상상하지 마세요.
+        9. reason/evidenceSnippet/summary는 UI 보조용이므로 각각 50자 이내로 짧게 쓰세요.
 
         Few-shot:
         - "영희님 내일까지 비용 자료 검토 후 회신 부탁드립니다" + mailboxOwner "김영희" => autoCreateTask, deadline/replyRequired.
         - "철수님 내일까지 비용 자료 검토 부탁드립니다" + mailboxOwner "김영희" => ignore, explicitAssignee "철수".
+        - mailboxRecipientRole "Cc" + "자료 확인 부탁드립니다" => ignore.
+        - mailboxRecipientRole "Cc" + "오늘 15시 회의 참석" => autoCreateTask, meeting/calendarEvent.
         - "확인했습니다" + quotedHistoryPreview에 오래된 요청만 있음 => ignore.
         - "아래 고객 요청 건 확인 후 대응 부탁드립니다" + forwardedContext 있음 => currentSenderRequested true, actionOrigin forwardedContext, 명확하면 autoCreateTask 아니면 review.
         """;

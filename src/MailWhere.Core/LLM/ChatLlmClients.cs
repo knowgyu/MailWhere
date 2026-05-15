@@ -72,7 +72,7 @@ public sealed class OllamaLlmClient : HttpJsonLlmClient
             options = new
             {
                 temperature = 0.0,
-                num_predict = 768,
+                num_predict = 1280,
                 top_p = 0.9
             },
             messages = new[]
@@ -109,7 +109,7 @@ public sealed class OpenAiChatCompletionsLlmClient : HttpJsonLlmClient
         {
             model = Settings.Model,
             temperature = 0.0,
-            max_tokens = 768,
+            max_tokens = 1280,
             response_format = new { type = "json_object" },
             messages = new[]
             {
@@ -146,7 +146,7 @@ public sealed class OpenAiResponsesLlmClient : HttpJsonLlmClient
             model = Settings.Model,
             store = false,
             temperature = 0.0,
-            max_output_tokens = 768,
+            max_output_tokens = 1280,
             text = new
             {
                 format = new

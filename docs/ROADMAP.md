@@ -90,6 +90,16 @@ Included:
 - LLM triage is more conservative for replied/forwarded mail, FYI notices, ownership cues, and unclear due dates.
 - LLM sampling is more deterministic for triage (`temperature=0`, `top_p=0.9`) and Ollama keep-alive is longer during scan sessions.
 
+## Release 0.2.1 — recipient-aware board and resilient batches
+
+Goal: To/CC와 회의 여부를 반영해 떠야 할 것만 업무보드에 올리고, 초기 스캔 batch 끝부분 실패/느림을 줄인다.
+
+- Outlook COM 수신자 정보를 이용해 To는 내 할 일 후보, CC는 비일정성 요청 억제, 회의/일정은 CC여도 표시.
+- LLM batch 기본값을 8건으로 올리고, 일부 id 누락/마지막 partial batch가 전체 실패로 번지지 않도록 보정.
+- 업무 보드를 오늘/7일 내/30일 내/기한 미정 필터 + 할 일/일정 2열 카드로 단순화.
+- 카드 액션: Outlook 열기, MailWhere 보드에서 삭제, 기한 없는 항목 캘린더 날짜 지정.
+- 팀/부서 배포용 `MailWhere.defaults.json` seed 지원.
+
 Not included:
 
 - Sender organization/department display.

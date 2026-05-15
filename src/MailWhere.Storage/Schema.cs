@@ -16,7 +16,11 @@ internal static class Schema
             snooze_until TEXT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            source_derived_data_deleted INTEGER NOT NULL DEFAULT 0
+            source_derived_data_deleted INTEGER NOT NULL DEFAULT 0,
+            source_sender_display TEXT NULL,
+            source_received_at TEXT NULL,
+            source_recipient_role TEXT NOT NULL DEFAULT 'Direct',
+            kind TEXT NOT NULL DEFAULT 'ActionRequested'
         );
 
         CREATE TABLE IF NOT EXISTS review_candidates (
@@ -31,6 +35,9 @@ internal static class Schema
             due_at TEXT NULL,
             created_at TEXT NOT NULL,
             snooze_until TEXT NULL,
+            source_sender_display TEXT NULL,
+            source_received_at TEXT NULL,
+            source_recipient_role TEXT NOT NULL DEFAULT 'Direct',
             suppressed INTEGER NOT NULL DEFAULT 0,
             resolved_at TEXT NULL,
             resolution TEXT NULL

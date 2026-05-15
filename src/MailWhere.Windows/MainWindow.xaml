@@ -109,7 +109,27 @@
                                     </Grid>
                                     <TextBlock Text="마감은 비워둘 수 있습니다. '내일', '금요일', '2026-05-20' 같은 표현을 우선 지원합니다." Foreground="#667085" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
-                                <ListBox x:Name="TasksList" FontSize="14" MouseDoubleClick="OpenSelectedTaskMail_DoubleClick"/>
+                                <ListBox x:Name="TasksList" FontSize="14">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <DockPanel Grid.Row="0" LastChildFill="True">
+                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+                                                        <Button Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="SetTaskDueButton_Click" Padding="9,5" Margin="0,0,6,0"/>
+                                                        <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTaskButton_Click" Padding="9,5" Margin="0,0,6,0"/>
+                                                        <Button Content="삭제" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="DismissTaskButton_Click" Padding="9,5" Background="#FFF1F0" BorderBrush="#FDA29B" Foreground="#B42318"/>
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                </DockPanel>
+                                                <TextBlock Grid.Row="1" Text="{Binding Meta}" Foreground="#667085" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                             </DockPanel>
                         </TabItem>
                         <TabItem x:Name="ReviewTab" Header="검토함">

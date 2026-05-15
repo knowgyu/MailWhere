@@ -1,0 +1,20 @@
+<Window x:Class="MailWhere.Windows.ManualTaskDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="직접 추가" Height="280" Width="460" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="#F5F7FB" Icon="Assets/app-icon.ico">
+    <Border Margin="18" CornerRadius="18" Background="#FFFFFF" Padding="18" BorderBrush="#E3E8F2" BorderThickness="1">
+        <StackPanel>
+            <TextBlock Text="할 일 직접 추가" FontSize="18" FontWeight="Bold" Foreground="#14213D"/>
+            <TextBlock Text="메일과 무관하게 기억할 일을 짧게 적어두세요." Foreground="#667085" Margin="0,4,0,14"/>
+            <TextBlock Text="내용" FontWeight="SemiBold" Foreground="#20304F"/>
+            <TextBox x:Name="TitleText" MinHeight="36" Margin="0,4,0,12" Padding="8,6"/>
+            <TextBlock Text="기한(선택)" FontWeight="SemiBold" Foreground="#20304F"/>
+            <DatePicker x:Name="DueDatePicker" Margin="0,4,0,18"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Padding="14,8" Margin="0,0,8,0" Click="Cancel_Click">취소</Button>
+                <Button Padding="14,8" Background="#2458F2" Foreground="White" Click="Save_Click">추가</Button>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

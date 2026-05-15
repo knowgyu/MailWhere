@@ -46,7 +46,7 @@ public sealed class OutlookComMailSource : IEmailSource
             dynamic outlookDynamic = outlook;
             session = outlookDynamic.Session;
             dynamic sessionDynamic = session;
-            string? mailboxOwner = TryReadCurrentUserDisplayName(session);
+            var mailboxIdentity = TryReadCurrentUserIdentity(session);
             inbox = sessionDynamic.GetDefaultFolder(6); // olFolderInbox
             dynamic inboxDynamic = inbox;
             items = inboxDynamic.Items;
@@ -74,6 +74,7 @@ public sealed class OutlookComMailSource : IEmailSource
                     string? body = request.IncludeBody ? Convert.ToString(itemDynamic.Body) : null;
                     string? conversationId = TryReadString(item, "ConversationID");
                     var recipients = SplitRecipients(TryReadString(item, "To"), TryReadString(item, "CC"));
+                    var recipientRole = TryResolveMailboxRecipientRole(item, mailboxIdentity);
 
                     messages.Add(new EmailSnapshot(
                         entryId,
@@ -82,8 +83,9 @@ public sealed class OutlookComMailSource : IEmailSource
                         subject,
                         body,
                         conversationId,
-                        mailboxOwner,
-                        recipients));
+                        mailboxIdentity.DisplayName,
+                        recipients,
+                        recipientRole));
                 }
                 catch (OperationCanceledException)
                 {
@@ -132,7 +134,7 @@ public sealed class OutlookComMailSource : IEmailSource
         }
     }
 
-    private static string? TryReadCurrentUserDisplayName(object session)
+    private static MailboxIdentity TryReadCurrentUserIdentity(object session)
     {
         object? currentUser = null;
         try
@@ -140,16 +142,19 @@ public sealed class OutlookComMailSource : IEmailSource
             currentUser = session.GetType().InvokeMember("CurrentUser", System.Reflection.BindingFlags.GetProperty, null, session, null);
             if (currentUser is null)
             {
-                return null;
+                return MailboxIdentity.Empty;
             }
 
-            return TryReadString(currentUser, "Name")
-                   ?? TryReadString(currentUser, "Address")
-                   ?? Convert.ToString(currentUser);
+            var displayName = TryReadString(currentUser, "Name")
+                              ?? TryReadString(currentUser, "Address")
+                              ?? Convert.ToString(currentUser);
+            var address = TryReadString(currentUser, "Address");
+            var smtpAddress = TryReadSmtpAddress(currentUser);
+            return new MailboxIdentity(displayName, BuildAliases(displayName, address, smtpAddress));
         }
         catch
         {
-            return null;
+            return MailboxIdentity.Empty;
         }
         finally
         {
@@ -157,9 +162,157 @@ public sealed class OutlookComMailSource : IEmailSource
         }
     }
 
+    private static string? TryReadSmtpAddress(object addressEntry)
+    {
+        object? exchangeUser = null;
+        try
+        {
+            exchangeUser = addressEntry.GetType().InvokeMember("GetExchangeUser", System.Reflection.BindingFlags.InvokeMethod, null, addressEntry, null);
+            if (exchangeUser is null)
+            {
+                return null;
+            }
+
+            return TryReadString(exchangeUser, "PrimarySmtpAddress")
+                   ?? TryReadString(exchangeUser, "Address");
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            ComRelease.FinalRelease(exchangeUser);
+        }
+    }
+
+    private static MailboxRecipientRole TryResolveMailboxRecipientRole(object item, MailboxIdentity mailboxIdentity)
+    {
+        object? recipients = null;
+        try
+        {
+            recipients = item.GetType().InvokeMember("Recipients", System.Reflection.BindingFlags.GetProperty, null, item, null);
+            if (recipients is null)
+            {
+                return MailboxRecipientRole.Other;
+            }
+
+            dynamic recipientsDynamic = recipients;
+            int count = Convert.ToInt32(recipientsDynamic.Count);
+            var sawCc = false;
+            var sawBcc = false;
+            for (var i = 1; i <= count; i++)
+            {
+                object? recipient = null;
+                try
+                {
+                    recipient = recipientsDynamic[i];
+                    dynamic recipientDynamic = recipient;
+                    var type = Convert.ToInt32(recipientDynamic.Type);
+                    if (!RecipientLooksLikeMailboxUser(recipient, mailboxIdentity))
+                    {
+                        continue;
+                    }
+
+                    if (type == 1)
+                    {
+                        return MailboxRecipientRole.Direct;
+                    }
+
+                    if (type == 2)
+                    {
+                        sawCc = true;
+                    }
+                    else if (type == 3)
+                    {
+                        sawBcc = true;
+                    }
+                }
+                catch
+                {
+                    // Keep recipient-role uncertainty conservative; do not promote it to Direct.
+                }
+                finally
+                {
+                    ComRelease.FinalRelease(recipient);
+                }
+            }
+
+            if (sawCc)
+            {
+                return MailboxRecipientRole.Cc;
+            }
+
+            return sawBcc ? MailboxRecipientRole.Bcc : MailboxRecipientRole.Other;
+        }
+        catch
+        {
+            return MailboxRecipientRole.Other;
+        }
+        finally
+        {
+            ComRelease.FinalRelease(recipients);
+        }
+    }
+
+    private static bool RecipientLooksLikeMailboxUser(object recipient, MailboxIdentity mailboxIdentity)
+    {
+        if (mailboxIdentity.Aliases.Count == 0)
+        {
+            return false;
+        }
+
+        var candidates = new[]
+            {
+                TryReadString(recipient, "Name"),
+                TryReadString(recipient, "Address")
+            }
+            .Concat(TryReadRecipientSmtpAddresses(recipient))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => NormalizeIdentity(value!))
+            .ToArray();
+
+        return candidates.Any(candidate => mailboxIdentity.Aliases.Contains(candidate));
+    }
+
+    private static IEnumerable<string?> TryReadRecipientSmtpAddresses(object recipient)
+    {
+        object? addressEntry = null;
+        try
+        {
+            addressEntry = recipient.GetType().InvokeMember("AddressEntry", System.Reflection.BindingFlags.GetProperty, null, recipient, null);
+            if (addressEntry is null)
+            {
+                yield break;
+            }
+
+            yield return TryReadString(addressEntry, "Name");
+            yield return TryReadString(addressEntry, "Address");
+            yield return TryReadSmtpAddress(addressEntry);
+        }
+        finally
+        {
+            ComRelease.FinalRelease(addressEntry);
+        }
+    }
+
+    private static HashSet<string> BuildAliases(params string?[] values) =>
+        values.Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => NormalizeIdentity(value!))
+            .Where(value => value.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static string NormalizeIdentity(string value) =>
+        value.Trim().Trim('"').Trim('<', '>').ToLowerInvariant();
+
     private static IReadOnlyList<string> SplitRecipients(params string?[] values) =>
         values.Where(value => !string.IsNullOrWhiteSpace(value))
             .SelectMany(value => value!.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+    private sealed record MailboxIdentity(string? DisplayName, HashSet<string> Aliases)
+    {
+        public static MailboxIdentity Empty { get; } = new(null, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    }
 }

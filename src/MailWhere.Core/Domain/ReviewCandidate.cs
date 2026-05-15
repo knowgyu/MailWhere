@@ -7,8 +7,24 @@ public sealed record ReviewCandidate(
     FollowUpAnalysis Analysis,
     DateTimeOffset CreatedAt,
     bool Suppressed = false,
-    DateTimeOffset? SnoozeUntil = null)
+    DateTimeOffset? SnoozeUntil = null,
+    string? SourceSenderDisplay = null,
+    DateTimeOffset? SourceReceivedAt = null,
+    MailboxRecipientRole SourceRecipientRole = MailboxRecipientRole.Direct)
 {
     public static ReviewCandidate FromAnalysis(EmailSnapshot source, FollowUpAnalysis analysis, DateTimeOffset now) =>
-        new(Guid.NewGuid(), source.SourceHash, source.SourceId, analysis with { SuggestedTitle = EvidencePolicy.Truncate(analysis.SuggestedTitle) ?? string.Empty, Reason = EvidencePolicy.Truncate(analysis.Reason) ?? "Review candidate", EvidenceSnippet = EvidencePolicy.Truncate(analysis.EvidenceSnippet) }, now);
+        new(
+            Guid.NewGuid(),
+            source.SourceHash,
+            source.SourceId,
+            analysis with
+            {
+                SuggestedTitle = EvidencePolicy.Truncate(analysis.SuggestedTitle) ?? string.Empty,
+                Reason = EvidencePolicy.Truncate(analysis.Reason) ?? "Review candidate",
+                EvidenceSnippet = EvidencePolicy.Truncate(analysis.EvidenceSnippet)
+            },
+            now,
+            SourceSenderDisplay: EvidencePolicy.Truncate(source.SenderDisplay),
+            SourceReceivedAt: source.ReceivedAt,
+            SourceRecipientRole: source.MailboxRecipientRole);
 }

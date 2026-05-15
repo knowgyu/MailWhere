@@ -33,10 +33,23 @@ It runs on:
 The workflow performs the Windows verification path and uploads:
 
 ```text
-artifacts/MailWhere-v0.2.0-win-x64-portable.zip
+artifacts/MailWhere-v0.2.1-win-x64-portable.zip
 ```
 
-The zip contains the published app, README, operator docs, `appsettings.sample.json`, and `BUILD-MANIFEST.json`.
+The zip contains the published app, README, operator docs, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`.
+
+## Team default settings seed
+
+If a small team should start with the same approved local LLM endpoint/model, copy `MailWhere.defaults.sample.json` to `MailWhere.defaults.json` in the same folder as `MailWhere.exe` and edit only non-secret defaults such as:
+
+- `ExternalLlmEnabled`
+- `LlmProvider`
+- `LlmEndpoint`
+- `LlmModel`
+- `LlmTimeoutSeconds`
+- `LlmFallbackPolicy`
+
+On first run, if the user's `%AppData%\\MailWhere\\runtime-settings.json` does not exist, MailWhere reads the seed file and saves it as the user setting. Do not put API keys, personal tokens, or mailbox-specific data in the seed file.
 
 ## Local Windows portable build
 

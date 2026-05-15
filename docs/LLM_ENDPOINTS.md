@@ -33,7 +33,7 @@ Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다
 - `temperature=0`, `top_p=0.9`: 업무 triage 결과가 매번 흔들리지 않도록 보수적으로 샘플링합니다.
 - `keep_alive=30m`: 대량 스캔 중 모델이 자주 unload되는 것을 줄입니다.
 
-초기/대량 스캔에서는 작은 batch 단위로 여러 메일을 한 번에 분석합니다. 단, 각 메일 결과는 독립 JSON item으로 매핑하고, 실패/timeout이 나면 자동 등록하지 않고 retry 가능한 검토 후보로 남깁니다.
+초기/대량 스캔에서는 기본 8건 batch 단위로 여러 메일을 한 번에 분석합니다. 각 메일 결과는 독립 JSON item으로 매핑하며, 마지막 batch가 8건보다 작거나 모델이 일부 id를 빠뜨려도 전체 스캔을 실패시키지 않고 누락 item만 retry 가능한 LLM 실패 후보로 남깁니다.
 
 ## OpenAI-compatible Chat Completions 예시
 
@@ -100,6 +100,6 @@ endpoint가 이미 `/v1`로 끝나면 중복으로 `/v1/v1/models`가 되지 않
 ## 보안 원칙
 
 - prompt와 raw mail body는 저장하지 않습니다.
-- SQLite에는 source hash, 짧은 제목/사유/근거 snippet을 저장합니다. Outlook 원본 메일 열기를 위해 새 항목에는 로컬 source id도 저장하며, source-derived data 삭제 시 함께 제거합니다.
+- SQLite에는 source hash, 짧은 제목/사유/근거 snippet을 저장합니다. Outlook 원본 메일 열기와 업무보드 한 줄 표기를 위해 새 항목에는 로컬 source id, 보낸 사람 표시명, 수신 시각, 수신/참조 역할도 저장할 수 있으며, source-derived data 삭제/Not-a-task 처리/LLM 실패 후보 정리 시 함께 제거하거나 비식별화합니다.
 - 외부 네트워크 LLM은 기본 사용 시나리오가 아닙니다. 승인된 보안 정책이 허용할 때만 켭니다.
 - LLM JSON 파싱이 실패하면 선택한 `LlmFallbackPolicy`에 따라 검토함에 남기거나 rule-based analyzer로 fallback합니다.

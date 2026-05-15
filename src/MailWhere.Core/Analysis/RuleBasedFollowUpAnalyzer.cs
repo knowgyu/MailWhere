@@ -17,6 +17,10 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
         "(회의|미팅|콜|화상|일정|참석|초대|meeting|sync|call|calendar|invite)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex MeetingCommitmentKeyword = new(
+        "(참석|초대|입장|조인|참여|발표|회의\\s*(?:예정|진행|참석)|attend|join|invite|presentation)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static readonly Regex IgnoreKeyword = new(
         "(참고|공지|뉴스레터|시스템 알림|자동 발송|newsletter|no action|FYI|for your information|advertisement|unsubscribe|광고|구독)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -80,11 +84,11 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
                 null));
         }
 
-        if (meeting.Success && (due.Success || action.Success))
+        if (meeting.Success && (action.Success || MeetingCommitmentKeyword.IsMatch(contextText)))
         {
             var hasExplicitAction = action.Success;
-            var hasExplicitDue = due.Success;
-            return Task.FromResult(ApplyContextPolicy(new FollowUpAnalysis(
+            var hasExplicitDue = due.Success || MeetingCommitmentKeyword.IsMatch(contextText);
+            return Task.FromResult(ApplyPolicies(email, new FollowUpAnalysis(
                 FollowUpKind.Meeting,
                 hasExplicitDue && hasExplicitAction ? AnalysisDisposition.AutoCreateTask : AnalysisDisposition.Review,
                 hasExplicitDue && hasExplicitAction ? 0.82 : 0.62,
@@ -96,7 +100,7 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
 
         if (action.Success && due.Success)
         {
-            return Task.FromResult(ApplyContextPolicy(new FollowUpAnalysis(
+            return Task.FromResult(ApplyPolicies(email, new FollowUpAnalysis(
                 FollowUpKind.Deadline,
                 AnalysisDisposition.AutoCreateTask,
                 0.90,
@@ -108,7 +112,7 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
 
         if (action.Success)
         {
-            return Task.FromResult(ApplyContextPolicy(new FollowUpAnalysis(
+            return Task.FromResult(ApplyPolicies(email, new FollowUpAnalysis(
                 LooksLikeReply(action.Value) ? FollowUpKind.ReplyRequired : FollowUpKind.ActionRequested,
                 AnalysisDisposition.Review,
                 0.65,
@@ -120,7 +124,7 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
 
         if (due.Success)
         {
-            return Task.FromResult(ApplyContextPolicy(new FollowUpAnalysis(
+            return Task.FromResult(ApplyPolicies(email, new FollowUpAnalysis(
                 FollowUpKind.ReviewNeeded,
                 AnalysisDisposition.Review,
                 0.45,
@@ -149,6 +153,18 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
         var start = Math.Max(0, index - 80);
         var length = Math.Min(text.Length - start, 200);
         return EvidencePolicy.Truncate(text.Substring(start, length));
+    }
+
+    private static FollowUpAnalysis ApplyPolicies(EmailSnapshot email, FollowUpAnalysis analysis, MailBodyContext context)
+    {
+        var contextApplied = ApplyContextPolicy(analysis, context);
+        if (analysis.Disposition == AnalysisDisposition.AutoCreateTask
+            && contextApplied.Disposition == AnalysisDisposition.Review)
+        {
+            return contextApplied;
+        }
+
+        return RecipientTriagePolicy.Apply(email, contextApplied);
     }
 
     private static FollowUpAnalysis ApplyContextPolicy(FollowUpAnalysis analysis, MailBodyContext context)

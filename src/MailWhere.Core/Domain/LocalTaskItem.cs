@@ -22,7 +22,11 @@ public sealed record LocalTaskItem(
     DateTimeOffset? SnoozeUntil,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    bool SourceDerivedDataDeleted = false)
+    bool SourceDerivedDataDeleted = false,
+    string? SourceSenderDisplay = null,
+    DateTimeOffset? SourceReceivedAt = null,
+    MailboxRecipientRole SourceRecipientRole = MailboxRecipientRole.Direct,
+    FollowUpKind Kind = FollowUpKind.ActionRequested)
 {
     public const string RedactedTitle = "메일 기반 항목(원문 삭제됨)";
     public const string RedactedReason = "메일 원문 기반 사유가 삭제되었습니다.";
@@ -45,7 +49,12 @@ public sealed record LocalTaskItem(
             LocalTaskStatus.Open,
             null,
             now,
-            now);
+            now,
+            SourceDerivedDataDeleted: false,
+            SourceSenderDisplay: EvidencePolicy.Truncate(source.SenderDisplay),
+            SourceReceivedAt: source.ReceivedAt,
+            SourceRecipientRole: source.MailboxRecipientRole,
+            Kind: analysis.Kind);
     }
 
     public LocalTaskItem MarkDone(DateTimeOffset now) => this with
@@ -69,6 +78,9 @@ public sealed record LocalTaskItem(
         EvidenceSnippet = null,
         SourceId = null,
         SourceDerivedDataDeleted = true,
+        SourceSenderDisplay = null,
+        SourceReceivedAt = null,
+        SourceRecipientRole = MailboxRecipientRole.Other,
         UpdatedAt = now
     };
 }

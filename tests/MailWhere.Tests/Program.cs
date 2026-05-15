@@ -18,6 +18,8 @@ var tests = new List<(string Name, Func<Task> Test)>
 {
     ("Korean deadline request creates auto task", KoreanDeadlineRequestCreatesAutoTask),
     ("Meeting request is classified as meeting", MeetingRequestIsClassifiedAsMeeting),
+    ("CC action is ignored but CC meeting is kept", CcActionIgnoredButCcMeetingKept),
+    ("Unverified recipient action is conservative", UnverifiedRecipientActionIsConservative),
     ("Korean weekday due date parses", KoreanWeekdayDueDateParses),
     ("FYI mail is ignored", FyiMailIsIgnored),
     ("Evidence is truncated", EvidenceIsTruncated),
@@ -58,6 +60,10 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM user cancellation propagates", LlmUserCancellationPropagates),
     ("Batch LLM maps results", BatchLlmMapsResults),
     ("Batch LLM accepts raw array output", BatchLlmAcceptsRawArrayOutput),
+    ("Batch LLM tolerates missing final item", BatchLlmToleratesMissingFinalItem),
+    ("Batch LLM partial failure uses rule fallback when enabled", BatchLlmPartialFailureUsesRuleFallbackWhenEnabled),
+    ("Batch LLM rejects one-based ids", BatchLlmRejectsOneBasedIds),
+    ("Batch LLM rejects duplicate ids", BatchLlmRejectsDuplicateIds),
     ("LLM failure review candidate retries after recovery", LlmFailureReviewCandidateRetriesAfterRecovery),
     ("Repeated LLM failure does not duplicate review candidate", RepeatedLlmFailureDoesNotDuplicateReviewCandidate),
     ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
@@ -71,8 +77,11 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("SQLite store truncates source-derived fields", SqliteStoreTruncatesSourceDerivedFields),
     ("SQLite review candidates can be listed", SqliteReviewCandidatesCanBeListed),
     ("SQLite review candidate can be resolved as task", SqliteReviewCandidateCanBeResolvedAsTask),
+    ("SQLite review candidate not-task redacts source metadata", SqliteReviewCandidateNotTaskRedactsSourceMetadata),
+    ("SQLite suppress LLM failure redacts source metadata", SqliteSuppressLlmFailureRedactsSourceMetadata),
     ("SQLite double review approval is idempotent", SqliteDoubleReviewApprovalIsIdempotent),
     ("SQLite review candidate snooze hides until due", SqliteReviewCandidateSnoozeHidesUntilDue),
+    ("SQLite task dismiss and due update persist", SqliteTaskDismissAndDueUpdatePersist),
     ("SQLite stale review ignore does not redact approved task", SqliteStaleReviewIgnoreDoesNotRedactApprovedTask),
     ("SQLite migrates pre daily board schema", SqliteMigratesPreDailyBoardSchema),
     ("SQLite delete source-derived data redacts task and candidate", SqliteDeleteSourceDerivedDataRedactsTaskAndCandidate),
@@ -101,14 +110,17 @@ static EmailSnapshot Mail(
     string body,
     string? id = null,
     string? conversationId = null,
-    string? mailboxOwner = null) => new(
+    string? mailboxOwner = null,
+    MailboxRecipientRole recipientRole = MailboxRecipientRole.Direct) => new(
     id ?? Guid.NewGuid().ToString("N"),
     new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9)),
     "tester",
     subject,
     body,
     conversationId,
-    mailboxOwner);
+    mailboxOwner,
+    null,
+    recipientRole);
 
 static async Task KoreanDeadlineRequestCreatesAutoTask()
 {
@@ -126,6 +138,39 @@ static async Task MeetingRequestIsClassifiedAsMeeting()
     Assert(result.Kind == FollowUpKind.Meeting, "Expected meeting classification.");
     Assert(result.Disposition == AnalysisDisposition.AutoCreateTask, "Expected meeting with due signal to auto-create.");
     Assert(result.DueAt is not null, "Expected relative due date.");
+}
+
+static async Task CcActionIgnoredButCcMeetingKept()
+{
+    var analyzer = new RuleBasedFollowUpAnalyzer();
+    var action = await analyzer.AnalyzeAsync(Mail(
+        "자료 요청",
+        "내일까지 비용 자료 검토 후 회신 부탁드립니다.",
+        recipientRole: MailboxRecipientRole.Cc));
+    var meeting = await analyzer.AnalyzeAsync(Mail(
+        "주간 회의",
+        "내일 오후 회의 참석 부탁드립니다.",
+        recipientRole: MailboxRecipientRole.Cc));
+
+    Assert(action.Disposition == AnalysisDisposition.Ignore, "CC non-meeting action should not create a board task.");
+    Assert(meeting.Disposition == AnalysisDisposition.AutoCreateTask, "CC meeting should still appear as schedule.");
+    Assert(meeting.Kind == FollowUpKind.Meeting, "Expected meeting kind.");
+}
+
+static async Task UnverifiedRecipientActionIsConservative()
+{
+    var analyzer = new RuleBasedFollowUpAnalyzer();
+    var action = await analyzer.AnalyzeAsync(Mail(
+        "자료 요청",
+        "내일까지 비용 자료 검토 후 회신 부탁드립니다.",
+        recipientRole: MailboxRecipientRole.Other));
+    var meeting = await analyzer.AnalyzeAsync(Mail(
+        "주간 회의",
+        "내일 오후 회의 참석 부탁드립니다.",
+        recipientRole: MailboxRecipientRole.Other));
+
+    Assert(action.Disposition == AnalysisDisposition.Review, "Unverified non-meeting action should not auto-create as Direct.");
+    Assert(meeting.Disposition == AnalysisDisposition.AutoCreateTask, "Unverified meeting should still appear as schedule.");
 }
 
 static Task KoreanWeekdayDueDateParses()
@@ -335,6 +380,7 @@ static async Task ReviewCandidateIgnorePersists()
     Assert(ignored, "Expected candidate ignore to be recorded.");
     Assert(activeCandidates.Count == 0, "Expected ignored candidate to be hidden.");
     Assert(store.Candidates.Single().Analysis.SuggestedTitle == LocalTaskItem.RedactedTitle, "Expected ignored candidate source-derived title redacted.");
+    Assert(store.Candidates.Single().SourceSenderDisplay is null, "Expected ignored candidate sender metadata redacted.");
 }
 
 static Task NotificationThrottleSuppressesRepeatAlerts()
@@ -932,8 +978,188 @@ static async Task BatchLlmAcceptsRawArrayOutput()
     });
 
     Assert(results.Count == 2, "Expected two raw-array batch results.");
-    Assert(results[0].Disposition == AnalysisDisposition.Review, "Expected first raw-array result to remain review.");
+    Assert(results[0].Disposition == AnalysisDisposition.AutoCreateTask, "Expected direct actionable raw-array result to become task.");
     Assert(results[1].Disposition == AnalysisDisposition.Ignore, "Expected second raw-array result to ignore.");
+}
+
+static async Task BatchLlmToleratesMissingFinalItem()
+{
+    var llm = new FakeLlmClient("""
+        {
+          "items": [
+            {
+              "id": "0",
+              "kind": "actionRequested",
+              "disposition": "autoCreateTask",
+              "confidence": 0.72,
+              "suggestedTitle": "자료 확인",
+              "reason": "확인 요청",
+              "evidenceSnippet": "확인 부탁",
+              "dueAt": null,
+              "summary": "확인 필요",
+              "actionOrigin": "currentMessage",
+              "currentSenderRequested": true,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            }
+          ]
+        }
+        """);
+
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
+    var results = await analyzer.AnalyzeBatchAsync(new[]
+    {
+        Mail("확인 1", "확인 부탁드립니다.", "batch-missing-1"),
+        Mail("확인 2", "확인 부탁드립니다.", "batch-missing-2"),
+        Mail("확인 3", "확인 부탁드립니다.", "batch-missing-3")
+    });
+
+    Assert(results.Count == 3, "Partial batch output must still map to every input.");
+    Assert(results[0].Disposition == AnalysisDisposition.AutoCreateTask, "Expected returned item to parse normally.");
+    Assert(results[1].IsTransientLlmFailureReview, "Expected missing item placeholder for item 2.");
+    Assert(results[2].IsTransientLlmFailureReview, "Expected missing item placeholder for item 3.");
+}
+
+static async Task BatchLlmPartialFailureUsesRuleFallbackWhenEnabled()
+{
+    var llm = new FakeLlmClient("""
+        {
+          "items": [
+            {
+              "id": "0",
+              "kind": "none",
+              "disposition": "ignore",
+              "confidence": 0.8,
+              "suggestedTitle": "",
+              "reason": "공지",
+              "evidenceSnippet": "FYI",
+              "dueAt": null,
+              "summary": "후속 조치 없음",
+              "actionOrigin": "none",
+              "currentSenderRequested": false,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            }
+          ]
+        }
+        """);
+
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmThenRules);
+    var results = await analyzer.AnalyzeBatchAsync(new[]
+    {
+        Mail("공지", "FYI 참고만 해주세요.", "batch-partial-fallback-1"),
+        Mail("자료 요청", "내일까지 비용 자료 검토 후 회신 부탁드립니다.", "batch-partial-fallback-2")
+    });
+    var telemetry = analyzer.GetTelemetrySnapshot();
+
+    Assert(results.Count == 2, "Expected one result per input.");
+    Assert(results[0].Disposition == AnalysisDisposition.Ignore, "Expected returned LLM item to remain intact.");
+    Assert(results[1].Disposition == AnalysisDisposition.AutoCreateTask, "Expected missing batch item to use rule fallback when enabled.");
+    Assert(telemetry.LlmFailureCount == 1, "Expected missing batch item to count as LLM failure.");
+    Assert(telemetry.LlmFallbackCount == 1, "Expected one fallback for the missing batch item.");
+}
+
+static async Task BatchLlmRejectsOneBasedIds()
+{
+    var llm = new FakeLlmClient("""
+        {
+          "items": [
+            {
+              "id": "1",
+              "kind": "actionRequested",
+              "disposition": "autoCreateTask",
+              "confidence": 0.8,
+              "suggestedTitle": "첫 번째로 보이는 항목",
+              "reason": "1-based id는 안전하게 매핑할 수 없음",
+              "evidenceSnippet": "확인 부탁",
+              "dueAt": null,
+              "summary": "확인 필요",
+              "actionOrigin": "currentMessage",
+              "currentSenderRequested": true,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            },
+            {
+              "id": "2",
+              "kind": "none",
+              "disposition": "ignore",
+              "confidence": 0.8,
+              "suggestedTitle": "",
+              "reason": "공지",
+              "evidenceSnippet": "FYI",
+              "dueAt": null,
+              "summary": "후속 조치 없음",
+              "actionOrigin": "none",
+              "currentSenderRequested": false,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            }
+          ]
+        }
+        """);
+
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
+    var results = await analyzer.AnalyzeBatchAsync(new[]
+    {
+        Mail("확인 1", "확인 부탁드립니다.", "batch-one-based-1"),
+        Mail("공지 2", "FYI 참고만 해주세요.", "batch-one-based-2")
+    });
+    var telemetry = analyzer.GetTelemetrySnapshot();
+
+    Assert(results.Count == 2, "Expected two safe placeholders for unsafe one-based ids.");
+    Assert(results.All(item => item.IsTransientLlmFailureReview), "One-based ids must not be positionally attached to mail.");
+    Assert(telemetry.LlmFailureCount == 2, "Expected unsafe batch ids to count as LLM failures.");
+}
+
+static async Task BatchLlmRejectsDuplicateIds()
+{
+    var llm = new FakeLlmClient("""
+        {
+          "items": [
+            {
+              "id": "0",
+              "kind": "actionRequested",
+              "disposition": "autoCreateTask",
+              "confidence": 0.8,
+              "suggestedTitle": "첫 번째 항목",
+              "reason": "확인 요청",
+              "evidenceSnippet": "확인 부탁",
+              "dueAt": null,
+              "summary": "확인 필요",
+              "actionOrigin": "currentMessage",
+              "currentSenderRequested": true,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            },
+            {
+              "id": "0",
+              "kind": "actionRequested",
+              "disposition": "autoCreateTask",
+              "confidence": 0.8,
+              "suggestedTitle": "중복 id 항목",
+              "reason": "중복 id",
+              "evidenceSnippet": "확인 부탁",
+              "dueAt": null,
+              "summary": "확인 필요",
+              "actionOrigin": "currentMessage",
+              "currentSenderRequested": true,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            }
+          ]
+        }
+        """);
+
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
+    var results = await analyzer.AnalyzeBatchAsync(new[]
+    {
+        Mail("확인 1", "확인 부탁드립니다.", "batch-duplicate-1"),
+        Mail("확인 2", "확인 부탁드립니다.", "batch-duplicate-2")
+    });
+
+    Assert(results.Count == 2, "Duplicate ids should still return one result per input.");
+    Assert(results[0].Disposition == AnalysisDisposition.AutoCreateTask, "The ordinally trusted first id=0 item can be used.");
+    Assert(results[1].IsTransientLlmFailureReview, "Duplicate id must not be reused for the second mail.");
 }
 
 static async Task LlmFailureReviewCandidateRetriesAfterRecovery()
@@ -1107,8 +1333,8 @@ static async Task RecentMailScanHonorsRequestWindow()
     Assert(lastRequest!.MaxItems == 25, "Expected max items passed to source.");
     Assert(lastRequest.Since == now.AddDays(-30), "Expected recent-month lower bound.");
     Assert(summary.ReadCount == 3, "Expected three read messages.");
-    Assert(summary.TaskCreatedCount == 1, "Expected one auto-created task.");
-    Assert(summary.ReviewCandidateCount == 1, "Expected one review candidate.");
+    Assert(summary.TaskCreatedCount == 2, "Expected direct actionable mail to become tasks.");
+    Assert(summary.ReviewCandidateCount == 0, "Expected no review candidate for direct actionable mail.");
     Assert(summary.IgnoredCount == 1, "Expected one ignored message.");
 }
 
@@ -1272,6 +1498,62 @@ static async Task SqliteReviewCandidateCanBeResolvedAsTask()
     }
 }
 
+static async Task SqliteReviewCandidateNotTaskRedactsSourceMetadata()
+{
+    var (store, dbPath, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var mail = Mail("검토 요청", "확인 부탁드립니다.", "review-not-task");
+        var analysis = new FollowUpAnalysis(
+            FollowUpKind.ActionRequested,
+            AnalysisDisposition.Review,
+            0.61,
+            "검토 후보",
+            "확인 필요 후보",
+            "확인 부탁",
+            null);
+        var candidate = ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow);
+
+        await store.SaveReviewCandidateAsync(candidate);
+        var ignored = await store.ResolveReviewCandidateAsNotTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
+
+        Assert(ignored, "Expected not-task resolution to be recorded.");
+        var row = await QuerySingleRowAsync(dbPath, "SELECT source_id, source_sender_display, source_received_at, source_recipient_role FROM review_candidates WHERE id = $id", ("$id", candidate.Id.ToString()));
+        Assert(row[0] is null, "Expected source id deletion.");
+        Assert(row[1] is null, "Expected sender deletion.");
+        Assert(row[2] is null, "Expected received-at deletion.");
+        Assert(row[3] == MailboxRecipientRole.Other.ToString(), "Expected recipient role to become non-specific.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteSuppressLlmFailureRedactsSourceMetadata()
+{
+    var (store, dbPath, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var mail = Mail("LLM 실패", "확인 부탁드립니다.", "review-llm-suppress");
+        var candidate = ReviewCandidate.FromAnalysis(mail, LlmFailureAnalysis(mail), DateTimeOffset.UtcNow);
+
+        await store.SaveReviewCandidateAsync(candidate);
+        var rows = await store.SuppressOpenLlmFailureReviewCandidatesForSourceAsync(mail.SourceHash, DateTimeOffset.UtcNow, "Recovered");
+
+        Assert(rows == 1, "Expected one suppressed LLM failure candidate.");
+        var row = await QuerySingleRowAsync(dbPath, "SELECT source_id, source_sender_display, source_received_at, source_recipient_role FROM review_candidates WHERE id = $id", ("$id", candidate.Id.ToString()));
+        Assert(row[0] is null, "Expected source id deletion.");
+        Assert(row[1] is null, "Expected sender deletion.");
+        Assert(row[2] is null, "Expected received-at deletion.");
+        Assert(row[3] == MailboxRecipientRole.Other.ToString(), "Expected recipient role to become non-specific.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
 static async Task SqliteDoubleReviewApprovalIsIdempotent()
 {
     var (store, _, cleanup) = await CreateTempStoreAsync();
@@ -1338,6 +1620,46 @@ static async Task SqliteReviewCandidateSnoozeHidesUntilDue()
         Assert(snoozed, "Expected candidate snooze update.");
         Assert(hidden.Count == 0, "Expected snoozed candidate hidden before due.");
         Assert(visibleAgain.Count == 1, "Expected candidate visible again after snooze time.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteTaskDismissAndDueUpdatePersist()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var first = new LocalTaskItem(
+            Guid.NewGuid(),
+            "업무보드 삭제 테스트",
+            null,
+            StableHash.Create("dismiss-source"),
+            "dismiss-source",
+            0.9,
+            "테스트",
+            null,
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now);
+        var second = first with { Id = Guid.NewGuid(), Title = "기한 설정 테스트", SourceIdHash = StableHash.Create("due-source"), SourceId = "due-source" };
+        await store.SaveTaskAsync(first);
+        await store.SaveTaskAsync(second);
+
+        var dueAt = new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero);
+        var dismissed = await store.DismissTaskAsync(first.Id, now.AddMinutes(1));
+        var updated = await store.UpdateTaskDueAtAsync(second.Id, dueAt, now.AddMinutes(2));
+        var open = await store.ListOpenTasksAsync();
+
+        Assert(dismissed, "Expected local task dismiss to succeed.");
+        Assert(updated, "Expected due update to succeed.");
+        Assert(open.Count == 1, "Dismissed task should be hidden from open list.");
+        Assert(open[0].Id == second.Id, "Expected remaining task to be the due-updated item.");
+        Assert(open[0].DueAt == dueAt, "Expected due date persisted.");
     }
     finally
     {
@@ -1458,13 +1780,17 @@ static async Task SqliteDeleteSourceDerivedDataRedactsTaskAndCandidate()
         Assert(saved.Reason == LocalTaskItem.RedactedReason, "Expected task reason redaction.");
         Assert(saved.EvidenceSnippet is null, "Expected task evidence deletion.");
         Assert(saved.SourceId is null, "Expected task source id deletion.");
+        Assert(saved.SourceSenderDisplay is null, "Expected task sender display deletion.");
         Assert(saved.SourceDerivedDataDeleted, "Expected task deletion marker.");
 
-        var candidateRow = await QuerySingleRowAsync(dbPath, "SELECT suggested_title, reason, evidence_snippet, source_id FROM review_candidates WHERE source_id_hash = $source", ("$source", mail.SourceHash));
+        var candidateRow = await QuerySingleRowAsync(dbPath, "SELECT suggested_title, reason, evidence_snippet, source_id, source_sender_display, source_received_at, source_recipient_role FROM review_candidates WHERE source_id_hash = $source", ("$source", mail.SourceHash));
         Assert(candidateRow[0] == LocalTaskItem.RedactedTitle, "Expected candidate title redaction.");
         Assert(candidateRow[1] == LocalTaskItem.RedactedReason, "Expected candidate reason redaction.");
         Assert(candidateRow[2] is null, "Expected candidate evidence deletion.");
         Assert(candidateRow[3] is null, "Expected candidate source id deletion.");
+        Assert(candidateRow[4] is null, "Expected candidate sender display deletion.");
+        Assert(candidateRow[5] is null, "Expected candidate received-at deletion.");
+        Assert(candidateRow[6] == MailboxRecipientRole.Other.ToString(), "Expected candidate recipient role to become non-specific after redaction.");
     }
     finally
     {
@@ -1480,11 +1806,10 @@ static async Task SqliteSchemaAvoidsRawMailColumns()
         var columnNames = await QueryColumnAsync(dbPath, "SELECT name FROM pragma_table_info('tasks') UNION SELECT name FROM pragma_table_info('review_candidates')");
         var forbidden = columnNames.Where(column =>
             column.Contains("body", StringComparison.OrdinalIgnoreCase)
-            || column.Contains("sender", StringComparison.OrdinalIgnoreCase)
             || column.Contains("subject", StringComparison.OrdinalIgnoreCase)
             || column.Contains("entry", StringComparison.OrdinalIgnoreCase)).ToArray();
 
-        Assert(forbidden.Length == 0, $"Expected no raw-mail columns, found: {string.Join(", ", forbidden)}.");
+        Assert(forbidden.Length == 0, $"Expected no raw body/subject/entry columns, found: {string.Join(", ", forbidden)}.");
     }
     finally
     {
@@ -1629,6 +1954,9 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
             {
                 Suppressed = true,
                 SourceId = null,
+                SourceSenderDisplay = null,
+                SourceReceivedAt = null,
+                SourceRecipientRole = MailboxRecipientRole.Other,
                 Analysis = candidate.Analysis with
                 {
                     SuggestedTitle = LocalTaskItem.RedactedTitle,
@@ -1683,7 +2011,11 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
             LocalTaskStatus.Open,
             null,
             now,
-            now);
+            now,
+            SourceSenderDisplay: candidate.SourceSenderDisplay,
+            SourceReceivedAt: candidate.SourceReceivedAt,
+            SourceRecipientRole: candidate.SourceRecipientRole,
+            Kind: candidate.Analysis.Kind);
         Tasks.Add(task);
         Candidates[index] = candidate with { Suppressed = true, SourceId = null };
         return Task.FromResult<LocalTaskItem?>(task);
@@ -1714,12 +2046,45 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         {
             Suppressed = true,
             SourceId = null,
+            SourceSenderDisplay = null,
+            SourceReceivedAt = null,
+            SourceRecipientRole = MailboxRecipientRole.Other,
             Analysis = candidate.Analysis with
             {
                 SuggestedTitle = LocalTaskItem.RedactedTitle,
                 Reason = LocalTaskItem.RedactedReason,
                 EvidenceSnippet = null
             }
+        };
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> DismissTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = Tasks.FindIndex(task => task.Id == taskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed);
+        if (index < 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        Tasks[index] = Tasks[index] with { Status = LocalTaskStatus.Dismissed, UpdatedAt = now };
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> UpdateTaskDueAtAsync(Guid taskId, DateTimeOffset dueAt, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = Tasks.FindIndex(task => task.Id == taskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed);
+        if (index < 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        Tasks[index] = Tasks[index] with
+        {
+            DueAt = dueAt,
+            Status = Tasks[index].Status == LocalTaskStatus.Snoozed ? LocalTaskStatus.Open : Tasks[index].Status,
+            SnoozeUntil = null,
+            UpdatedAt = now
         };
         return Task.FromResult(true);
     }
@@ -1751,6 +2116,9 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
                 Candidates[index] = Candidates[index] with
                 {
                     SourceId = null,
+                    SourceSenderDisplay = null,
+                    SourceReceivedAt = null,
+                    SourceRecipientRole = MailboxRecipientRole.Other,
                     Analysis = Candidates[index].Analysis with
                     {
                         SuggestedTitle = LocalTaskItem.RedactedTitle,
