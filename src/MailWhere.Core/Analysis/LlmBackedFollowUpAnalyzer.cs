@@ -460,10 +460,30 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             _ => ex.GetType().Name
         };
 
-    private const string SystemPrompt = """
+    private const string SharedTriagePolicyPrompt = """
+        판단 정책:
+        1. currentMessage가 이번 발신자의 새 요청입니다. 기본 근거는 currentMessage입니다.
+        2. forwardedContext는 현재 발신자가 아래/전달/포워드된 내용을 확인·대응·회신하라고 요구할 때만 근거로 쓰세요.
+        3. quotedHistoryPreview만 있는 과거 요청은 stale history이므로 자동 등록하지 마세요.
+        4. 다른 사람에게 명시 배정된 일은 ignore입니다. 명시 대상이 mailboxOwner이면 내 업무입니다. 팀/담당자/전체처럼 불명확하면 review입니다.
+        5. 명확한 action/deadline/reply/meeting이면 autoCreateTask, 유용하지만 애매하면 review, FYI/공지/감사/단순 확인은 ignore입니다.
+        6. dueAt은 메일에 근거가 있을 때만 ISO-8601로 쓰고, 없으면 null입니다. 마감일을 상상하지 마세요.
+        7. reason/evidenceSnippet/summary는 UI 보조용이므로 각각 50자 이내로 짧게 쓰세요.
+
+        Few-shot:
+        - "영희님 내일까지 비용 자료 검토 후 회신 부탁드립니다" + mailboxOwner "김영희" => autoCreateTask, deadline/replyRequired.
+        - "철수님 내일까지 비용 자료 검토 부탁드립니다" + mailboxOwner "김영희" => ignore, explicitAssignee "철수".
+        - "확인했습니다" + quotedHistoryPreview에 오래된 요청만 있음 => ignore.
+        - "아래 고객 요청 건 확인 후 대응 부탁드립니다" + forwardedContext 있음 => currentSenderRequested true, actionOrigin forwardedContext, 명확하면 autoCreateTask 아니면 review.
+        """;
+
+    private static readonly string SystemPrompt = """
         /no_think
         한국어 업무 메일 triage 전용 로컬 비서입니다. 추론 설명 없이 짧은 JSON object 하나만 반환하세요.
-        제목보다 "사용자가 실제로 해야 할 일"을 suggestedTitle에 30자 이내로 쓰세요. reason/evidenceSnippet/summary는 각각 50자 이내.
+        목표: 메일 제목을 요약하지 말고 "사용자가 실제로 해야 할 일"만 30자 이내 suggestedTitle로 만드세요.
+
+        """ + SharedTriagePolicyPrompt + """
+
         스키마:
         {
           "kind": "none|replyRequired|actionRequested|deadline|waitingForReply|reviewNeeded|meeting|calendarEvent",
@@ -479,14 +499,15 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
           "explicitAssignee": "명시 대상자 또는 null",
           "assignedToMailboxUser": true
         }
-        currentMessage가 이번 발신자의 새 요청입니다. forwardedContext는 현재 발신자가 "아래 내용 확인/대응"을 요구할 때만 근거로 쓰세요.
-        quotedHistoryPreview만 있는 과거 요청은 자동 등록하지 마세요. 다른 사람에게 명시 배정된 일은 ignore. 애매하면 review.
         """;
 
-    private const string BatchSystemPrompt = """
+    private static readonly string BatchSystemPrompt = """
         /no_think
         한국어 업무 메일 triage 전용 로컬 비서입니다. items[]를 각각 독립 분석하고 짧은 JSON object 하나만 반환하세요.
         출력은 {"items":[...]} 하나뿐입니다. 각 결과는 입력 id를 그대로 포함하세요. 제목보다 "사용자가 실제로 해야 할 일"을 30자 이내로 쓰세요.
+
+        """ + SharedTriagePolicyPrompt + """
+
         각 item 스키마:
         {
           "id": "입력 id",
@@ -503,8 +524,6 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
           "explicitAssignee": "명시 대상자 또는 null",
           "assignedToMailboxUser": true
         }
-        currentMessage가 이번 발신자의 새 요청입니다. forwardedContext는 현재 발신자가 아래 내용 확인/대응을 요구할 때만 근거로 쓰세요.
-        quotedHistoryPreview만 있는 과거 요청은 자동 등록하지 마세요. 다른 사람에게 명시 배정된 일은 ignore. 애매하면 review.
         """;
 
     private sealed record LlmFollowUpResponse(

@@ -71,11 +71,9 @@
                     <TextBlock Text="최근 1개월 메일에서 Action item, 회의/일정, 마감 리마인드를 찾아 조용히 알려줍니다." Margin="0,5,0,0" Foreground="#5F6B83"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Click="RunDiagnostics_Click">진단 실행</Button>
                     <Button Click="OpenDailyBoard_Click">업무 보드</Button>
                     <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Background="#2458F2" Foreground="White">최근 1개월 스캔</Button>
                     <Button x:Name="StopScanButton" Click="StopScan_Click" Visibility="Collapsed" Background="#F04438" Foreground="White">스캔 중지</Button>
-                    <Button Click="TestNotification_Click">알림 테스트</Button>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -90,7 +88,7 @@
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
                         <TextBlock Text="오늘 봐야 할 항목" FontSize="18" FontWeight="Bold"/>
-                        <TextBlock x:Name="StatusText" Text="대기 중입니다. 관리형 PC에서는 진단 후 최근 1개월 스캔부터 시작하세요." Foreground="#667085" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="StatusText" Text="대기 중입니다. 최근 1개월 스캔을 실행하면 오늘 볼 항목을 모아줍니다." Foreground="#667085" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         <ProgressBar x:Name="ScanProgressBar" Height="4" IsIndeterminate="True" Visibility="Collapsed" Margin="0,10,0,4"/>
                         <TextBlock x:Name="ScanProgressText" Text="대기 중입니다." Visibility="Collapsed" Foreground="#2458F2" FontWeight="SemiBold" FontSize="12"/>
                     </StackPanel>
@@ -117,7 +115,7 @@
                         <TabItem x:Name="ReviewTab" Header="검토함">
                             <DockPanel Margin="8">
                                 <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                                    <TextBlock Text="확신이 낮아 자동 등록하지 않은 후보입니다. 메일 원문 없이 짧은 근거만 보여주며, 선택한 후보를 바로 할 일로 등록하거나 무시할 수 있습니다." TextWrapping="Wrap" Foreground="#667085" Margin="0,0,0,10"/>
+                                    <TextBlock Text="확신이 낮아 자동 등록하지 않은 후보입니다. 목록은 짧게 보여주고, 근거가 필요하면 원본 메일을 열어 확인하세요." TextWrapping="Wrap" Foreground="#667085" Margin="0,0,0,10"/>
                                     <StackPanel Orientation="Horizontal">
                                         <Button Click="ApproveSelectedReview_Click" Background="#2458F2" Foreground="White">선택 항목 등록 (Alt+A)</Button>
                                         <Button Click="OpenSelectedReviewMail_Click">원본 메일 열기</Button>
@@ -127,9 +125,6 @@
                                 </StackPanel>
                                 <ListBox x:Name="ReviewCandidatesList" FontSize="14" MouseDoubleClick="OpenSelectedReviewMail_DoubleClick"/>
                             </DockPanel>
-                        </TabItem>
-                        <TabItem Header="진단 로그">
-                            <TextBox x:Name="DiagnosticsText" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsReadOnly="True" FontFamily="Consolas"/>
                         </TabItem>
                     </TabControl>
                 </DockPanel>
@@ -192,6 +187,16 @@
                                     <ComboBoxItem Tag="LlmThenRules" Content="규칙 기반 fallback 허용"/>
                                 </ComboBox>
                                 <TextBlock Text="기본값은 검토함 보관입니다. 규칙 fallback은 LLM이 안 될 때도 후보를 계속 만들고 싶을 때만 켜세요." Foreground="#667085" FontSize="12" TextWrapping="Wrap" Margin="0,-6,12,10"/>
+                            </StackPanel>
+                        </Expander>
+                        <Expander Header="문제 해결" Margin="0,12,12,0">
+                            <StackPanel Margin="0,10,0,0">
+                                <TextBlock Text="평소에는 열지 않아도 됩니다. Outlook/저장소/LLM 연결이 이상할 때만 확인하세요." Foreground="#667085" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                    <Button Click="RunDiagnostics_Click" Margin="0,0,8,0">진단 실행</Button>
+                                    <Button Click="TestNotification_Click">알림 테스트</Button>
+                                </StackPanel>
+                                <TextBox x:Name="DiagnosticsText" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsReadOnly="True" FontFamily="Consolas" MinHeight="140" Text="진단을 실행하면 여기에 안전한 코드만 표시됩니다."/>
                             </StackPanel>
                         </Expander>
                     </StackPanel>

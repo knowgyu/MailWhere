@@ -78,7 +78,25 @@ Included:
 - Tasks/review candidates can carry a local source id so double-click can open the Outlook original read-only.
 - Board/list cards wrap concise due/action/reason text instead of long one-line rows.
 
-## Phase 0.2 — false positive control and daily-use inbox
+## Release 0.2.0 — quiet board and clearer LLM triage policy
+
+Goal: everyday UI should show what to do, while model/debug details stay out of the primary board.
+
+Included:
+
+- Daily board prioritizes today/overdue actions and folds review candidates into a compact count/CTA.
+- Main task/review lists no longer show confidence percentages or long reasons by default.
+- Diagnostics and notification tests move from prominent header/tab controls into settings > problem solving.
+- LLM triage is more conservative for replied/forwarded mail, FYI notices, ownership cues, and unclear due dates.
+- LLM sampling is more deterministic for triage (`temperature=0`, `top_p=0.9`) and Ollama keep-alive is longer during scan sessions.
+
+Not included:
+
+- Sender organization/department display.
+- LLM throughput benchmarking.
+- Bulk triage edit controls.
+
+## Phase 0.2.x — false positive control and daily-use inbox
 
 Priority: high.
 

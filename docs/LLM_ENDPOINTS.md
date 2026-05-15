@@ -30,7 +30,8 @@ Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다
 - `think=false`: Qwen 계열처럼 thinking-capable 모델이 긴 내부 reasoning을 하느라 느려지는 것을 줄입니다.
 - `format=json`: JSON object 출력을 요구합니다.
 - `num_predict=768`: 필요한 구조화 결과 이상으로 길게 생성하지 않게 제한합니다.
-- `keep_alive=10m`: 대량 스캔 중 모델이 자주 unload되는 것을 줄입니다.
+- `temperature=0`, `top_p=0.9`: 업무 triage 결과가 매번 흔들리지 않도록 보수적으로 샘플링합니다.
+- `keep_alive=30m`: 대량 스캔 중 모델이 자주 unload되는 것을 줄입니다.
 
 초기/대량 스캔에서는 작은 batch 단위로 여러 메일을 한 번에 분석합니다. 단, 각 메일 결과는 독립 JSON item으로 매핑하고, 실패/timeout이 나면 자동 등록하지 않고 retry 가능한 검토 후보로 남깁니다.
 

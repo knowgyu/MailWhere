@@ -17,7 +17,8 @@
   - OpenAI-compatible local server `/v1/responses`
 - endpoint에서 모델 목록 불러오기 + LLM 연결 테스트
 - 스캔별 LLM 시도/성공/fallback/실패 요약
-- Ollama 분석 시 thinking 비활성화, 짧은 JSON 출력 제한, 소규모 batch 분석
+- Ollama 분석 시 thinking 비활성화, 보수적 샘플링, 짧은 JSON 출력 제한, 소규모 batch 분석
+- LLM 분석 품질 개선: 답장/전달 메일과 담당자 표현을 더 보수적으로 판단
 - LLM 실패 후보는 중복 생성하지 않고, endpoint 복구 후 같은 메일을 다시 분석
 - RE/FW 제목 정규화와 현재 작성부/전달 맥락/인용 히스토리 분리
 - 같은 스레드에서 반복되는 동일 action item 중복 생성 억제
@@ -25,6 +26,7 @@
 - SQLite 로컬 task 저장
 - 낮은 확신 후보를 검토함에 표시
 - 기본 08:00 오늘의 업무 보드 창 표시(이후 실행 시 다음 정시)
+- 업무 보드는 신뢰도/긴 근거보다 오늘 처리할 행동과 검토 필요 개수를 먼저 표시
 - 상단 버튼 또는 tray 우클릭에서 오늘의 업무 보드 다시 열기
 - 초기/대량 스캔 시 후보별 팝업 폭탄 대신 scan summary 1회 + 검토함/보드 중심 처리
 - 검토 후보 버튼 처리와 충돌 적은 Alt+A 등록 / Alt+S 나중에 보기 / Alt+I 무시 단축키
@@ -63,7 +65,7 @@ cd MailWhere
 출력:
 
 ```text
-artifacts/MailWhere-v0.1.5-win-x64-portable.zip
+artifacts/MailWhere-v0.2.0-win-x64-portable.zip
 ```
 
 ## LLM endpoint

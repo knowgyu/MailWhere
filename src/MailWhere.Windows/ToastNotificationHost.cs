@@ -153,7 +153,7 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
                 "확인 필요",
                 notification.Title,
                 notification.Message,
-                "앱을 열어 상태와 진단 로그를 확인하세요",
+                "앱을 열어 상태와 문제 해결 정보를 확인하세요",
                 "×",
                 "#D92D20",
                 "#FEE4E2",

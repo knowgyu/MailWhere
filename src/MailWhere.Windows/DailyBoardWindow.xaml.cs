@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
 using MailWhere.Core.Domain;
-using MailWhere.Core.Localization;
 using MailWhere.Core.Reminders;
 using MailWhere.OutlookCom;
 
@@ -36,7 +35,7 @@ public partial class DailyBoardWindow : Window
         FillTaskList(DueTodayList, dueToday, now, "오늘 마감/지난 할 일이 없습니다.");
         FillTaskList(UpcomingList, upcoming, now, "앞으로 7일 내 마감이 없습니다.");
         FillTaskList(NoDueList, noDue, now, "마감 없는 할 일이 없습니다.");
-        FillReviewList(reviewCandidates);
+        FillReviewSummary(reviewCandidates.Count);
     }
 
     private static void FillTaskList(System.Windows.Controls.ListBox list, IReadOnlyList<LocalTaskItem> tasks, DateTimeOffset now, string emptyText)
@@ -45,7 +44,8 @@ public partial class DailyBoardWindow : Window
         foreach (var task in tasks)
         {
             var due = task.DueAt is null ? "마감 없음" : $"{DdayFormatter.Format(task.DueAt.Value, now)} · {task.DueAt.Value:MM/dd HH:mm}";
-            var display = $"{due} · {CompactLine(task.Title, 42)}\n{CompactLine(task.Reason, 70)}";
+            var display = $"{due}\n{CompactLine(task.Title, 54)}"
+                          + (string.IsNullOrWhiteSpace(task.SourceId) ? string.Empty : "\n더블클릭: Outlook 원본 메일");
             list.Items.Add(new BoardItem(display, task.SourceId));
         }
 
@@ -55,22 +55,14 @@ public partial class DailyBoardWindow : Window
         }
     }
 
-    private void FillReviewList(IReadOnlyList<ReviewCandidate> candidates)
+    private void FillReviewSummary(int candidateCount)
     {
-        ReviewList.Items.Clear();
-        foreach (var candidate in candidates.Take(10))
-        {
-            var due = candidate.Analysis.DueAt is null
-                ? "마감 불명"
-                : $"{DdayFormatter.Format(candidate.Analysis.DueAt.Value, DateTimeOffset.Now)} · {candidate.Analysis.DueAt.Value:MM/dd HH:mm}";
-            var display = $"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {due} · 신뢰도 {candidate.Analysis.Confidence:P0}\n{CompactLine(candidate.Analysis.SuggestedTitle, 42)}\n{CompactLine(candidate.Analysis.Reason, 70)}";
-            ReviewList.Items.Add(new BoardItem(display, candidate.SourceId));
-        }
-
-        if (candidates.Count == 0)
-        {
-            ReviewList.Items.Add("확인 필요한 후보가 없습니다.");
-        }
+        ReviewSummaryTitle.Text = $"확인 필요한 항목 {candidateCount}개";
+        ReviewSummaryText.Text = candidateCount == 0
+            ? "자동 등록하기 애매한 메일이 없습니다."
+            : "자동 등록하기 애매한 메일입니다. 검토함에서 한 번에 등록하거나 무시하세요.";
+        OpenReviewButton.IsEnabled = candidateCount > 0;
+        OpenReviewButton.Content = candidateCount == 0 ? "검토할 항목 없음" : "검토하기";
     }
 
     private void OpenReview_Click(object sender, RoutedEventArgs e)

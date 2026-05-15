@@ -74,8 +74,8 @@ public partial class MainWindow : Window
             var report = new CapabilityReport(DateTimeOffset.UtcNow, results);
             var snapshot = RuntimeGateComposer.Compose(settings, report);
             DiagnosticsText.Text = SanitizedDiagnosticsExporter.Export(snapshot);
-            StatusText.Text = "진단이 완료되었습니다. 민감한 메일 원문/제목/발신자는 진단 로그에 저장하지 않습니다.";
-            await _notificationSink.ShowAsync(new UserNotification(UserNotificationKind.Diagnostics, "MailWhere 진단 완료", "진단 결과를 앱에서 확인하세요."));
+            StatusText.Text = "진단이 완료되었습니다. 설정의 문제 해결 영역에서 결과를 확인할 수 있습니다.";
+            await _notificationSink.ShowAsync(new UserNotification(UserNotificationKind.Diagnostics, "MailWhere 진단 완료", "설정의 문제 해결 영역에서 결과를 확인하세요."));
         }
         catch (Exception ex)
         {
@@ -567,8 +567,8 @@ public partial class MainWindow : Window
         foreach (var task in tasks)
         {
             var due = task.DueAt is null ? "마감 없음" : $"{DdayFormatter.Format(task.DueAt.Value, now)} · {task.DueAt.Value:MM/dd HH:mm}";
-            var display = $"{due} · {CompactLine(task.Title, 42)}\n{CompactLine(task.Reason, 70)} · 신뢰도 {task.Confidence:P0}"
-                          + (string.IsNullOrWhiteSpace(task.SourceId) ? string.Empty : "\n더블클릭하면 Outlook 원본 메일을 엽니다.");
+            var display = $"{due}\n{CompactLine(task.Title, 54)}"
+                          + (string.IsNullOrWhiteSpace(task.SourceId) ? string.Empty : "\n더블클릭: Outlook 원본 메일");
             TasksList.Items.Add(new TaskListItem(task, display));
         }
 
@@ -588,7 +588,7 @@ public partial class MainWindow : Window
             var due = candidate.Analysis.DueAt is null ? "마감 불명" : $"{DdayFormatter.Format(candidate.Analysis.DueAt.Value, DateTimeOffset.Now)} · {candidate.Analysis.DueAt.Value:MM/dd HH:mm}";
             ReviewCandidatesList.Items.Add(new ReviewCandidateListItem(
                 candidate,
-                $"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {due} · 신뢰도 {candidate.Analysis.Confidence:P0}\n{CompactLine(candidate.Analysis.SuggestedTitle, 42)}\n{CompactLine(candidate.Analysis.Reason, 70)}"));
+                $"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {due}\n{CompactLine(candidate.Analysis.SuggestedTitle, 54)}"));
         }
 
         if (candidates.Count == 0)
