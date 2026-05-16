@@ -33,6 +33,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Sent request is classified as waiting on them", SentRequestIsClassifiedAsWaitingOnThem),
     ("Follow-up presentation buckets promise and waiting", FollowUpPresentationBucketsPromiseAndWaiting),
     ("Follow-up presentation strips card scaffolding", FollowUpPresentationStripsCardScaffolding),
+    ("Follow-up presentation uses human due labels", FollowUpPresentationUsesHumanDueLabels),
     ("Managed mode blocks automatic check before readiness", ManagedModeBlocksWatcherWithoutGate),
     ("Manual readiness is required even if managed mode is false", SmokeGateRequiredEvenIfManagedModeFalse),
     ("Ambiguous mail does not auto create", AmbiguousMailDoesNotAutoCreate),
@@ -47,6 +48,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Runtime diagnostics export includes safe gate codes", RuntimeDiagnosticsExportIncludesSafeGateCodes),
     ("Partial runtime settings keep safe defaults", PartialRuntimeSettingsKeepSafeDefaults),
     ("Runtime settings map Ollama endpoint", RuntimeSettingsMapOllamaEndpoint),
+    ("Runtime settings direct API key wins without env setup", RuntimeSettingsDirectApiKeyWinsWithoutEnvSetup),
     ("Runtime settings map legacy OpenAI-compatible endpoint", RuntimeSettingsMapLegacyOpenAiCompatibleEndpoint),
     ("Runtime settings map OpenAI Responses endpoint", RuntimeSettingsMapOpenAiResponsesEndpoint),
     ("Runtime settings serialize canonical provider names", RuntimeSettingsSerializeCanonicalProviderNames),
@@ -56,6 +58,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Daily board planner schedules next whole hour", DailyBoardPlannerSchedulesNextWholeHour),
     ("Daily board planner waits for startup settling delay", DailyBoardPlannerWaitsForStartupSettlingDelay),
     ("Daily board route options map manual and today brief", DailyBoardRouteOptionsMapManualAndTodayBrief),
+    ("Daily board week filter uses calendar week", DailyBoardWeekFilterUsesCalendarWeek),
     ("Daily board Today brief route includes brief highlights", DailyBoardTodayBriefRouteIncludesBriefHighlights),
     ("Daily board route hides archived and future snooze", DailyBoardRouteHidesArchivedAndFutureSnooze),
     ("Notification action resolver maps daily brief", NotificationActionResolverMapsDailyBrief),
@@ -371,6 +374,18 @@ static Task FollowUpPresentationStripsCardScaffolding()
     return Task.CompletedTask;
 }
 
+static Task FollowUpPresentationUsesHumanDueLabels()
+{
+    var friday = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
+    Assert(FollowUpPresentation.HumanDueText(null, friday) == "날짜 없음", "No due date should use product copy.");
+    Assert(FollowUpPresentation.HumanDueText(friday.AddHours(6), friday) == "오늘 15:00", "Same-day due should say today.");
+    Assert(FollowUpPresentation.HumanDueText(friday.AddDays(1).AddHours(1), friday) == "내일 10:00", "Tomorrow due should say tomorrow.");
+    Assert(FollowUpPresentation.HumanDueText(friday.AddDays(2).AddHours(1), friday) == "이번 주 일요일 10:00", "Same calendar week due should use weekday copy.");
+    Assert(FollowUpPresentation.HumanDueText(friday.AddDays(10), friday) == "5/25 09:00", "Later due should use compact date.");
+    Assert(FollowUpPresentation.HumanSenderText("Customer Success") == "보낸 사람: Customer Success", "Sender should use explicit label.");
+    return Task.CompletedTask;
+}
+
 static Task ManagedModeBlocksWatcherWithoutGate()
 {
     var result = FeatureGate.EvaluateAutomaticWatcher(new GateInput(
@@ -616,6 +631,31 @@ static Task RuntimeSettingsMapOllamaEndpoint()
     }
 }
 
+static Task RuntimeSettingsDirectApiKeyWinsWithoutEnvSetup()
+{
+    Environment.SetEnvironmentVariable("OAS_TEST_KEY", "env-token");
+    var json = """
+        {
+          "ExternalLlmEnabled": true,
+          "LlmProvider": "OpenAiResponses",
+          "LlmEndpoint": "https://api.openai.com/v1",
+          "LlmModel": "gpt-test",
+          "LlmApiKey": "direct-token",
+          "LlmApiKeyEnvironmentVariable": "OAS_TEST_KEY"
+        }
+        """;
+    try
+    {
+        var settings = RuntimeSettingsSerializer.ParseOrDefault(json);
+        Assert(settings.ToLlmEndpointSettings().ApiKey == "direct-token", "Direct API key should avoid forcing environment setup.");
+        return Task.CompletedTask;
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("OAS_TEST_KEY", null);
+    }
+}
+
 static Task RuntimeSettingsMapLegacyOpenAiCompatibleEndpoint()
 {
     var json = """
@@ -775,6 +815,24 @@ static Task NotificationActionResolverMapsDailyBrief()
     var notification = DailyBriefNotificationEmitter.CreateNotification(EmptyBriefSnapshot(), new DailyBoardPlan(true, DateTimeOffset.Now, "2026-05-15", "08:00"));
     Assert(notification.Title == "오늘 브리핑", "Expected concise Daily Brief notification title.");
     Assert(notification.Message.Contains("업무 보드", StringComparison.Ordinal), "Daily Brief notification should keep board-source-of-truth copy.");
+    return Task.CompletedTask;
+}
+
+static Task DailyBoardWeekFilterUsesCalendarWeek()
+{
+    var now = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)); // Friday
+    var sunday = BriefTask("이번 주 일요일", FollowUpKind.ActionRequested, now.AddDays(2), LocalTaskStatus.Open, null, now, 0.8);
+    var nextMonday = BriefTask("다음 주 월요일", FollowUpKind.ActionRequested, now.AddDays(3), LocalTaskStatus.Open, null, now, 0.8);
+    var noDue = BriefTask("날짜 없음", FollowUpKind.ActionRequested, null, LocalTaskStatus.Open, null, now, 0.8);
+
+    var week = DailyBoardRouteTaskSelector.SelectVisibleTasks(
+        new[] { sunday, nextMonday, noDue },
+        Array.Empty<ReviewCandidate>(),
+        now,
+        BoardRouteFilter.Week,
+        showBriefSummary: false);
+
+    Assert(week.Single().Title == "이번 주 일요일", "Week filter should mean this calendar week, not the next seven days.");
     return Task.CompletedTask;
 }
 

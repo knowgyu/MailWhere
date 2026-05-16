@@ -90,4 +90,64 @@ public static class FollowUpPresentation
         task.Status == LocalTaskStatus.Snoozed
         && task.SnoozeUntil is not null
         && task.SnoozeUntil.Value > now;
+
+    public static string HumanDueText(DateTimeOffset? dueAt, DateTimeOffset now)
+    {
+        if (dueAt is null)
+        {
+            return "날짜 없음";
+        }
+
+        var localNow = now;
+        var value = dueAt.Value.ToOffset(localNow.Offset);
+        var date = value.Date;
+        var today = localNow.Date;
+
+        if (date == today)
+        {
+            return $"오늘 {value:HH:mm}";
+        }
+
+        if (date == today.AddDays(1))
+        {
+            return $"내일 {value:HH:mm}";
+        }
+
+        if (date > today && StartOfKoreanWeek(date) == StartOfKoreanWeek(today))
+        {
+            return $"이번 주 {KoreanDayOfWeek(date.DayOfWeek)} {value:HH:mm}";
+        }
+
+        return $"{value:M/d HH:mm}";
+    }
+
+    public static string HumanSenderText(string? senderDisplay, string fallback = "직접 추가")
+    {
+        var sender = string.IsNullOrWhiteSpace(senderDisplay)
+            ? fallback
+            : string.Join(' ', senderDisplay.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
+        var compact = sender.Length <= 30 ? sender : sender[..30].TrimEnd() + "…";
+        return $"보낸 사람: {compact}";
+    }
+
+    public static DateTime StartOfKoreanWeek(DateTime date)
+    {
+        var diff = ((int)date.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+        return date.Date.AddDays(-diff);
+    }
+
+    public static DateTime EndOfKoreanWeek(DateTime date) =>
+        StartOfKoreanWeek(date).AddDays(6);
+
+    private static string KoreanDayOfWeek(DayOfWeek dayOfWeek) => dayOfWeek switch
+    {
+        DayOfWeek.Monday => "월요일",
+        DayOfWeek.Tuesday => "화요일",
+        DayOfWeek.Wednesday => "수요일",
+        DayOfWeek.Thursday => "목요일",
+        DayOfWeek.Friday => "금요일",
+        DayOfWeek.Saturday => "토요일",
+        DayOfWeek.Sunday => "일요일",
+        _ => string.Empty
+    };
 }

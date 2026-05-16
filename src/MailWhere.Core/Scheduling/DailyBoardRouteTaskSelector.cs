@@ -34,9 +34,9 @@ public static class DailyBoardRouteTaskSelector
         filter switch
         {
             BoardRouteFilter.All => tasks,
-            BoardRouteFilter.Today => tasks.Where(task => task.DueAt is not null && task.DueAt.Value.Date <= now.Date),
-            BoardRouteFilter.Week => tasks.Where(task => task.DueAt is not null && task.DueAt.Value.Date <= now.AddDays(7).Date),
-            BoardRouteFilter.Month => tasks.Where(task => task.DueAt is not null && task.DueAt.Value.Date <= now.AddDays(30).Date),
+            BoardRouteFilter.Today => tasks.Where(task => task.DueAt is not null && task.DueAt.Value.ToOffset(now.Offset).Date <= now.Date),
+            BoardRouteFilter.Week => tasks.Where(task => task.DueAt is not null && task.DueAt.Value.ToOffset(now.Offset).Date <= FollowUpPresentation.EndOfKoreanWeek(now.Date)),
+            BoardRouteFilter.Month => tasks.Where(task => task.DueAt is not null && task.DueAt.Value.ToOffset(now.Offset).Date <= now.AddDays(30).Date),
             BoardRouteFilter.NoDue => tasks.Where(task => task.DueAt is null),
             _ => tasks
         };
