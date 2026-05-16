@@ -159,7 +159,7 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
                 "메일 확인 완료",
                 notification.Title,
                 notification.Message,
-                "검토 후보는 보드의 검토 후보 탭에 모아둡니다",
+                "검토 후보는 별도 창에서 확인합니다",
                 "업무 보드",
                 "검토 후보",
                 TimeSpan.FromSeconds(12)),

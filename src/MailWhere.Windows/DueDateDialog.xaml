@@ -9,8 +9,8 @@
             <TextBlock x:Name="DescriptionText" Text="오늘 날짜를 기준으로 열립니다." Foreground="#667085" Margin="0,4,0,16"/>
             <DatePicker x:Name="DueDatePicker" SelectedDateFormat="Short" Margin="0,0,0,18"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Padding="14,8" Margin="0,0,8,0" Click="Cancel_Click">취소</Button>
-                <Button Padding="14,8" Background="#2458F2" Foreground="White" Click="Save_Click">저장</Button>
+                <Button Padding="14,8" Margin="0,0,8,0" IsCancel="True" Click="Cancel_Click">취소(Esc)</Button>
+                <Button Padding="14,8" Background="#2458F2" Foreground="White" IsDefault="True" Click="Save_Click">저장(Enter)</Button>
             </StackPanel>
         </StackPanel>
     </Border>

@@ -12,8 +12,8 @@
             <TextBlock Text="기한(선택)" FontWeight="SemiBold" Foreground="#20304F"/>
             <DatePicker x:Name="DueDatePicker" Margin="0,4,0,18"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Padding="14,8" Margin="0,0,8,0" Click="Cancel_Click">취소</Button>
-                <Button Padding="14,8" Background="#2458F2" Foreground="White" Click="Save_Click">추가</Button>
+                <Button Padding="14,8" Margin="0,0,8,0" IsCancel="True" Click="Cancel_Click">취소(Esc)</Button>
+                <Button Padding="14,8" Background="#2458F2" Foreground="White" IsDefault="True" Click="Save_Click">추가(Enter)</Button>
             </StackPanel>
         </StackPanel>
     </Border>

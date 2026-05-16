@@ -38,8 +38,8 @@
             <TextBlock x:Name="ErrorText" Grid.Row="3" Visibility="Collapsed" Foreground="#C62828" TextWrapping="Wrap"/>
 
             <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Padding="16,8" Margin="0,0,8,0" Click="Cancel_Click">취소</Button>
-                <Button Padding="16,8" Background="#2458F2" Foreground="White" Click="Save_Click">저장</Button>
+                <Button Padding="16,8" Margin="0,0,8,0" IsCancel="True" Click="Cancel_Click">취소(Esc)</Button>
+                <Button Padding="16,8" Background="#2458F2" Foreground="White" IsDefault="True" Click="Save_Click">저장(Enter)</Button>
             </StackPanel>
         </Grid>
     </Border>

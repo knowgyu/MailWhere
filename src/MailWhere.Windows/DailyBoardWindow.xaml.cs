@@ -136,9 +136,9 @@ public partial class DailyBoardWindow : Window
     {
         BoardRouteFilter.All => "전체",
         BoardRouteFilter.Today => "오늘",
-        BoardRouteFilter.Week => "7일 내",
-        BoardRouteFilter.Month => "30일 내",
-        BoardRouteFilter.NoDue => "기한 미정",
+        BoardRouteFilter.Week => "이번 주",
+        BoardRouteFilter.Month => "전체",
+        BoardRouteFilter.NoDue => "날짜 없음",
         _ => "전체"
     };
 
@@ -466,33 +466,16 @@ public partial class DailyBoardWindow : Window
 
         public static BoardCardItem FromTask(LocalTaskItem task, DateTimeOffset now)
         {
-            var sender = string.IsNullOrWhiteSpace(task.SourceSenderDisplay) ? "직접 추가" : CompactLine(task.SourceSenderDisplay, 18);
-            var received = task.SourceReceivedAt ?? task.CreatedAt;
+            var due = FollowUpPresentation.HumanDueText(task.DueAt, now);
+            var sender = FollowUpPresentation.HumanSenderText(task.SourceSenderDisplay);
             var snooze = task.Status == LocalTaskStatus.Snoozed && task.SnoozeUntil is not null
-                ? $"나중에 {FormatDate(task.SnoozeUntil.Value, now)} · "
+                ? $"나중에 {FollowUpPresentation.HumanDueText(task.SnoozeUntil, now)} · "
                 : string.Empty;
             return new BoardCardItem(
                 task,
                 CompactLine(FollowUpPresentation.ActionTitle(task.Title), 120),
-                $"{snooze}{sender} · {received:MM/dd HH:mm}",
-                task.DueAt is null ? "기한 추가" : FormatDate(task.DueAt.Value, now));
-        }
-
-        private static string FormatDate(DateTimeOffset value, DateTimeOffset now)
-        {
-            var date = value.LocalDateTime.Date;
-            var today = now.LocalDateTime.Date;
-            if (date == today)
-            {
-                return $"오늘 {value:HH:mm}";
-            }
-
-            if (date == today.AddDays(1))
-            {
-                return $"내일 {value:HH:mm}";
-            }
-
-            return $"{DdayFormatter.Format(value, now)} · {value:MM/dd HH:mm}";
+                $"{snooze}{sender}",
+                due);
         }
 
         private static string CompactLine(string? value, int maxChars)

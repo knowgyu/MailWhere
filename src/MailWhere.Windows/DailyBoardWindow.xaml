@@ -109,13 +109,15 @@
                     </Grid>
                 </Border>
                 <Border x:Name="FilterPanel" CornerRadius="16" Background="{StaticResource MwBrush.PrimarySoft}" Padding="4" BorderBrush="{StaticResource MwBrush.BorderStrong}" BorderThickness="1">
-                    <UniformGrid Rows="1" Columns="5">
-                        <Button x:Name="AllFilterButton" Style="{StaticResource PillButton}" Click="AllFilter_Click">전체</Button>
-                        <Button x:Name="TodayFilterButton" Style="{StaticResource PillButton}" Click="TodayFilter_Click">오늘</Button>
-                        <Button x:Name="WeekFilterButton" Style="{StaticResource PillButton}" Click="WeekFilter_Click">7일 내</Button>
-                        <Button x:Name="MonthFilterButton" Style="{StaticResource PillButton}" Click="MonthFilter_Click">30일 내</Button>
-                        <Button x:Name="NoDueFilterButton" Style="{StaticResource PillButton}" Click="NoDueFilter_Click">기한 미정</Button>
-                    </UniformGrid>
+                    <Grid>
+                        <UniformGrid Rows="1" Columns="4">
+                            <Button x:Name="TodayFilterButton" Style="{StaticResource PillButton}" Click="TodayFilter_Click">오늘</Button>
+                            <Button x:Name="WeekFilterButton" Style="{StaticResource PillButton}" Click="WeekFilter_Click">이번 주</Button>
+                            <Button x:Name="NoDueFilterButton" Style="{StaticResource PillButton}" Click="NoDueFilter_Click">날짜 없음</Button>
+                            <Button x:Name="AllFilterButton" Style="{StaticResource PillButton}" Click="AllFilter_Click">전체</Button>
+                        </UniformGrid>
+                        <Button x:Name="MonthFilterButton" Visibility="Collapsed" Click="MonthFilter_Click">이번 달</Button>
+                    </Grid>
                 </Border>
             </StackPanel>
 

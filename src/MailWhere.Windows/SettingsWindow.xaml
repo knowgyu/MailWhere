@@ -1,0 +1,177 @@
+<Window x:Class="MailWhere.Windows.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="설정" Height="680" Width="760" MinHeight="560" MinWidth="680"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource MwBrush.Page}" Icon="Assets/app-icon.ico">
+    <Window.Resources>
+        <Style TargetType="Button" BasedOn="{StaticResource MwButton.Base}">
+            <Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MwBrush.Text}"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="0,4,12,12"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="MinHeight" Value="34"/>
+        </Style>
+        <Style TargetType="PasswordBox">
+            <Setter Property="Margin" Value="0,4,12,12"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="MinHeight" Value="34"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Margin" Value="0,4,12,12"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="MinHeight" Value="34"/>
+        </Style>
+        <Style x:Key="SectionCard" TargetType="Border" BasedOn="{StaticResource MwPanelBorder}">
+            <Setter Property="Margin" Value="0,0,0,12"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" CornerRadius="20" Background="{StaticResource MwBrush.Surface}" Padding="18" Margin="0,0,0,12" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
+            <StackPanel>
+                <TextBlock Text="설정" FontSize="22" FontWeight="Bold" Foreground="{StaticResource MwBrush.TextStrong}"/>
+                <TextBlock Text="자주 쓰는 동작과 AI 분석 연결만 정리합니다." Margin="0,5,0,0" Foreground="{StaticResource MwBrush.TextMuted}"/>
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="일반" FontSize="16" FontWeight="Bold"/>
+                        <CheckBox x:Name="StartupToggle" Content="Windows 시작 시 트레이에서 실행" Margin="0,10,0,8"/>
+                        <CheckBox x:Name="AutoWatcherToggle" Content="수동 확인 성공 후 자동으로 새 메일 확인" Margin="0,0,0,12"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1*"/>
+                                <ColumnDefinition Width="1*"/>
+                                <ColumnDefinition Width="1*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="메일 확인 기간(일)" FontWeight="SemiBold"/>
+                                <TextBox x:Name="ScanDaysText"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="자동 확인 간격(분)" FontWeight="SemiBold"/>
+                                <TextBox x:Name="AutomaticScanIntervalText"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="최대 메일 수(비우면 전체)" FontWeight="SemiBold"/>
+                                <TextBox x:Name="MaxItemsText"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="알림" FontSize="16" FontWeight="Bold"/>
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1*"/>
+                                <ColumnDefinition Width="1*"/>
+                                <ColumnDefinition Width="1*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="미리 알려줄 시간" FontWeight="SemiBold"/>
+                                <TextBox x:Name="ReminderLookAheadText"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="아침 업무 보드 시간" FontWeight="SemiBold"/>
+                                <TextBox x:Name="DailyBoardTimeText" ToolTip="예: 08:00"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="시작 후 대기(분)" FontWeight="SemiBold"/>
+                                <TextBox x:Name="DailyBoardStartupDelayText"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <TextBlock Text="AI 분석" FontSize="16" FontWeight="Bold"/>
+                        <CheckBox x:Name="LlmEnabledToggle" Content="AI 분석 사용" Margin="0,10,0,10" Click="LlmEnabled_Click"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1*"/>
+                                <ColumnDefinition Width="1*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="방식" FontWeight="SemiBold"/>
+                                <ComboBox x:Name="LlmProviderBox">
+                                    <ComboBoxItem Tag="OllamaNative" Content="Ollama 로컬"/>
+                                    <ComboBoxItem Tag="OpenAiChatCompletions" Content="OpenAI 호환 · Chat Completions"/>
+                                    <ComboBoxItem Tag="OpenAiResponses" Content="OpenAI 호환 · Responses"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="주소" FontWeight="SemiBold"/>
+                                <TextBox x:Name="LlmEndpointText" ToolTip="예: http://localhost:11434 또는 https://api.openai.com"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="모델" FontWeight="SemiBold"/>
+                                <ComboBox x:Name="LlmModelBox" IsEditable="True"/>
+                            </StackPanel>
+                            <Button x:Name="LoadModelsButton" Grid.Column="1" Click="LoadModels_Click" VerticalAlignment="Center">모델 불러오기</Button>
+                        </Grid>
+                        <TextBlock Text="AI 서버 인증" FontWeight="SemiBold"/>
+                        <ComboBox x:Name="LlmAuthModeBox" SelectionChanged="AuthMode_SelectionChanged">
+                            <ComboBoxItem Tag="None" Content="인증 없음"/>
+                            <ComboBoxItem Tag="Direct" Content="API 키 입력"/>
+                            <ComboBoxItem Tag="Environment" Content="환경 변수에서 읽기"/>
+                        </ComboBox>
+                        <TextBlock Text="API 키" FontWeight="SemiBold"/>
+                        <PasswordBox x:Name="LlmApiKeyBox" ToolTip="개인 PC용입니다. 키는 화면에 표시하지 않습니다."/>
+                        <TextBlock Text="인증 키 환경 변수" FontWeight="SemiBold"/>
+                        <TextBox x:Name="LlmApiKeyEnvText" ToolTip="예: OPENAI_API_KEY"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1*"/>
+                                <ColumnDefinition Width="1*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="AI 응답 대기 시간(초)" FontWeight="SemiBold"/>
+                                <TextBox x:Name="LlmTimeoutText"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="AI 실패 시 처리" FontWeight="SemiBold"/>
+                                <ComboBox x:Name="LlmFallbackPolicyBox">
+                                    <ComboBoxItem Tag="LlmOnly" Content="검토 후보로 보관"/>
+                                    <ComboBoxItem Tag="LlmThenRules" Content="규칙 기반 보조 허용"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="TestConnectionButton" Click="TestConnection_Click" Style="{StaticResource MwButton.Primary}">연결 테스트</Button>
+                            <TextBlock x:Name="LlmStatusText" Text="연결 테스트 전입니다." VerticalAlignment="Center" Foreground="{StaticResource MwBrush.TextMuted}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="12" Margin="0,12,0,0" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button IsCancel="True" Padding="16,8">취소(Esc)</Button>
+                <Button IsDefault="True" Click="Save_Click" Style="{StaticResource MwButton.Primary}" Padding="16,8" Margin="0">저장(Enter)</Button>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -38,6 +39,10 @@ public partial class MainWindow : Window
     private bool _backgroundStarted;
     private bool _allowExit;
     private DailyBoardWindow? _dailyBoardWindow;
+    private ReviewCandidatesWindow? _reviewCandidatesWindow;
+    private SettingsWindow? _settingsWindow;
+    private DeveloperToolsWindow? _developerToolsWindow;
+    private BoardRouteFilter _mainFilter = BoardRouteFilter.Today;
     private AnalysisTelemetry _lastAnalysisTelemetry = AnalysisTelemetry.Empty;
 
     public MainWindow()
@@ -73,6 +78,7 @@ public partial class MainWindow : Window
 
     public void ShowShell()
     {
+        _ = RefreshTasksAsync();
         Show();
         WindowState = WindowState.Normal;
         Activate();
@@ -174,13 +180,35 @@ public partial class MainWindow : Window
 
     private async Task OpenDailyBoardAsync(DailyBoardOpenOptions options)
     {
-        await ShowDailyBoardAsync(DateTimeOffset.Now, _settings.DailyBoardTime, options);
+        await ShowUnifiedBoardAsync(options);
     }
 
     public void OpenReviewTab()
     {
         ShowShell();
-        MainTabs.SelectedItem = ReviewTab;
+        _ = OpenReviewCandidatesWindowAsync();
+    }
+
+    private async Task ShowUnifiedBoardAsync(DailyBoardOpenOptions options)
+    {
+        _mainFilter = options.Filter == BoardRouteFilter.Month ? BoardRouteFilter.Week : options.Filter;
+        await RefreshTasksAsync();
+        ShowShell();
+        BringWindowToFront(this);
+        StatusText.Text = options.ShowBriefSummary
+            ? "오늘 업무를 열었습니다."
+            : "업무 보드를 열었습니다.";
+    }
+
+    private async void TodayMainFilter_Click(object sender, RoutedEventArgs e) => await SetMainFilterAsync(BoardRouteFilter.Today);
+    private async void WeekMainFilter_Click(object sender, RoutedEventArgs e) => await SetMainFilterAsync(BoardRouteFilter.Week);
+    private async void NoDueMainFilter_Click(object sender, RoutedEventArgs e) => await SetMainFilterAsync(BoardRouteFilter.NoDue);
+    private async void AllMainFilter_Click(object sender, RoutedEventArgs e) => await SetMainFilterAsync(BoardRouteFilter.All);
+
+    private async Task SetMainFilterAsync(BoardRouteFilter filter)
+    {
+        _mainFilter = filter;
+        await RefreshTasksAsync();
     }
 
     private async void OpenTaskButton_Click(object sender, RoutedEventArgs e)
@@ -250,6 +278,83 @@ public partial class MainWindow : Window
         {
             StatusText.Text = $"기한을 설정하지 못했습니다: {ex.GetType().Name}";
         }
+    }
+
+    private async void SnoozeTaskButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button button || GetTaskListItem(sender) is not { Task: { } task })
+        {
+            return;
+        }
+
+        var menu = new System.Windows.Controls.ContextMenu
+        {
+            PlacementTarget = button,
+            Placement = PlacementMode.Bottom,
+            StaysOpen = false
+        };
+        AddSnoozeMenuItem(menu, "오늘 1시에 다시 보기", task, SnoozePlanner.Plan(SnoozePreset.TodayAtOnePm, DateTimeOffset.Now));
+        AddSnoozeMenuItem(menu, "내일 아침 다시 보기", task, SnoozePlanner.Plan(SnoozePreset.TomorrowMorning, DateTimeOffset.Now));
+        AddSnoozeMenuItem(menu, "다음 월요일 다시 보기", task, SnoozePlanner.Plan(SnoozePreset.NextMondayMorning, DateTimeOffset.Now));
+        var custom = new System.Windows.Controls.MenuItem { Header = "직접 날짜 선택" };
+        custom.Click += async (_, _) =>
+        {
+            var dialog = new DueDateDialog(DateTime.Today, task.SnoozeUntil?.DateTime ?? task.DueAt?.DateTime)
+            {
+                Owner = this,
+                Title = "나중에 보기"
+            };
+            if (dialog.ShowDialog() == true && dialog.SelectedDueAt is { } until)
+            {
+                await SnoozeTaskAsync(task, until);
+            }
+        };
+        menu.Items.Add(custom);
+        button.ContextMenu = menu;
+        menu.IsOpen = true;
+    }
+
+    private void AddSnoozeMenuItem(System.Windows.Controls.ContextMenu menu, string header, LocalTaskItem task, DateTimeOffset until)
+    {
+        var item = new System.Windows.Controls.MenuItem { Header = header };
+        item.Click += async (_, _) => await SnoozeTaskAsync(task, until);
+        menu.Items.Add(item);
+    }
+
+    private async void AddManualTaskDialog_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var dialog = new ManualTaskDialog(DateTime.Today)
+            {
+                Owner = this
+            };
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            await CreateManualTaskAsync(dialog.TaskTitle, dialog.DueAt);
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("직접 추가 실패", ex);
+        }
+    }
+
+    private async void OpenReviewCandidates_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenReviewCandidatesWindowAsync();
+    }
+
+    private async void OpenSettings_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenSettingsWindowAsync();
+    }
+
+    private void OpenDeveloperTools_Click(object sender, RoutedEventArgs e)
+    {
+        OpenDeveloperToolsWindow();
     }
 
     private async void TestLlmEndpoint_Click(object sender, RoutedEventArgs e)
@@ -544,12 +649,13 @@ public partial class MainWindow : Window
     {
         if (_automaticScanTimer is not null)
         {
+            _automaticScanTimer.Interval = TimeSpan.FromMinutes(_settings.AutomaticScanIntervalMinutes);
             return;
         }
 
         _automaticScanTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMinutes(15)
+            Interval = TimeSpan.FromMinutes(_settings.AutomaticScanIntervalMinutes)
         };
         _automaticScanTimer.Tick += async (_, _) =>
         {
@@ -722,14 +828,50 @@ public partial class MainWindow : Window
     {
         var store = await GetStoreAsync();
         var tasks = await store.ListOpenTasksAsync();
+        var candidates = await store.ListReviewCandidatesAsync();
         TasksList.Items.Clear();
         var now = DateTimeOffset.Now;
-        TasksList.Visibility = tasks.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        TasksEmptyText.Visibility = tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var task in tasks)
+        var visible = DailyBoardRouteTaskSelector.SelectVisibleTasks(
+                tasks,
+                candidates,
+                now,
+                _mainFilter,
+                showBriefSummary: false)
+            .OrderBy(SortKey)
+            .ThenBy(task => task.CreatedAt)
+            .ToArray();
+        TasksList.Visibility = visible.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        TasksEmptyText.Visibility = visible.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var task in visible)
         {
             TasksList.Items.Add(TaskListItem.FromTask(task, now));
         }
+
+        OpenReviewCandidatesButton.Content = candidates.Count == 0
+            ? "검토 후보"
+            : $"검토 후보 {candidates.Count}";
+        UpdateMainFilterHighlight();
+    }
+
+    private static DateTimeOffset SortKey(LocalTaskItem task) =>
+        task.DueAt ?? task.SnoozeUntil ?? DateTimeOffset.MaxValue;
+
+    private void UpdateMainFilterHighlight()
+    {
+        SetFilterStyle(TodayFilterButton, _mainFilter == BoardRouteFilter.Today);
+        SetFilterStyle(WeekFilterButton, _mainFilter == BoardRouteFilter.Week);
+        SetFilterStyle(NoDueFilterButton, _mainFilter == BoardRouteFilter.NoDue);
+        SetFilterStyle(AllFilterButton, _mainFilter == BoardRouteFilter.All);
+    }
+
+    private static void SetFilterStyle(System.Windows.Controls.Button button, bool active)
+    {
+        button.Background = active
+            ? System.Windows.Media.Brushes.White
+            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xEE, 0xF3, 0xFF));
+        button.BorderBrush = active
+            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x24, 0x58, 0xF2))
+            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xD8, 0xE2, 0xFF));
     }
 
     private async Task<IReadOnlyList<ReviewCandidate>> RefreshReviewCandidatesAsync()
@@ -741,12 +883,14 @@ public partial class MainWindow : Window
         ReviewCandidatesEmptyText.Visibility = candidates.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         foreach (var candidate in candidates)
         {
-            var due = candidate.Analysis.DueAt is null ? "마감 불명" : $"{DdayFormatter.Format(candidate.Analysis.DueAt.Value, DateTimeOffset.Now)} · {candidate.Analysis.DueAt.Value:MM/dd HH:mm}";
+            var due = FollowUpPresentation.HumanDueText(candidate.Analysis.DueAt, DateTimeOffset.Now);
+            var sender = FollowUpPresentation.HumanSenderText(candidate.SourceSenderDisplay, "알 수 없음");
             ReviewCandidatesList.Items.Add(new ReviewCandidateListItem(
                 candidate,
-                $"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {due}\n{CompactLine(candidate.Analysis.SuggestedTitle, 54)}"));
+                $"{due} · {sender}\n{CompactLine(FollowUpPresentation.ActionTitle(candidate.Analysis.SuggestedTitle), 54)}"));
         }
 
+        _reviewCandidatesWindow?.Refresh(candidates);
         return candidates;
     }
 
@@ -866,60 +1010,22 @@ public partial class MainWindow : Window
 
     private async Task ShowDailyBoardAsync(DateTimeOffset now, string dailyBoardTime, DailyBoardOpenOptions options)
     {
-        var store = await GetStoreAsync();
-        var tasks = await store.ListOpenTasksAsync();
-        var candidates = await store.ListReviewCandidatesAsync();
-        if (_dailyBoardWindow?.IsVisible == true)
-        {
-            _dailyBoardWindow.ApplyOpenOptions(options, now, dailyBoardTime, tasks, candidates);
-            if (options.ShowBriefSummary)
-            {
-                WindowsRuntimeDiagnostics.RecordUiEvent("daily-board-existing-window-updated-today-brief", new Dictionary<string, string>
-                {
-                    ["origin"] = options.Origin.ToString()
-                });
-            }
-            if (options.BringToFront)
-            {
-                BringDailyBoardToFront(_dailyBoardWindow);
-            }
-
-            StatusText.Text = options.ShowBriefSummary
-                ? "업무 보드를 오늘 브리핑으로 갱신했습니다."
-                : "업무 보드를 갱신했습니다.";
-            return;
-        }
-
-        _dailyBoardWindow = new DailyBoardWindow(
-            tasks,
-            candidates,
-            now,
-            dailyBoardTime,
-            options,
-            OpenTaskSourceAsync,
-            ArchiveTaskAsync,
-            SnoozeTaskAsync,
-            SetTaskDueAsync,
-            UpdateTaskDetailsAsync,
-            CreateManualTaskAsync,
-            OpenReviewCandidatesFromBoardAsync);
-        if (IsVisible)
-        {
-            _dailyBoardWindow.Owner = this;
-        }
-        _dailyBoardWindow.Closed += (_, _) => _dailyBoardWindow = null;
-        _dailyBoardWindow.Show();
+        _ = now;
+        _ = dailyBoardTime;
+        _mainFilter = options.Filter == BoardRouteFilter.Month ? BoardRouteFilter.Week : options.Filter;
+        await RefreshTasksAsync();
+        ShowShell();
         if (options.BringToFront)
         {
-            BringDailyBoardToFront(_dailyBoardWindow);
+            BringWindowToFront(this);
         }
 
         StatusText.Text = options.ShowBriefSummary
-            ? "업무 보드를 오늘 브리핑으로 열었습니다."
+            ? "오늘 업무를 열었습니다."
             : "업무 보드를 열었습니다.";
     }
 
-    private static void BringDailyBoardToFront(Window window)
+    private static void BringWindowToFront(Window window)
     {
         if (window.WindowState == WindowState.Minimized)
         {
@@ -1121,6 +1227,186 @@ public partial class MainWindow : Window
         return Task.CompletedTask;
     }
 
+    private async Task OpenReviewCandidatesWindowAsync()
+    {
+        var candidates = await RefreshReviewCandidatesAsync();
+        if (_reviewCandidatesWindow?.IsVisible == true)
+        {
+            _reviewCandidatesWindow.Refresh(candidates);
+            BringWindowToFront(_reviewCandidatesWindow);
+            return;
+        }
+
+        _reviewCandidatesWindow = new ReviewCandidatesWindow(
+            candidates,
+            ApproveReviewCandidateAsync,
+            OpenReviewCandidateMailAsync,
+            SnoozeReviewCandidateAsync,
+            IgnoreReviewCandidateAsync)
+        {
+            Owner = IsVisible ? this : null
+        };
+        _reviewCandidatesWindow.Closed += (_, _) => _reviewCandidatesWindow = null;
+        _reviewCandidatesWindow.Show();
+        BringWindowToFront(_reviewCandidatesWindow);
+        StatusText.Text = candidates.Count == 0
+            ? "표시할 검토 후보가 없습니다."
+            : $"검토 후보 {candidates.Count}개를 열었습니다.";
+    }
+
+    private async Task OpenReviewCandidateMailAsync(ReviewCandidate candidate)
+    {
+        await OpenSourceMailAsync(candidate.SourceId);
+    }
+
+    private async Task OpenSettingsWindowAsync()
+    {
+        if (_settingsWindow?.IsVisible == true)
+        {
+            BringWindowToFront(_settingsWindow);
+            return;
+        }
+
+        var window = new SettingsWindow(_settings, StartupToggle.IsChecked == true)
+        {
+            Owner = IsVisible ? this : null
+        };
+        _settingsWindow = window;
+        window.Closed += (_, _) => _settingsWindow = null;
+        var accepted = window.ShowDialog() == true;
+        if (!accepted || window.UpdatedSettings is null)
+        {
+            return;
+        }
+
+        _settings = window.UpdatedSettings;
+        WindowsRuntimeSettingsStore.Save(_settings);
+        SetStartupRegistration(window.StartupEnabled);
+        StartupToggle.IsChecked = window.StartupEnabled;
+        ApplySettingsToControls(_settings);
+        if (_settings.AutomaticWatcherRequested && _settings.SmokeGatePassed)
+        {
+            StartAutomaticScanTimer();
+        }
+
+        StatusText.Text = "설정을 저장했습니다.";
+    }
+
+    private void OpenDeveloperToolsWindow()
+    {
+        if (_developerToolsWindow?.IsVisible == true)
+        {
+            BringWindowToFront(_developerToolsWindow);
+            return;
+        }
+
+        _developerToolsWindow = new DeveloperToolsWindow(
+            OpenFilterFromDeveloperAsync,
+            ShowDeveloperToastAsync,
+            ResetTodayBoardMarkerAsync,
+            AddSampleTasksAsync,
+            AddSampleReviewCandidateAsync)
+        {
+            Owner = IsVisible ? this : null
+        };
+        _developerToolsWindow.Closed += (_, _) => _developerToolsWindow = null;
+        _developerToolsWindow.Show();
+        BringWindowToFront(_developerToolsWindow);
+    }
+
+    private async Task OpenFilterFromDeveloperAsync(BoardRouteFilter filter)
+    {
+        _mainFilter = filter;
+        await RefreshTasksAsync();
+        ShowShell();
+    }
+
+    private async Task ShowDeveloperToastAsync()
+    {
+        await _notificationSink.ShowAsync(new UserNotification(
+            UserNotificationKind.Reminder,
+            "MailWhere 알림 테스트",
+            "흰색 박스 중심의 간단한 알림으로 표시됩니다.",
+            "developer-toast-test"));
+        StatusText.Text = "알림 테스트를 보냈습니다.";
+    }
+
+    private async Task ResetTodayBoardMarkerAsync()
+    {
+        var store = await GetStoreAsync();
+        await store.SetAppStateAsync(DailyBoardPlanner.LastShownDateKey, string.Empty);
+        StatusText.Text = "오늘 업무 자동 표시 기록을 초기화했습니다.";
+    }
+
+    private async Task AddSampleTasksAsync()
+    {
+        var store = await GetStoreAsync();
+        var now = DateTimeOffset.Now;
+        var samples = new[]
+        {
+            BuildSampleTask("결제 플로우 문구 확인", now.Date.AddHours(15), "Design Partner", now.AddHours(-2)),
+            BuildSampleTask("홈 QA 피드백 정리", now.Date.AddDays(1).AddHours(10), "Product Manager", now.AddHours(-5)),
+            BuildSampleTask("운영 체크리스트 확인", null, "Customer Success", now.AddHours(-1))
+        };
+        foreach (var task in samples)
+        {
+            await store.SaveTaskAsync(task);
+        }
+
+        await RefreshTasksAsync();
+        StatusText.Text = "샘플 업무 3개를 추가했습니다.";
+    }
+
+    private static LocalTaskItem BuildSampleTask(string title, DateTime? dueAt, string sender, DateTimeOffset receivedAt)
+    {
+        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset? due = dueAt is null
+            ? null
+            : new DateTimeOffset(dueAt.Value, TimeZoneInfo.Local.GetUtcOffset(dueAt.Value));
+        return new LocalTaskItem(
+            Guid.NewGuid(),
+            title,
+            due,
+            StableHash.Create($"sample:{title}:{now:O}"),
+            null,
+            0.9,
+            "개발자 도구 샘플 데이터",
+            null,
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now,
+            SourceSenderDisplay: sender,
+            SourceReceivedAt: receivedAt,
+            Kind: FollowUpKind.ActionRequested);
+    }
+
+    private async Task AddSampleReviewCandidateAsync()
+    {
+        var store = await GetStoreAsync();
+        var now = DateTimeOffset.Now;
+        var mail = new EmailSnapshot(
+            $"sample-review-{Guid.NewGuid():N}",
+            now.AddHours(-3),
+            "Finance Team",
+            "비용 정산 안내",
+            "이번 주 비용 정산 범위를 확인해주세요.");
+        var candidate = ReviewCandidate.FromAnalysis(
+            mail,
+            new FollowUpAnalysis(
+                FollowUpKind.ReviewNeeded,
+                AnalysisDisposition.Review,
+                0.52,
+                "비용 정산 범위 확인",
+                "개발자 도구 샘플 데이터",
+                "비용 정산 범위 확인",
+                new DateTimeOffset(now.Date.AddDays(2).AddHours(9), TimeZoneInfo.Local.GetUtcOffset(now.Date.AddDays(2)))),
+            DateTimeOffset.UtcNow);
+        await store.SaveReviewCandidateAsync(candidate);
+        await RefreshReviewCandidatesAsync();
+        StatusText.Text = "샘플 검토 후보 1개를 추가했습니다.";
+    }
+
     private bool MarkSmokeGatePassedAfterManualScan(MailScanSummary summary)
     {
         if (_settings.SmokeGatePassed)
@@ -1192,11 +1478,13 @@ public partial class MainWindow : Window
             ManagedMode: true,
             ExternalLlmEnabled: llmEnabled,
             AutomaticWatcherRequested: AutoWatcherToggle.IsChecked == true,
+            AutomaticScanIntervalMinutes: ParseInt(AutomaticScanIntervalText.Text, defaults.AutomaticScanIntervalMinutes),
             SmokeGatePassed: _settings.SmokeGatePassed,
             RuleOnlyModeAccepted: true,
             LlmProvider: provider,
             LlmEndpoint: LlmEndpointText.Text,
             LlmModel: LlmModelBox.Text,
+            LlmApiKey: _settings.LlmApiKey,
             LlmApiKeyEnvironmentVariable: LlmApiKeyEnvText.Text,
             LlmTimeoutSeconds: ParseInt(LlmTimeoutText.Text, defaults.LlmTimeoutSeconds),
             LlmFallbackPolicy: ParseFallbackPolicy(((ComboBoxItem?)LlmFallbackPolicyBox.SelectedItem)?.Tag?.ToString()),
@@ -1211,6 +1499,7 @@ public partial class MainWindow : Window
     {
         LlmEnabledToggle.IsChecked = settings.ExternalLlmEnabled;
         AutoWatcherToggle.IsChecked = settings.AutomaticWatcherRequested;
+        AutomaticScanIntervalText.Text = settings.AutomaticScanIntervalMinutes.ToString();
         LlmEndpointText.Text = settings.LlmEndpoint;
         ApplyModelList(Array.Empty<string>(), settings.LlmModel);
         LlmApiKeyEnvText.Text = settings.LlmApiKeyEnvironmentVariable ?? string.Empty;
@@ -1438,30 +1727,13 @@ public partial class MainWindow : Window
 
         public static TaskListItem FromTask(LocalTaskItem task, DateTimeOffset now)
         {
-            var sender = string.IsNullOrWhiteSpace(task.SourceSenderDisplay) ? "직접 추가" : CompactLine(task.SourceSenderDisplay, 18);
-            var received = task.SourceReceivedAt ?? task.CreatedAt;
+            var due = FollowUpPresentation.HumanDueText(task.DueAt, now);
+            var sender = FollowUpPresentation.HumanSenderText(task.SourceSenderDisplay);
             return new TaskListItem(
                 task,
                 CompactLine(FollowUpPresentation.ActionTitle(task.Title), 120),
-                task.DueAt is null ? "기한 추가" : FormatDate(task.DueAt.Value, now),
-                $"{sender} · {received:MM/dd HH:mm}");
-        }
-
-        private static string FormatDate(DateTimeOffset value, DateTimeOffset now)
-        {
-            var date = value.LocalDateTime.Date;
-            var today = now.LocalDateTime.Date;
-            if (date == today)
-            {
-                return $"오늘 {value:HH:mm}";
-            }
-
-            if (date == today.AddDays(1))
-            {
-                return $"내일 {value:HH:mm}";
-            }
-
-            return $"{DdayFormatter.Format(value, now)} · {value:MM/dd HH:mm}";
+                due,
+                $"{due} · {sender}");
         }
 
         public override string ToString() => Title;
