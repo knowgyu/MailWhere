@@ -54,16 +54,11 @@ public partial class ToastNotificationWindow : Window
         TitleText.Text = spec.Title;
         MessageText.Text = spec.Message;
         MetaText.Text = spec.MetaText;
-        IconGlyph.Text = spec.IconGlyph;
         PrimaryButton.Content = spec.PrimaryLabel;
         SecondaryButton.Content = spec.SecondaryLabel ?? string.Empty;
         SecondaryButton.Visibility = string.IsNullOrWhiteSpace(spec.SecondaryLabel)
             ? Visibility.Collapsed
             : Visibility.Visible;
-
-        AccentBar.Background = ToBrush(spec.AccentColor);
-        IconGlyph.Foreground = ToBrush(spec.AccentColor);
-        IconBadge.Background = ToBrush(spec.BadgeColor);
     }
 
     private async void ToastCard_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -127,12 +122,6 @@ public partial class ToastNotificationWindow : Window
 
         return false;
     }
-
-    private static System.Windows.Media.Brush ToBrush(string hex)
-    {
-        var brush = (System.Windows.Media.Brush?)new BrushConverter().ConvertFromString(hex);
-        return brush ?? System.Windows.Media.Brushes.SteelBlue;
-    }
 }
 
 internal sealed record ToastNotificationSpec(
@@ -140,9 +129,6 @@ internal sealed record ToastNotificationSpec(
     string Title,
     string Message,
     string MetaText,
-    string IconGlyph,
-    string AccentColor,
-    string BadgeColor,
     string PrimaryLabel,
     string? SecondaryLabel,
     TimeSpan Duration);

@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="MailWhere 알림"
-        Width="392"
+        Width="420"
         SizeToContent="Height"
         Icon="Assets/app-icon.ico"
         Background="Transparent"
@@ -19,110 +19,87 @@
 
     <Grid Margin="10">
         <Border x:Name="ToastCard"
-                CornerRadius="18"
+                CornerRadius="16"
                 Background="#FFFFFF"
                 BorderBrush="#D8E0F0"
                 BorderThickness="1"
                 SnapsToDevicePixels="True"
                 MouseLeftButtonUp="ToastCard_MouseLeftButtonUp">
             <Border.Effect>
-                <DropShadowEffect Color="#0F172A" BlurRadius="28" ShadowDepth="8" Opacity="0.22"/>
+                <DropShadowEffect Color="#0F172A" BlurRadius="18" ShadowDepth="4" Opacity="0.16"/>
             </Border.Effect>
 
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="5"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
+            <Grid Margin="18,16,14,16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-                <Border x:Name="AccentBar" Grid.Column="0" CornerRadius="18,0,0,18" Background="#2458F2"/>
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
 
-                <Grid Grid.Column="1" Margin="15,13,13,13">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="KindText"
+                               Text="MailWhere"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="#475467"
+                               TextTrimming="CharacterEllipsis"/>
 
-                    <Grid Grid.Row="0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="42"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-
-                        <Border x:Name="IconBadge"
-                                Grid.Column="0"
-                                Width="34"
-                                Height="34"
-                                CornerRadius="12"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Top"
-                                Background="#EEF3FF">
-                            <TextBlock x:Name="IconGlyph"
-                                       Text="✓"
-                                       FontSize="18"
-                                       FontWeight="Bold"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       Foreground="#2458F2"/>
-                        </Border>
-
-                        <StackPanel Grid.Column="1" Margin="0,0,8,0">
-                            <TextBlock x:Name="KindText"
-                                       Text="MailWhere"
-                                       FontSize="11"
-                                       FontWeight="Bold"
-                                       Foreground="#2458F2"
-                                       TextTrimming="CharacterEllipsis"/>
-                            <TextBlock x:Name="TitleText"
-                                       Text="알림 제목"
-                                       Margin="0,2,0,0"
-                                       FontSize="15"
-                                       FontWeight="Bold"
-                                       Foreground="#101828"
-                                       TextWrapping="Wrap"
-                                       TextTrimming="CharacterEllipsis"/>
-                        </StackPanel>
-
-                        <Button Grid.Column="2"
-                                x:Name="CloseButton"
-                                Click="CloseButton_Click"
-                                Width="28"
-                                Height="28"
-                                Padding="0"
-                                Background="#F2F4F7"
-                                Foreground="#667085"
-                                BorderThickness="0"
-                                Cursor="Hand"
-                                ToolTip="닫기">×</Button>
-                    </Grid>
-
-                    <StackPanel Grid.Row="1" Margin="42,7,0,0">
-                        <TextBlock x:Name="MessageText"
-                                   Text="알림 내용"
-                                   Foreground="#475467"
-                                   FontSize="13"
-                                   TextWrapping="Wrap"
-                                   MaxHeight="58"/>
-                        <TextBlock x:Name="MetaText"
-                                   Text="클릭해서 확인"
-                                   Margin="0,7,0,0"
-                                   Foreground="#7A8699"
-                                   FontSize="11"/>
-                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0" HorizontalAlignment="Left">
-                            <Button x:Name="PrimaryButton"
-                                    Style="{StaticResource ToastButton}"
-                                    Click="PrimaryButton_Click"
-                                    Background="{StaticResource MwBrush.Primary}"
-                                    Foreground="White">업무 보드</Button>
-                            <Button x:Name="SecondaryButton"
-                                    Style="{StaticResource ToastButton}"
-                                    Click="SecondaryButton_Click"
-                                    Background="{StaticResource MwBrush.PrimarySoft}"
-                                    Foreground="#344054">검토 후보</Button>
-                        </StackPanel>
-                    </StackPanel>
+                    <Button Grid.Column="1"
+                            x:Name="CloseButton"
+                            Click="CloseButton_Click"
+                            Width="26"
+                            Height="26"
+                            Padding="0"
+                            Background="Transparent"
+                            Foreground="#667085"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            ToolTip="닫기">×</Button>
                 </Grid>
+
+                <TextBlock x:Name="TitleText"
+                           Grid.Row="1"
+                           Text="알림 제목"
+                           Margin="0,3,28,0"
+                           FontSize="16"
+                           FontWeight="Bold"
+                           Foreground="#101828"
+                           TextWrapping="Wrap"
+                           MaxHeight="44"/>
+
+                <StackPanel Grid.Row="2" Margin="0,8,0,0">
+                    <TextBlock x:Name="MessageText"
+                               Text="알림 내용"
+                               Foreground="#475467"
+                               FontSize="13"
+                               TextWrapping="Wrap"
+                               MaxHeight="64"/>
+                    <TextBlock x:Name="MetaText"
+                               Text="클릭해서 확인"
+                               Margin="0,7,0,0"
+                               Foreground="#667085"
+                               FontSize="12"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,14,0,0" HorizontalAlignment="Left">
+                    <Button x:Name="PrimaryButton"
+                            Style="{StaticResource ToastButton}"
+                            Click="PrimaryButton_Click"
+                            Background="{StaticResource MwBrush.Primary}"
+                            Foreground="White">업무 보드</Button>
+                    <Button x:Name="SecondaryButton"
+                            Style="{StaticResource ToastButton}"
+                            Click="SecondaryButton_Click"
+                            Background="{StaticResource MwBrush.PrimarySoft}"
+                            Foreground="#344054">검토 후보</Button>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>
