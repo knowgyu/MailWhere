@@ -7,7 +7,7 @@ For the first managed-PC smoke tests, use a portable self-contained zip.
 Why portable is the default:
 
 - It does not require admin install, MSIX sideload enablement, package identity, or a trusted code-signing certificate.
-- It keeps the Phase 0/1 promise simple: unzip, run diagnostics, keep watcher/offline automation disabled until the local smoke gate passes.
+- It keeps the Phase 0/1 promise simple: unzip, run diagnostics, keep 새 메일 자동 확인 disabled until local readiness checks pass.
 - It is easier to replace during rapid home-development iterations because a failed build can be deleted without touching Windows app registration state.
 
 MSIX remains a good later option only after the target Windows PC confirms:
@@ -75,7 +75,7 @@ Optional parameters:
 2. Unzip to a user-owned folder, for example `%USERPROFILE%\Apps\MailWhere`.
 3. Start `MailWhere.exe`.
 4. Run diagnostics first.
-5. Keep watcher/automation disabled until `docs/MANAGED_PC_SMOKE_TEST.md` passes.
+5. Keep 새 메일 자동 확인 disabled until `docs/MANAGED_PC_SMOKE_TEST.md` passes.
 6. Do not enable external LLM providers unless approved policy explicitly allows it.
 
 ## Artifact safety boundaries
@@ -84,7 +84,7 @@ Do not commit or package:
 
 - local SQLite databases;
 - Outlook mailbox exports;
-- runtime smoke-gate approval files from a managed Windows PC;
+- runtime readiness approval files from a managed Windows PC;
 - API keys, endpoint credentials, or prompt logs containing mail bodies.
 
 The portable artifact is allowed to include documentation and sample config only.

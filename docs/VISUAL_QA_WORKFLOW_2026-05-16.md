@@ -14,8 +14,8 @@ MailWhere is now treated as a **tray-first assistant**:
 The visual QA screenshots showed crowded card actions and duplicate Main/DailyBoard behavior. The first-pass fix is:
 
 - Keep user-facing actions simple: **열기**, **나중에**, **수정**, **보관**.
-- Keep `나중에` distinct from `보관`: snoozed tasks hide until their chosen time; archived tasks leave active lists and do not resurface.
-- Replace visible `완료/삭제/숨김` language with `보관` in primary UI. Legacy `Done`/`Dismissed` storage values remain readable for backward compatibility but are not primary actions.
+- Keep `나중에` distinct from `보관`: snoozed tasks are temporarily absent until their chosen time; archived tasks leave active lists and do not resurface.
+- Replace visible close/remove variants with `보관` in primary UI. Legacy `Done`/`Dismissed` storage values remain readable for backward compatibility but are not primary actions.
 - Support a bounded edit dialog for AI-derived tasks: title, simple category (`할 일`, `일정`, `기다리는 중`), and optional due date.
 - Make future-snoozed and archived items absent from active board/list queries; due snoozed items return when their snooze time has passed.
 
@@ -25,7 +25,7 @@ At the configured daily board time, MailWhere now opens or updates the board win
 
 ## Copy polish
 
-Primary UI copy avoids developer-facing terms such as `watcher`, `smoke gate`, and `최근 1개월 스캔`. User-facing wording now favors:
+Primary UI copy avoids developer-facing implementation/gate terms. User-facing wording now favors:
 
 - `지금 메일 확인`
 - `새 메일 자동 확인`

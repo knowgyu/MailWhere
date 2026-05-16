@@ -29,7 +29,7 @@ MailWhere는 이미 PoC치고는 좋은 방향으로 나뉘어 있다. `MailWher
 ### 2.2 확장 리스크
 
 - **`MainWindow.xaml.cs`가 composition root + controller + view state + scheduler + settings + scan orchestration을 동시에 맡는다.** 예: `ScanRecentMailAsync` 안에서 settings 저장, store 생성, analyzer 구성, pipeline/scanner 생성, progress/update/notification까지 처리한다.
-- **Timer 기반 background work가 UI object에 묶여 있다.** `_reminderTimer`, `_dailyBoardTimer`, `_automaticScanTimer`가 모두 `DispatcherTimer`라 always-on behavior가 커질수록 테스트/재시작/중복 실행 제어가 어려워진다.
+- **Timer 기반 background work가 UI object에 묶여 있다.** `_reminderTimer`, `_dailyBoardTimer`, `_automaticScanTimer`가 모두 `DispatcherTimer`라 always-on automatic-check behavior가 커질수록 테스트/재시작/중복 실행 제어가 어려워진다.
 - **LLM/provider strategy가 코드 분기 중심이다.** `BuildAnalyzer`/settings mapping은 잘 시작했지만 provider가 늘면 `MainWindow`와 `RuntimeSettings` 변경 폭이 커진다.
 - **SQLite migration은 단순 add-column 방식이라 product schema/version story가 더 필요하다.** 현재는 좋지만 future tables(calendar shadow, audit, provider profile, feedback decisions)가 생기면 versioned migrations와 compatibility tests가 중요해진다.
 - **Agent CLI integration artifact는 아직 연구/문서 수준이다.** imported report(`docs/history/parent-omx-import/specs/autoresearch-codex-where-integration/report.md`)는 방향을 제시하지만 repo-native scripts/MCP/skill은 아직 없다.
@@ -163,7 +163,7 @@ idle -> preparing -> reading_outlook -> analyzing_batch -> persisting -> summari
                     read_warning      llm_retryable   partial_success
 ```
 
-이 state machine을 문서화하고 tests에 고정하면 false-positive control, feedback loop, always-on watcher가 쉬워진다.
+이 state machine을 문서화하고 tests에 고정하면 false-positive control, feedback loop, always-on automatic mail check가 쉬워진다.
 
 ### 3.6 Outlook identity: EntryID/StoreID는 안정 ID가 아니라 reference hint
 
@@ -180,14 +180,16 @@ Microsoft Outlook docs explain that `EntryID` is assigned by the MAPI store and 
 
 ### 4.0 현재 제품 범위 결정(2026-05-16)
 
-이번 구현 범위는 “메일을 대신 처리하는 agent”가 아니라 **놓치면 곤란한 후속조치를 적은 클릭으로 관리하는 foreground assistant**로 고정한다.
+이번 구현 범위는 “메일을 대신 처리하는 agent”가 아니라 **tray에 상주하다가 필요한 때 업무 보드를 열어주는 read-only assistant**로 고정한다.
 
-- **Daily Brief**: 앱/Windows 시작 후 바로 띄우지 않고 기본 10분 지연 뒤 foreground로 올린다. 내용은 오늘 신경 쓸 `내가 할 일`과 `기다리는 중`만 압축한다.
-- **업무 보드**: Daily Brief와 달리 활성 항목 전체 원장이다. 전체/오늘/7일/30일/기한 미정 필터와 `내가 할 일`/`기다리는 중` 2열을 유지한다.
+- **Tray-first**: 앱 시작 시 메인 창을 자동으로 띄우지 않는다. 메인 창은 설정/검토 후보/진단/수동 확인용 보조 shell이다.
+- **오늘 업무 보드**: 지정 시간에는 알림보다 보드 창을 먼저 열거나 갱신한다. 보드 열기에 실패한 경우에만 notification fallback을 쓴다.
+- **업무 보드**: 활성 항목 전체 원장이다. 전체/오늘/7일/30일/기한 미정 필터와 `내가 할 일`/`기다리는 중` 2열을 유지한다.
 - **메일 소스**: `기다리는 중`을 실제로 만들 수 있도록 Outlook COM은 read-only로 Inbox와 Sent Items를 함께 읽는다.
 - **알림**: due-day/overdue/snooze-due 같은 interrupt-worthy 항목만 toast로 올리고, 일반 waiting 상태는 보드/brief에서 확인한다.
 - **검토 후보**: 낮은 확신 후보는 기본 화면에 섞지 않는다. 사용자가 `검토 후보 보기`나 검토 후보을 열 때만 처리한다.
-- **액션**: `열기`, `기한`, `나중에 보기`, `완료`, `숨김`만 1차 제품 액션으로 둔다. 답장 초안, 자동 발송/삭제/이동/회신은 범위 밖이다.
+- **액션**: `열기`, `나중에`, `수정`, `보관`을 1차 제품 액션으로 둔다. 기한은 카드의 기한 버튼에서 바꾼다. 답장 초안, 자동 발송/삭제/이동/회신은 범위 밖이다.
+- **상태 모델**: `나중에`는 다시 표시되는 snooze이고, `보관`은 active 목록에서 제외되어 자동 재표시되지 않는 archive다. Legacy `done`/`dismissed`는 호환용 non-active 상태로만 남긴다.
 - **테스트 ergonomics**: fallback/rule scan 결과를 AppData에서 직접 지우지 않도록 앱의 문제 해결 버튼과 `scripts/reset-local-data.ps1`을 제공한다. 기본 reset은 settings를 유지하고 local task/review/processed-source DB만 삭제한다.
 - **Agent CLI/skill/hook**: 지금은 설계 경계만 남긴다. 구현은 sanitized export/read-only skill부터 시작하고 MCP/full work-agent는 future work다.
 
@@ -210,6 +212,7 @@ Tasks:
    - `ScanMailUseCase`
    - `ReviewCandidateUseCase`
    - `DailyBoardUseCase`
+   - `TaskActionUseCase` for snooze/edit/archive state transitions
    - `SettingsUseCase` or settings service in Windows layer
 2. Add `MailWhere.Windows/Composition` with service registration.
 3. Introduce Generic Host in `App.xaml.cs`.
@@ -242,7 +245,7 @@ Goal: app can run all day without surprise.
 Tasks:
 
 - Move automatic scan/reminder/day board scheduling to hosted/application services.
-- Add “scan lease” to prevent overlapping scans across timer/manual triggers.
+- Add “mail-check lease” to prevent overlapping checks across timer/manual triggers.
 - Add local notification history/quiet hours table.
 - Add failure counters/circuit breaker for Outlook COM and LLM endpoint.
 
@@ -442,7 +445,7 @@ This allows one install/update path for skills, agents, hooks, and MCP config.
 1. `scripts/export-mailwhere-context.py` read-only SQLite export.
 2. `scripts/where-brief.py` builds markdown briefing from exported context and optional OfficeWhere results.
 3. `.codex/skills/where-desk/SKILL.md` references those scripts.
-4. Fixture tests ensure no raw body/address/attachment fields leak.
+4. Synthetic safety tests ensure no raw body/address/attachment fields leak.
 5. Document usage in README.
 
 ### Backlog D — Agent CLI phase 2

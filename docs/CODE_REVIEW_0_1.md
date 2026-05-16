@@ -30,7 +30,7 @@ Reviewed the sanitized 0.1.0 release candidate after the tray-first MailWhere im
    - This improves local LLM quality and made payload tests meaningful.
 3. `src/MailWhere.Windows/MainWindow.xaml` and `.xaml.cs`
    - Review candidates are now visible in the 검토 후보 tab instead of being only stored in SQLite.
-   - Manual successful scans can record the smoke gate, but only when at least one mail is read and no blocked warning exists.
+   - Manual successful mail checks can record readiness, but only when at least one mail is read and no blocked warning exists.
 4. `src/MailWhere.Storage/SqliteFollowUpStore.cs`
    - Added a read path for unsuppressed review candidates so non-developers do not need to open the database.
 5. `tests/MailWhere.Tests/Program.cs`
@@ -98,7 +98,7 @@ Watchlist, not release blockers:
 2. Run `MailWhere.exe`.
 3. Run diagnostics.
 4. Optionally configure local LLM endpoint.
-5. Click “최근 1개월 스캔”.
+5. Click “지금 메일 확인”.
 6. Keep the app in tray for D-day reminders.
 
 The largest non-developer gap is not extraction but **review control**: users can see low-confidence candidates now, but they cannot approve/dismiss/edit them in the UI yet. That should be 0.2 priority one.
