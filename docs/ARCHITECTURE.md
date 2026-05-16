@@ -16,7 +16,7 @@ Current product surface:
 
 - `App` starts in tray-first mode and keeps shutdown explicit so closing the shell does not kill the assistant accidentally.
 - `MainWindow` is a supplemental shell for settings, diagnostics, review candidates, and manual mail checks.
-- `DailyBoardWindow` is the primary glance surface for active tasks. It supports `열기`, `나중에`, `수정`, `보관`, and due-date changes.
+- `DailyBoardWindow` is the primary glance surface for active tasks. It renders one unified task list and exposes only `열기`, `나중에`, `보관` plus clickable due-date changes; double-click opens the bounded edit dialog.
 - Scheduled daily-board time opens or updates the board first. Notification is a fallback only when the board cannot be surfaced.
 - `LocalTaskStatus.Archived` is the active-list exit state for the user-facing `보관` action. Legacy `Done`/`Dismissed` values remain readable but are not primary UI actions.
 - Future-snoozed tasks and archived tasks are excluded from primary active lists by `FollowUpPresentation.IsVisibleInPrimary`.

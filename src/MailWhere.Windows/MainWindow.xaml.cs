@@ -213,21 +213,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void EditTaskButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (GetTaskListItem(sender) is { Task: { } task })
-            {
-                await EditTaskAsync(task);
-            }
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"업무를 수정하지 못했습니다: {ex.GetType().Name}";
-        }
-    }
-
     private async void TaskList_DoubleClick(object sender, MouseButtonEventArgs e)
     {
         try
@@ -1435,27 +1420,48 @@ public partial class MainWindow : Window
 
     private sealed class TaskListItem
     {
-        private TaskListItem(LocalTaskItem? task, string title, string meta)
+        private TaskListItem(LocalTaskItem? task, string title, string dueText, string meta)
         {
             Task = task;
             Title = title;
+            DueText = dueText;
             Meta = meta;
         }
 
         public LocalTaskItem? Task { get; }
         public string Title { get; }
+        public string DueText { get; }
         public string Meta { get; }
         public bool HasTask => Task is not null;
         public bool CanOpen => !string.IsNullOrWhiteSpace(Task?.SourceId);
-        public string DueButtonText => Task?.DueAt is null ? "기한 설정" : "기한 변경";
         public Visibility DueButtonVisibility => Task is null ? Visibility.Collapsed : Visibility.Visible;
 
         public static TaskListItem FromTask(LocalTaskItem task, DateTimeOffset now)
         {
-            var due = task.DueAt is null ? "기한 미정" : DdayFormatter.Format(task.DueAt.Value, now);
             var sender = string.IsNullOrWhiteSpace(task.SourceSenderDisplay) ? "직접 추가" : CompactLine(task.SourceSenderDisplay, 18);
             var received = task.SourceReceivedAt ?? task.CreatedAt;
-            return new TaskListItem(task, CompactLine(task.Title, 120), $"{due} · {sender} · {received:MM/dd HH:mm}");
+            return new TaskListItem(
+                task,
+                CompactLine(FollowUpPresentation.ActionTitle(task.Title), 120),
+                task.DueAt is null ? "기한 추가" : FormatDate(task.DueAt.Value, now),
+                $"{sender} · {received:MM/dd HH:mm}");
+        }
+
+        private static string FormatDate(DateTimeOffset value, DateTimeOffset now)
+        {
+            var date = value.LocalDateTime.Date;
+            var today = now.LocalDateTime.Date;
+            if (date == today)
+            {
+                return $"오늘 {value:HH:mm}";
+            }
+
+            if (date == today.AddDays(1))
+            {
+                return $"내일 {value:HH:mm}";
+            }
+
+            return $"{DdayFormatter.Format(value, now)} · {value:MM/dd HH:mm}";
         }
 
         public override string ToString() => Title;

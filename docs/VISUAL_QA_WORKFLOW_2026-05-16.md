@@ -13,10 +13,10 @@ MailWhere is now treated as a **tray-first assistant**:
 
 The visual QA screenshots showed crowded card actions and duplicate Main/DailyBoard behavior. The first-pass fix is:
 
-- Keep user-facing actions simple: **열기**, **나중에**, **수정**, **보관**.
+- Keep user-facing card actions simple: **열기**, **나중에**, **보관**. Editing is a double-click flow, not another card button.
 - Keep `나중에` distinct from `보관`: snoozed tasks are temporarily absent until their chosen time; archived tasks leave active lists and do not resurface.
 - Replace visible close/remove variants with `보관` in primary UI. Legacy `Done`/`Dismissed` storage values remain readable for backward compatibility but are not primary actions.
-- Support a bounded edit dialog for AI-derived tasks: title, simple category (`할 일`, `일정`, `기다리는 중`), and optional due date.
+- Support a bounded edit dialog for AI-derived tasks: title and optional due date only. Task kind remains internal.
 - Make future-snoozed and archived items absent from active board/list queries; due snoozed items return when their snooze time has passed.
 
 ## Scheduled board behavior
@@ -51,3 +51,11 @@ Small polish fixes from the pass:
 
 - Replaced remaining primary-surface "hidden" wording with neutral "not shown again / temporarily not visible" wording.
 - Kept the edit dialog error copy Korean-first instead of surfacing a domain exception message.
+
+## 2026-05-16 follow-up polish
+
+- DailyBoard now uses one unified 업무 list instead of separate `내가 할 일` / `기다리는 중` columns.
+- Cards no longer show kind/status badges such as `할 일` or `대기`; the title must carry the real action.
+- Same-day due text uses `오늘 HH:mm` instead of repeating `D-day`, and generic prefixes like `메일 확인:` / `오늘 회신` are stripped from presentation.
+- MainWindow keeps the manual mail-check/settings shell lightweight; the scheduled/tray board remains the primary glance surface.
+- Task editing no longer asks users to choose a type. Double-click edits title/deadline while preserving internal kind.

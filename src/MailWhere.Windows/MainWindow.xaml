@@ -70,7 +70,6 @@
                     <TextBlock Text="트레이에서 조용히 지켜보고, 필요한 순간 업무 보드와 오늘 브리핑으로 이어집니다." Margin="0,5,0,0" Foreground="{StaticResource MwBrush.TextMuted}"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Click="OpenDailyBoard_Click" Style="{StaticResource MwButton.Secondary}">업무 보드</Button>
                     <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Style="{StaticResource MwButton.Primary}">지금 메일 확인</Button>
                     <Button x:Name="StopScanButton" Click="StopScan_Click" Visibility="Collapsed" Style="{StaticResource MwButton.Danger}">확인 중지</Button>
                 </StackPanel>
@@ -80,23 +79,16 @@
         <Border Grid.Row="1" CornerRadius="20" Background="{StaticResource MwBrush.Surface}" Padding="16" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
             <DockPanel>
                 <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
+                    <StackPanel>
                         <TextBlock Text="오늘 업무" FontSize="18" FontWeight="Bold"/>
-                        <TextBlock x:Name="StatusText" Text="트레이에서 대기 중입니다. 필요할 때 메일을 확인하고 업무 보드에서 다시 봅니다." Foreground="{StaticResource MwBrush.TextMuted}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="StatusText" Text="트레이에서 대기 중입니다." Foreground="{StaticResource MwBrush.TextMuted}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         <ProgressBar x:Name="ScanProgressBar" Height="4" IsIndeterminate="True" Visibility="Collapsed" Margin="0,10,0,4"/>
                         <TextBlock x:Name="ScanProgressText" Text="대기 중입니다." Visibility="Collapsed" Foreground="{StaticResource MwBrush.Primary}" FontWeight="SemiBold" FontSize="12"/>
                     </StackPanel>
-                    <Border Grid.Column="1" CornerRadius="14" Background="{StaticResource MwBrush.PrimarySoft}" Padding="12,8" VerticalAlignment="Top" Margin="16,0,0,0">
-                        <TextBlock Text="설정은 탭 안에 정리했습니다" Foreground="{StaticResource MwBrush.Primary}" FontWeight="SemiBold"/>
-                    </Border>
                 </Grid>
 
                 <TabControl x:Name="MainTabs">
-                    <TabItem x:Name="TasksTab" Header="업무 보드">
+                    <TabItem x:Name="TasksTab" Header="업무">
                         <DockPanel Margin="8">
                             <Border DockPanel.Dock="Top" Style="{StaticResource SectionCard}">
                                 <StackPanel>
@@ -111,7 +103,7 @@
                                         <TextBox x:Name="ManualDueText" Grid.Column="1" ToolTip="예: 내일, 금요일, 2026-05-20" />
                                         <Button Grid.Column="2" Click="AddManualTask_Click" Style="{StaticResource MwButton.Primary}">추가</Button>
                                     </Grid>
-                                    <TextBlock Text="마감은 비워둘 수 있습니다. '내일', '금요일', '2026-05-20'을 우선 지원합니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap"/>
+                                    <TextBlock Text="마감은 비워도 됩니다. 예: 내일, 금요일, 2026-05-20" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
                             <Grid MinHeight="220">
@@ -125,14 +117,15 @@
                                                 </Grid.RowDefinitions>
                                                 <DockPanel Grid.Row="0" LastChildFill="True">
                                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
-                                                        <Button Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="SetTaskDueButton_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,6,0"/>
                                                         <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTaskButton_Click" Style="{StaticResource MwButton.Base}" Margin="0,0,6,0"/>
-                                                        <Button Content="수정" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="EditTaskButton_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,6,0"/>
                                                         <Button Content="보관" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="ArchiveTaskButton_Click" Style="{StaticResource MwButton.Danger}"/>
                                                     </StackPanel>
                                                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" MaxHeight="42"/>
                                                 </DockPanel>
-                                                <TextBlock Grid.Row="1" Text="{Binding Meta}" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+                                                <WrapPanel Grid.Row="1" Margin="0,6,0,0">
+                                                    <Button Content="{Binding DueText}" Visibility="{Binding DueButtonVisibility}" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="SetTaskDueButton_Click" Style="{StaticResource MwButton.Ghost}" Margin="0,0,8,4" Padding="8,4"/>
+                                                    <TextBlock Text="{Binding Meta}" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+                                                </WrapPanel>
                                             </Grid>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>

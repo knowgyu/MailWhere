@@ -1,26 +1,17 @@
 using System.Windows;
-using System.Linq;
 using MailWhere.Core.Domain;
 
 namespace MailWhere.Windows;
 
 public partial class TaskEditDialog : Window
 {
-    private sealed record KindChoice(string Label, FollowUpKind Kind);
+    private readonly FollowUpKind _kind;
 
     public TaskEditDialog(LocalTaskItem task)
     {
         InitializeComponent();
-        TitleText.Text = task.Title;
-        KindBox.ItemsSource = new[]
-        {
-            new KindChoice("할 일", FollowUpKind.ActionRequested),
-            new KindChoice("일정", FollowUpKind.Meeting),
-            new KindChoice("기다리는 중", FollowUpKind.WaitingForReply)
-        };
-        var normalizedKind = TaskEditRequest.NormalizeKind(task.Kind);
-        KindBox.SelectedItem = KindBox.Items.Cast<KindChoice>().FirstOrDefault(choice => choice.Kind == normalizedKind)
-                               ?? KindBox.Items[0];
+        _kind = TaskEditRequest.NormalizeKind(task.Kind);
+        TitleText.Text = FollowUpPresentation.ActionTitle(task.Title);
         DueDatePicker.DisplayDate = DateTime.Today;
         DueDatePicker.SelectedDate = task.DueAt?.DateTime.Date ?? DateTime.Today;
         NoDueCheck.IsChecked = task.DueAt is null;
@@ -35,13 +26,10 @@ public partial class TaskEditDialog : Window
     {
         try
         {
-            var kind = KindBox.SelectedItem is KindChoice choice
-                ? choice.Kind
-                : FollowUpKind.ActionRequested;
             DateTimeOffset? dueAt = NoDueCheck.IsChecked == true
                 ? null
                 : BuildDueDate(DueDatePicker.SelectedDate ?? DateTime.Today);
-            EditRequest = TaskEditRequest.Create(TitleText.Text, kind, dueAt);
+            EditRequest = TaskEditRequest.Create(TitleText.Text, _kind, dueAt);
             DialogResult = true;
         }
         catch (ArgumentException)
