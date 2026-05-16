@@ -1,4 +1,5 @@
 using System.Windows;
+using MailWhere.Core.Capabilities;
 
 namespace MailWhere.Windows;
 
@@ -14,6 +15,13 @@ public partial class App : System.Windows.Application
         MainWindow = mainWindow;
         _trayHost = new TrayHost(mainWindow);
         mainWindow.SetNotificationSink(_trayHost);
+        mainWindow.SyncStartupRegistration();
+        var launchMode = StartupLaunchModeResolver.FromArgs(e.Args);
+        if (launchMode == StartupLaunchMode.ShowMainWindow)
+        {
+            mainWindow.ShowShell(refresh: false);
+        }
+
         _ = StartBackgroundSafelyAsync(mainWindow);
     }
 
@@ -26,7 +34,7 @@ public partial class App : System.Windows.Application
         catch (Exception ex)
         {
             mainWindow.ReportStatus($"트레이 초기화 중 문제가 발생했습니다: {ex.GetType().Name}");
-            mainWindow.ShowShell();
+            mainWindow.ShowShell(refresh: false);
         }
     }
 

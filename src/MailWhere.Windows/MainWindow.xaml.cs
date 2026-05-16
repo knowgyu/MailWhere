@@ -1,12 +1,10 @@
 using System.ComponentModel;
 using System.IO;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
-using Microsoft.Win32;
 using MailWhere.Core.Analysis;
 using MailWhere.Core.Capabilities;
 using MailWhere.Core.Domain;
@@ -38,10 +36,8 @@ public partial class MainWindow : Window
     private bool _fallbackPromptShownThisSession;
     private bool _backgroundStarted;
     private bool _allowExit;
-    private DailyBoardWindow? _dailyBoardWindow;
     private ReviewCandidatesWindow? _reviewCandidatesWindow;
     private SettingsWindow? _settingsWindow;
-    private DeveloperToolsWindow? _developerToolsWindow;
     private BoardRouteFilter _mainFilter = BoardRouteFilter.Today;
     private AnalysisTelemetry _lastAnalysisTelemetry = AnalysisTelemetry.Empty;
 
@@ -49,9 +45,6 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _settings = UpgradeRuntimeSettings(WindowsRuntimeSettingsStore.Load());
-        StartupToggle.IsChecked = IsStartupRegistered();
-        ApplySettingsToControls(_settings);
-        Loaded += async (_, _) => await StartBackgroundAsync();
         Closing += MainWindow_Closing;
     }
 
@@ -76,12 +69,28 @@ public partial class MainWindow : Window
         await OnLoadedAsync();
     }
 
-    public void ShowShell()
+    public void ShowShell(bool refresh = true)
     {
-        _ = RefreshTasksAsync();
+        if (refresh)
+        {
+            _ = RefreshTasksSafelyAsync();
+        }
+
         Show();
         WindowState = WindowState.Normal;
         Activate();
+    }
+
+    private async Task RefreshTasksSafelyAsync()
+    {
+        try
+        {
+            await RefreshTasksAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"업무 목록 새로고침 실패: {ex.GetType().Name}";
+        }
     }
 
     public void ReportStatus(string message) => StatusText.Text = message;
@@ -98,34 +107,6 @@ public partial class MainWindow : Window
         e.Cancel = true;
         Hide();
         StatusText.Text = "창을 닫아도 트레이에서 계속 실행됩니다.";
-    }
-
-    private async void RunDiagnostics_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var settings = ReadSettingsFromControls();
-            var probe = new OutlookComCapabilityProbe();
-            var outlookReport = probe.Run(includeBodyProbe: false);
-            var results = outlookReport.Results
-                .Concat(new[]
-                {
-                    WindowsRuntimeDiagnostics.ProbeStorageWritable(),
-                    WindowsRuntimeDiagnostics.ProbeStartupToggleWritable(),
-                    WindowsRuntimeDiagnostics.ProbeRuntimeSettings(settings),
-                    ProbeLlmSettings(settings)
-                })
-                .ToArray();
-            var report = new CapabilityReport(DateTimeOffset.UtcNow, results);
-            var snapshot = RuntimeGateComposer.Compose(settings, report);
-            DiagnosticsText.Text = SanitizedDiagnosticsExporter.Export(snapshot);
-            StatusText.Text = "진단이 완료되었습니다. 설정의 문제 해결 영역에서 결과를 확인할 수 있습니다.";
-            await _notificationSink.ShowAsync(new UserNotification(UserNotificationKind.Diagnostics, "MailWhere 진단 완료", "설정의 문제 해결 영역에서 결과를 확인하세요."));
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync("진단 실패", ex);
-        }
     }
 
     private async void ScanRecentMonth_Click(object sender, RoutedEventArgs e)
@@ -150,18 +131,6 @@ public partial class MainWindow : Window
         _scanCancellationSource.Cancel();
         StatusText.Text = "메일 확인 중지를 요청했습니다. 현재 LLM 요청이 정리되면 멈춥니다.";
         ScanProgressText.Text = "중지 요청됨…";
-    }
-
-    private async void OpenDailyBoard_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            await OpenDailyBoardAsync();
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"업무보드를 열지 못했습니다: {ex.GetType().Name}";
-        }
     }
 
     public async Task OpenDailyBoardAsync()
@@ -352,139 +321,6 @@ public partial class MainWindow : Window
         await OpenSettingsWindowAsync();
     }
 
-    private void OpenDeveloperTools_Click(object sender, RoutedEventArgs e)
-    {
-        OpenDeveloperToolsWindow();
-    }
-
-    private async void TestLlmEndpoint_Click(object sender, RoutedEventArgs e)
-    {
-        if (_scanInProgress)
-        {
-            return;
-        }
-
-        try
-        {
-            var settings = ReadSettingsFromControls();
-            _settings = settings;
-            WindowsRuntimeSettingsStore.Save(settings);
-            LlmStatusText.Text = "LLM endpoint 연결을 테스트하는 중입니다…";
-            TestLlmEndpointButton.IsEnabled = false;
-            LoadLlmModelsButton.IsEnabled = false;
-            ScanRecentMonthButton.IsEnabled = false;
-            await Dispatcher.Yield(DispatcherPriority.Background);
-
-            var result = await LlmEndpointProbe.ProbeAsync(settings.ToLlmEndpointSettings());
-            LlmStatusText.Text = result.ToKoreanStatus();
-            DiagnosticsText.Text = JsonSerializer.Serialize(new
-            {
-                llmProbe = new
-                {
-                    success = result.Success,
-                    code = result.Code,
-                    provider = result.Provider,
-                    model = result.Model,
-                    durationMs = Math.Round(result.Duration.TotalMilliseconds)
-                }
-            }, new JsonSerializerOptions { WriteIndented = true });
-            StatusText.Text = result.Success
-                ? "LLM 연결 테스트가 성공했습니다."
-                : "LLM 연결 테스트가 실패했습니다. endpoint/model/provider를 확인하세요.";
-            if (!result.Success && !string.Equals(result.Code, "not-configured", StringComparison.OrdinalIgnoreCase))
-            {
-                OfferRuleFallbackAfterLlmFailure();
-            }
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync("LLM 연결 테스트 실패", ex);
-        }
-        finally
-        {
-            if (!_scanInProgress)
-            {
-                TestLlmEndpointButton.IsEnabled = true;
-                LoadLlmModelsButton.IsEnabled = true;
-                ScanRecentMonthButton.IsEnabled = true;
-                UpdateLlmControlAvailability();
-            }
-        }
-    }
-
-    private async void LoadLlmModels_Click(object sender, RoutedEventArgs e)
-    {
-        if (_scanInProgress)
-        {
-            return;
-        }
-
-        try
-        {
-            var settings = ReadSettingsFromControls();
-            if (settings.LlmProvider == LlmProviderKind.Disabled || string.IsNullOrWhiteSpace(settings.LlmEndpoint))
-            {
-                StatusText.Text = "Provider와 endpoint를 먼저 입력하세요.";
-                return;
-            }
-
-            LlmStatusText.Text = "모델 목록을 불러오는 중입니다…";
-            LoadLlmModelsButton.IsEnabled = false;
-            TestLlmEndpointButton.IsEnabled = false;
-            await Dispatcher.Yield(DispatcherPriority.Background);
-
-            var catalogSettings = settings.ToLlmEndpointSettings() with
-            {
-                Enabled = true,
-                Model = string.IsNullOrWhiteSpace(settings.LlmModel) ? "catalog" : settings.LlmModel
-            };
-            var models = await LlmModelCatalog.FetchAsync(catalogSettings);
-            ApplyModelList(models, settings.LlmModel);
-            LlmStatusText.Text = models.Count == 0
-                ? "모델 목록이 비어 있습니다. 모델명을 직접 입력하세요."
-                : $"모델 {models.Count}개를 불러왔습니다.";
-            StatusText.Text = models.Count == 0
-                ? "모델을 직접 입력한 뒤 연결 테스트를 실행하세요."
-                : "모델을 선택한 뒤 연결 테스트를 실행하세요.";
-        }
-        catch (Exception ex)
-        {
-            LlmStatusText.Text = $"모델 목록 불러오기 실패 · {ex.GetType().Name}";
-            DiagnosticsText.Text = $"모델 목록 불러오기 실패\n{ex.GetType().Name}: {ex.Message}";
-        }
-        finally
-        {
-            if (!_scanInProgress)
-            {
-                LoadLlmModelsButton.IsEnabled = true;
-                TestLlmEndpointButton.IsEnabled = true;
-                UpdateLlmControlAvailability();
-            }
-        }
-    }
-
-    private async void AddManualTask_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var store = await GetStoreAsync();
-            var service = new ManualTaskService(store);
-            var title = string.IsNullOrWhiteSpace(ManualTaskText.Text)
-                ? $"수동 할 일 {DateTimeOffset.Now:MM/dd HH:mm}"
-                : ManualTaskText.Text.Trim();
-            var dueAt = ParseManualDueAt(ManualDueText.Text);
-            await service.CreateAsync(title, dueAt);
-            ManualTaskText.Clear();
-            ManualDueText.Clear();
-            await RefreshTasksAsync();
-            StatusText.Text = "수동 할 일을 추가했습니다.";
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync("수동 할 일 추가 실패", ex);
-        }
-    }
-
     private async Task OnLoadedAsync()
     {
         await RefreshTasksAsync();
@@ -494,7 +330,7 @@ public partial class MainWindow : Window
 
         if (_settings.AutomaticWatcherRequested && _settings.SmokeGatePassed)
         {
-            await ScanRecentMailAsync(showSummaryNotification: false, refreshSettingsFromControls: false);
+            await ScanRecentMailAsync(showSummaryNotification: false);
             StartAutomaticScanTimer();
         }
 
@@ -502,7 +338,7 @@ public partial class MainWindow : Window
         await MaybeShowDailyBoardAsync();
     }
 
-    private async Task<MailScanSummary> ScanRecentMailAsync(bool showSummaryNotification, bool refreshSettingsFromControls = true)
+    private async Task<MailScanSummary> ScanRecentMailAsync(bool showSummaryNotification)
     {
         if (_scanInProgress)
         {
@@ -516,12 +352,6 @@ public partial class MainWindow : Window
         SetScanBusy(true, "메일 확인 준비 중입니다…");
         try
         {
-            if (refreshSettingsFromControls)
-            {
-                _settings = ReadSettingsFromControls();
-                WindowsRuntimeSettingsStore.Save(_settings);
-            }
-
             StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일을 읽고 업무 후보를 분석하는 중입니다…";
             await Dispatcher.Yield(DispatcherPriority.Background);
 
@@ -562,7 +392,6 @@ public partial class MainWindow : Window
             var newReviewCandidateCount = reviewCandidates.Count(candidate => !beforeCandidateIds.Contains(candidate.Id));
 
             var llmSummary = _lastAnalysisTelemetry.ToKoreanSummary();
-            LlmStatusText.Text = llmSummary;
             StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 새 검토 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {llmSummary}"
                 + (smokeGateRecorded ? " · 자동 확인 준비 완료" : string.Empty);
             if (showSummaryNotification)
@@ -666,7 +495,7 @@ public partial class MainWindow : Window
 
             try
             {
-                await ScanRecentMailAsync(showSummaryNotification: false, refreshSettingsFromControls: false);
+                await ScanRecentMailAsync(showSummaryNotification: false);
             }
             catch (Exception ex)
             {
@@ -674,154 +503,6 @@ public partial class MainWindow : Window
             }
         };
         _automaticScanTimer.Start();
-    }
-
-    private async void TestNotification_Click(object sender, RoutedEventArgs e)
-    {
-        await _notificationSink.ShowAsync(new UserNotification(
-            UserNotificationKind.Reminder,
-            "내일 마감 · 비용 자료 회신",
-            "09:00까지 검토 후 회신이 필요합니다. 토스트 버튼으로 업무 보드를 바로 열 수 있습니다.",
-            "notification-test"));
-    }
-
-    private async void ResetLocalData_Click(object sender, RoutedEventArgs e)
-    {
-        if (_scanInProgress)
-        {
-            StatusText.Text = "메일 확인 중에는 업무 데이터를 초기화할 수 없습니다. 확인을 중지하거나 끝난 뒤 다시 시도하세요.";
-            return;
-        }
-
-        var result = System.Windows.MessageBox.Show(
-            this,
-	            "저장된 할 일, 검토 후보, 메일 확인 중복 기록을 지웁니다.\n설정과 Windows 시작 등록은 유지합니다.",
-            "MailWhere 업무 데이터 초기화",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
-        if (result != MessageBoxResult.Yes)
-        {
-            return;
-        }
-
-        try
-        {
-            _dailyBoardWindow?.Close();
-            _dailyBoardWindow = null;
-            _store = null;
-            var deleted = WindowsRuntimeDiagnostics.DeleteFollowUpDatabaseFiles();
-            await RefreshTasksAsync();
-            await RefreshReviewCandidatesAsync();
-            StatusText.Text = "업무 데이터를 초기화했습니다. 다음 메일 확인은 새 데이터베이스에서 시작합니다.";
-            DiagnosticsText.Text = JsonSerializer.Serialize(new
-            {
-                localDataReset = new
-                {
-                    deletedFiles = deleted,
-                    directory = WindowsRuntimeDiagnostics.GetAppDataDirectory(),
-                    preserved = new[] { "runtime settings", "Windows startup registration" }
-                }
-            }, new JsonSerializerOptions { WriteIndented = true });
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync("업무 데이터 초기화 실패", ex);
-        }
-    }
-
-    private void SaveSettings_Click(object sender, RoutedEventArgs e)
-    {
-        _settings = ReadSettingsFromControls();
-        WindowsRuntimeSettingsStore.Save(_settings);
-        if (_settings.AutomaticWatcherRequested && _settings.SmokeGatePassed)
-        {
-            StartAutomaticScanTimer();
-        }
-
-        StatusText.Text = "설정을 저장했습니다.";
-    }
-
-    private void StartupToggle_Click(object sender, RoutedEventArgs e)
-    {
-        SetStartupRegistration(StartupToggle.IsChecked == true);
-    }
-
-    private void LlmEnabledToggle_Click(object sender, RoutedEventArgs e)
-    {
-        UpdateLlmControlAvailability();
-    }
-
-    private async void ApproveSelectedReview_Click(object sender, RoutedEventArgs e)
-    {
-        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
-        {
-            await ApproveReviewCandidateAsync(item.Candidate);
-        }
-    }
-
-    private async void IgnoreSelectedReview_Click(object sender, RoutedEventArgs e)
-    {
-        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
-        {
-            await IgnoreReviewCandidateAsync(item.Candidate);
-        }
-    }
-
-    private async void SnoozeSelectedReview_Click(object sender, RoutedEventArgs e)
-    {
-        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
-        {
-            await SnoozeReviewCandidateAsync(item.Candidate);
-        }
-    }
-
-    private async void OpenSelectedReviewMail_Click(object sender, RoutedEventArgs e)
-    {
-        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
-        {
-            await OpenSourceMailAsync(item.Candidate.SourceId);
-        }
-    }
-
-    private async void OpenSelectedReviewMail_DoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem item)
-        {
-            await OpenSourceMailAsync(item.Candidate.SourceId);
-        }
-    }
-
-    private async void MainWindow_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-    {
-        if ((Keyboard.Modifiers & ModifierKeys.Alt) != ModifierKeys.Alt)
-        {
-            return;
-        }
-
-        if (e.Key == Key.A)
-        {
-            e.Handled = true;
-            if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem approveItem)
-            {
-                await ApproveReviewCandidateAsync(approveItem.Candidate);
-            }
-        }
-        else if (e.Key == Key.I)
-        {
-            e.Handled = true;
-            if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem ignoreItem)
-            {
-                await IgnoreReviewCandidateAsync(ignoreItem.Candidate);
-            }
-        }
-        else if (e.Key == Key.S)
-        {
-            e.Handled = true;
-            if (ReviewCandidatesList.SelectedItem is ReviewCandidateListItem snoozeItem)
-            {
-                await SnoozeReviewCandidateAsync(snoozeItem.Candidate);
-            }
-        }
     }
 
     private async Task RefreshTasksAsync()
@@ -878,18 +559,6 @@ public partial class MainWindow : Window
     {
         var store = await GetStoreAsync();
         var candidates = await store.ListReviewCandidatesAsync();
-        ReviewCandidatesList.Items.Clear();
-        ReviewCandidatesList.Visibility = candidates.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        ReviewCandidatesEmptyText.Visibility = candidates.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var candidate in candidates)
-        {
-            var due = FollowUpPresentation.HumanDueText(candidate.Analysis.DueAt, DateTimeOffset.Now);
-            var sender = FollowUpPresentation.HumanSenderText(candidate.SourceSenderDisplay, "알 수 없음");
-            ReviewCandidatesList.Items.Add(new ReviewCandidateListItem(
-                candidate,
-                $"{due} · {sender}\n{CompactLine(FollowUpPresentation.ActionTitle(candidate.Analysis.SuggestedTitle), 54)}"));
-        }
-
         _reviewCandidatesWindow?.Refresh(candidates);
         return candidates;
     }
@@ -1096,6 +765,11 @@ public partial class MainWindow : Window
 
     private async Task NotifyDueRemindersAsync()
     {
+        if (_settings.ReminderLookAheadHours <= 0)
+        {
+            return;
+        }
+
         var store = await GetStoreAsync();
         var tasks = await store.ListOpenTasksAsync();
         var now = DateTimeOffset.Now;
@@ -1221,12 +895,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private Task OpenReviewCandidatesFromBoardAsync()
-    {
-        OpenReviewTab();
-        return Task.CompletedTask;
-    }
-
     private async Task OpenReviewCandidatesWindowAsync()
     {
         var candidates = await RefreshReviewCandidatesAsync();
@@ -1242,7 +910,8 @@ public partial class MainWindow : Window
             ApproveReviewCandidateAsync,
             OpenReviewCandidateMailAsync,
             SnoozeReviewCandidateAsync,
-            IgnoreReviewCandidateAsync)
+            IgnoreReviewCandidateAsync,
+            RetryLlmFailureReviewCandidatesAsync)
         {
             Owner = IsVisible ? this : null
         };
@@ -1259,6 +928,52 @@ public partial class MainWindow : Window
         await OpenSourceMailAsync(candidate.SourceId);
     }
 
+    private async Task<ReviewCandidateRetrySummary> RetryLlmFailureReviewCandidatesAsync()
+    {
+        if (_scanInProgress)
+        {
+            StatusText.Text = "메일 확인 중에는 AI 실패 후보를 다시 분석할 수 없습니다.";
+            return new ReviewCandidateRetrySummary(0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        _scanInProgress = true;
+        SetScanBusy(true, "AI 실패 후보를 다시 분석하는 중입니다…");
+        try
+        {
+            var store = await GetStoreAsync();
+            var analyzer = BuildAnalyzer(_settings);
+            var pipeline = new FollowUpPipeline(analyzer, store);
+            var outlookSource = new OutlookComMailSource();
+            var retry = new ReviewCandidateRetryService(
+                store,
+                pipeline,
+                (candidate, cancellationToken) => outlookSource.TryReadBySourceIdAsync(candidate.SourceId, cancellationToken));
+
+            var summary = await retry.RetryTransientLlmFailuresAsync();
+            await RefreshTasksAsync();
+            await RefreshReviewCandidatesAsync();
+            StatusText.Text = ToRetryStatus(summary);
+            return summary;
+        }
+        finally
+        {
+            _scanInProgress = false;
+            SetScanBusy(false, "대기 중입니다.");
+        }
+    }
+
+    private static string ToRetryStatus(ReviewCandidateRetrySummary summary)
+    {
+        if (summary.EligibleCount == 0)
+        {
+            return "다시 분석할 AI 실패 후보가 없습니다.";
+        }
+
+        return $"AI 실패 후보 {summary.EligibleCount}개 중 {summary.RetriedCount}개 재분석 · 업무 {summary.TaskCreatedCount}개 · 새 검토 {summary.ReviewCandidateCreatedCount}개 · 중복 {summary.DuplicateCount}개"
+               + (summary.MissingSourceCount > 0 ? $" · 원본 없음 {summary.MissingSourceCount}개" : string.Empty)
+               + (summary.SourceLookupFailureCount > 0 ? $" · 원본 조회 실패 {summary.SourceLookupFailureCount}개" : string.Empty);
+    }
+
     private async Task OpenSettingsWindowAsync()
     {
         if (_settingsWindow?.IsVisible == true)
@@ -1267,7 +982,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        var window = new SettingsWindow(_settings, StartupToggle.IsChecked == true)
+        var window = new SettingsWindow(
+            _settings,
+            _settings.WindowsStartupRequested,
+            new DeveloperToolActions(
+                OpenFilterFromDeveloperAsync,
+                ShowDeveloperToastAsync,
+                ResetTodayBoardMarkerAsync,
+                AddSampleTasksAsync,
+                AddSampleReviewCandidateAsync))
         {
             Owner = IsVisible ? this : null
         };
@@ -1281,37 +1004,15 @@ public partial class MainWindow : Window
 
         _settings = window.UpdatedSettings;
         WindowsRuntimeSettingsStore.Save(_settings);
-        SetStartupRegistration(window.StartupEnabled);
-        StartupToggle.IsChecked = window.StartupEnabled;
-        ApplySettingsToControls(_settings);
+        var startupRegistration = SyncStartupRegistration();
         if (_settings.AutomaticWatcherRequested && _settings.SmokeGatePassed)
         {
             StartAutomaticScanTimer();
         }
 
-        StatusText.Text = "설정을 저장했습니다.";
-    }
-
-    private void OpenDeveloperToolsWindow()
-    {
-        if (_developerToolsWindow?.IsVisible == true)
-        {
-            BringWindowToFront(_developerToolsWindow);
-            return;
-        }
-
-        _developerToolsWindow = new DeveloperToolsWindow(
-            OpenFilterFromDeveloperAsync,
-            ShowDeveloperToastAsync,
-            ResetTodayBoardMarkerAsync,
-            AddSampleTasksAsync,
-            AddSampleReviewCandidateAsync)
-        {
-            Owner = IsVisible ? this : null
-        };
-        _developerToolsWindow.Closed += (_, _) => _developerToolsWindow = null;
-        _developerToolsWindow.Show();
-        BringWindowToFront(_developerToolsWindow);
+        StatusText.Text = startupRegistration.Succeeded
+            ? "설정을 저장했습니다."
+            : ToStartupRegistrationStatus(startupRegistration);
     }
 
     private async Task OpenFilterFromDeveloperAsync(BoardRouteFilter filter)
@@ -1436,23 +1137,6 @@ public partial class MainWindow : Window
         return new LlmBackedFollowUpAnalyzer(client, rule, settings.LlmFallbackPolicy);
     }
 
-    private static CapabilityProbeResult ProbeLlmSettings(RuntimeSettings settings)
-    {
-        var enabled = settings.ExternalLlmEnabled && settings.LlmProvider != LlmProviderKind.Disabled;
-        return enabled
-            ? CapabilityProbeResult.Warning("llm-endpoint", "LlmConfiguredNotPinged", new Dictionary<string, string>
-            {
-                ["feature"] = "llm-endpoint",
-                ["enabled"] = "true",
-                ["mode"] = settings.LlmProvider.ToString()
-            })
-            : CapabilityProbeResult.Warning("llm-endpoint", "EndpointNotConfigured", new Dictionary<string, string>
-            {
-                ["feature"] = "llm-endpoint",
-                ["enabled"] = "false"
-            });
-    }
-
     private async Task<SqliteFollowUpStore> GetStoreAsync()
     {
         if (_store is not null)
@@ -1465,112 +1149,6 @@ public partial class MainWindow : Window
         _store = new SqliteFollowUpStore(Path.Combine(directory, "followups.sqlite"));
         await _store.InitializeAsync();
         return _store;
-    }
-
-    private RuntimeSettings ReadSettingsFromControls()
-    {
-        var llmEnabled = LlmEnabledToggle.IsChecked == true;
-        var provider = llmEnabled
-            ? ParseVisibleProvider(((ComboBoxItem?)LlmProviderBox.SelectedItem)?.Tag?.ToString())
-            : LlmProviderKind.Disabled;
-        var defaults = RuntimeSettings.ManagedSafeDefault;
-        return RuntimeSettingsSerializer.Merge(new PartialRuntimeSettings(
-            ManagedMode: true,
-            ExternalLlmEnabled: llmEnabled,
-            AutomaticWatcherRequested: AutoWatcherToggle.IsChecked == true,
-            AutomaticScanIntervalMinutes: ParseInt(AutomaticScanIntervalText.Text, defaults.AutomaticScanIntervalMinutes),
-            SmokeGatePassed: _settings.SmokeGatePassed,
-            RuleOnlyModeAccepted: true,
-            LlmProvider: provider,
-            LlmEndpoint: LlmEndpointText.Text,
-            LlmModel: LlmModelBox.Text,
-            LlmApiKey: _settings.LlmApiKey,
-            LlmApiKeyEnvironmentVariable: LlmApiKeyEnvText.Text,
-            LlmTimeoutSeconds: ParseInt(LlmTimeoutText.Text, defaults.LlmTimeoutSeconds),
-            LlmFallbackPolicy: ParseFallbackPolicy(((ComboBoxItem?)LlmFallbackPolicyBox.SelectedItem)?.Tag?.ToString()),
-            RecentScanDays: ParseInt(ScanDaysText.Text, defaults.RecentScanDays),
-            RecentScanMaxItems: ParseInt(MaxItemsText.Text, defaults.RecentScanMaxItems),
-            ReminderLookAheadHours: ParseInt(ReminderLookAheadText.Text, defaults.ReminderLookAheadHours),
-            DailyBoardTime: DailyBoardTimeText.Text,
-            DailyBoardStartupDelayMinutes: ParseInt(DailyBoardStartupDelayText.Text, defaults.DailyBoardStartupDelayMinutes)));
-    }
-
-    private void ApplySettingsToControls(RuntimeSettings settings)
-    {
-        LlmEnabledToggle.IsChecked = settings.ExternalLlmEnabled;
-        AutoWatcherToggle.IsChecked = settings.AutomaticWatcherRequested;
-        AutomaticScanIntervalText.Text = settings.AutomaticScanIntervalMinutes.ToString();
-        LlmEndpointText.Text = settings.LlmEndpoint;
-        ApplyModelList(Array.Empty<string>(), settings.LlmModel);
-        LlmApiKeyEnvText.Text = settings.LlmApiKeyEnvironmentVariable ?? string.Empty;
-        ScanDaysText.Text = settings.RecentScanDays.ToString();
-        MaxItemsText.Text = settings.RecentScanMaxItems == 0 ? string.Empty : settings.RecentScanMaxItems.ToString();
-        ReminderLookAheadText.Text = settings.ReminderLookAheadHours.ToString();
-        DailyBoardTimeText.Text = settings.DailyBoardTime;
-        DailyBoardStartupDelayText.Text = settings.DailyBoardStartupDelayMinutes.ToString();
-        LlmTimeoutText.Text = settings.LlmTimeoutSeconds.ToString();
-        LlmStatusText.Text = "LLM 연결 테스트 전입니다.";
-        var visibleProvider = settings.LlmProvider == LlmProviderKind.Disabled
-            ? LlmProviderKind.OllamaNative
-            : settings.LlmProvider;
-        LlmProviderBox.SelectedItem = null;
-        foreach (ComboBoxItem item in LlmProviderBox.Items)
-        {
-            if (string.Equals(item.Tag?.ToString(), visibleProvider.ToString(), StringComparison.OrdinalIgnoreCase))
-            {
-                LlmProviderBox.SelectedItem = item;
-                break;
-            }
-        }
-
-        if (LlmProviderBox.SelectedItem is null)
-        {
-            LlmProviderBox.SelectedIndex = 0;
-        }
-
-        ApplyFallbackPolicyToControls(settings.LlmFallbackPolicy);
-        UpdateLlmControlAvailability();
-    }
-
-    private static LlmProviderKind ParseVisibleProvider(string? value) =>
-        Enum.TryParse<LlmProviderKind>(value, ignoreCase: true, out var parsed) && parsed != LlmProviderKind.Disabled
-            ? parsed
-            : LlmProviderKind.OllamaNative;
-
-    private static LlmFallbackPolicy ParseFallbackPolicy(string? value) =>
-        Enum.TryParse<LlmFallbackPolicy>(value, ignoreCase: true, out var parsed) ? parsed : LlmFallbackPolicy.LlmOnly;
-
-    private void ApplyFallbackPolicyToControls(LlmFallbackPolicy fallbackPolicy)
-    {
-        LlmFallbackPolicyBox.SelectedItem = null;
-        foreach (ComboBoxItem item in LlmFallbackPolicyBox.Items)
-        {
-            if (string.Equals(item.Tag?.ToString(), fallbackPolicy.ToString(), StringComparison.OrdinalIgnoreCase))
-            {
-                LlmFallbackPolicyBox.SelectedItem = item;
-                return;
-            }
-        }
-
-        LlmFallbackPolicyBox.SelectedIndex = 0;
-    }
-
-    private void ApplyModelList(IReadOnlyList<string> models, string currentModel)
-    {
-        var selected = string.IsNullOrWhiteSpace(currentModel) ? string.Empty : currentModel.Trim();
-        LlmModelBox.Items.Clear();
-        foreach (var model in models)
-        {
-            LlmModelBox.Items.Add(model);
-        }
-
-        if (!string.IsNullOrWhiteSpace(selected)
-            && !models.Any(model => string.Equals(model, selected, StringComparison.OrdinalIgnoreCase)))
-        {
-            LlmModelBox.Items.Add(selected);
-        }
-
-        LlmModelBox.Text = selected;
     }
 
     private void OfferRuleFallbackAfterLlmFailure()
@@ -1586,7 +1164,7 @@ public partial class MainWindow : Window
         _fallbackPromptShownThisSession = true;
         var result = System.Windows.MessageBox.Show(
             this,
-            "LLM 연결 또는 분석이 실패했습니다.\n\n기본값은 실패한 메일을 검토 후보로 보관하고, LLM 연결이 복구되면 다시 분석하는 방식입니다.\n그래도 다음 메일 확인부터 규칙 기반 fallback을 허용할까요?\n\n나중에 고급 설정의 'LLM 분석 실패 처리'에서 바꿀 수 있습니다.",
+            "LLM 연결 또는 분석이 실패했습니다.\n\n기본값은 실패한 메일을 검토 후보로 보관하고, LLM 연결이 복구되면 다시 분석하는 방식입니다.\n그래도 다음 메일 확인부터 규칙 기반 fallback을 허용할까요?\n\n나중에 설정 > AI 분석의 'AI 실패 시'에서 바꿀 수 있습니다.",
             "LLM 실패 처리",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -1597,33 +1175,17 @@ public partial class MainWindow : Window
 
         _settings = _settings with { LlmFallbackPolicy = LlmFallbackPolicy.LlmThenRules };
         WindowsRuntimeSettingsStore.Save(_settings);
-        ApplyFallbackPolicyToControls(_settings.LlmFallbackPolicy);
         StatusText.Text = "다음 메일 확인부터 LLM 실패 시 규칙 기반 fallback을 허용합니다.";
     }
-
-    private static int ParseInt(string? value, int fallback) =>
-        int.TryParse(value, out var parsed) ? parsed : fallback;
 
     private void SetScanBusy(bool busy, string message)
     {
         ScanRecentMonthButton.IsEnabled = !busy;
-        StopScanButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        StopScanButton.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
         StopScanButton.IsEnabled = busy;
         ScanProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressText.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressText.Text = message;
-        UpdateLlmControlAvailability();
-    }
-
-    private void UpdateLlmControlAvailability()
-    {
-        var enabled = !_scanInProgress && LlmEnabledToggle.IsChecked == true;
-        LlmProviderBox.IsEnabled = enabled;
-        LlmEndpointText.IsEnabled = enabled;
-        LlmModelBox.IsEnabled = enabled;
-        LlmTimeoutText.IsEnabled = !_scanInProgress && LlmEnabledToggle.IsChecked == true;
-        TestLlmEndpointButton.IsEnabled = enabled;
-        LoadLlmModelsButton.IsEnabled = enabled;
     }
 
     private void UpdateScanProgress(MailScanProgress progress)
@@ -1648,61 +1210,24 @@ public partial class MainWindow : Window
     private async Task ShowErrorAsync(string title, Exception ex)
     {
         StatusText.Text = $"{title}: {ex.GetType().Name}";
-        DiagnosticsText.Text = $"{title}\n{ex.GetType().Name}: {ex.Message}";
         await _notificationSink.ShowAsync(new UserNotification(UserNotificationKind.Error, title, ex.GetType().Name));
     }
 
-    private static void SetStartupRegistration(bool enabled)
+    internal StartupRegistrationResult SyncStartupRegistration()
     {
-        const string keyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
-        using var key = Registry.CurrentUser.CreateSubKey(keyPath, writable: true);
-        if (key is null)
+        var result = WindowsStartupRegistration.ApplyRequestedState(_settings.WindowsStartupRequested);
+        if (!result.Succeeded)
         {
-            return;
+            StatusText.Text = ToStartupRegistrationStatus(result);
         }
 
-        if (enabled)
-        {
-            var command = BuildStartupCommand(Environment.ProcessPath);
-            if (!string.IsNullOrWhiteSpace(command))
-            {
-                key.SetValue("MailWhere", command);
-            }
-        }
-        else
-        {
-            key.DeleteValue("MailWhere", throwOnMissingValue: false);
-        }
+        return result;
     }
 
-    internal static string? BuildStartupCommand(string? exePath)
-    {
-        if (string.IsNullOrWhiteSpace(exePath))
-        {
-            return null;
-        }
-
-        return $"\"{exePath.Trim().Trim('\"')}\"";
-    }
-
-    private static bool IsStartupRegistered()
-    {
-        const string keyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
-        using var key = Registry.CurrentUser.OpenSubKey(keyPath, writable: false);
-        var configured = key?.GetValue("MailWhere") as string;
-        var currentPath = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(configured) || string.IsNullOrWhiteSpace(currentPath))
-        {
-            return false;
-        }
-
-        return string.Equals(configured.Trim().Trim('"'), currentPath.Trim().Trim('"'), StringComparison.OrdinalIgnoreCase);
-    }
-
-    private sealed record ReviewCandidateListItem(ReviewCandidate Candidate, string Display)
-    {
-        public override string ToString() => Display;
-    }
+    private string ToStartupRegistrationStatus(StartupRegistrationResult result) =>
+        _settings.WindowsStartupRequested
+            ? $"시작 프로그램 등록에 실패했습니다: {result.FailureCode ?? "Unknown"}"
+            : $"시작 프로그램 해제에 실패했습니다: {result.FailureCode ?? "Unknown"}";
 
     private static TaskListItem? GetTaskListItem(object sender) =>
         sender is FrameworkElement { Tag: TaskListItem item } ? item : null;

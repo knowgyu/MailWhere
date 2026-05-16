@@ -34,7 +34,10 @@
 
         <Border Grid.Row="0" CornerRadius="20" Background="{StaticResource MwBrush.Surface}" Padding="18" Margin="0,0,0,12" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
             <DockPanel>
-                <Button DockPanel.Dock="Right" Click="Close_Click" Style="{StaticResource MwButton.Ghost}" Margin="12,0,0,0">닫기(Esc)</Button>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
+                    <Button x:Name="RetryLlmFailuresButton" Click="RetryLlmFailures_Click" Style="{StaticResource MwButton.Secondary}">AI 실패 후보 다시 분석</Button>
+                    <Button Click="Close_Click" Style="{StaticResource MwButton.Ghost}" Margin="0">닫기(Esc)</Button>
+                </StackPanel>
                 <StackPanel>
                     <TextBlock Text="검토 후보" FontSize="22" FontWeight="Bold" Foreground="{StaticResource MwBrush.TextStrong}"/>
                     <TextBlock x:Name="StatusText" Text="필요한 항목만 업무에 올립니다." Margin="0,5,0,0" Foreground="{StaticResource MwBrush.TextMuted}"/>
@@ -57,10 +60,10 @@
                                     <TextBlock Text="{Binding Meta}" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="13" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="18,0,0,0">
-                                    <Button Content="등록" Tag="{Binding}" Click="Approve_Click" Style="{StaticResource MwButton.Primary}" Margin="0,0,6,0"/>
+                                    <Button Content="등록(Alt+A)" Tag="{Binding}" Click="Approve_Click" Style="{StaticResource MwButton.Primary}" Margin="0,0,6,0"/>
                                     <Button Content="원본 열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenMail_Click" Margin="0,0,6,0"/>
-                                    <Button Content="나중에" Tag="{Binding}" Click="Snooze_Click" Style="{StaticResource MwButton.Ghost}" Margin="0,0,6,0"/>
-                                    <Button Content="무시" Tag="{Binding}" Click="Ignore_Click" Style="{StaticResource MwButton.Danger}" Margin="0"/>
+                                    <Button Content="나중에(Alt+S)" Tag="{Binding}" Click="Snooze_Click" Style="{StaticResource MwButton.Ghost}" Margin="0,0,6,0"/>
+                                    <Button Content="무시(Alt+I)" Tag="{Binding}" Click="Ignore_Click" Style="{StaticResource MwButton.Danger}" Margin="0"/>
                                 </StackPanel>
                             </Grid>
                         </DataTemplate>
