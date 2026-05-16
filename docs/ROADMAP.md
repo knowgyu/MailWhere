@@ -104,6 +104,27 @@ Included:
 - Review candidates can retry transient LLM-failure items with the current analyzer.
 - Core responsibilities are separated for settings choices, startup launch mode, and review-candidate retry so later SDK/skill integrations can call them without scraping WPF controls.
 
+## Next patch candidate — v0.4.2 visual follow-up
+
+Goal: fix the v0.4.1 Windows smoke-test rough edges before adding larger product features.
+
+User-reported TODO:
+
+- Main header action cluster still feels awkward. Re-align header buttons so the primary action stays cleanly rightmost, secondary buttons do not float oddly, and keyboard focus styling does not look like raw WPF.
+- Change board filter order to `오늘` / `이번 주` / `전체` / `날짜 없음`.
+- Restore developer-tool visibility inside settings. The tools should not be in the daily header, but the existing sample/filter/toast/reset controls must be easy to find and not feel removed.
+- Review candidate shortcuts should be single-key: `등록(Y)`, `나중에(S)`, `무시(I)` instead of `Alt+A/S/I`; they should work without first focusing a row-specific button.
+- Review candidate action order should put `원본 열기` before classification actions.
+- Restyle the review-candidate window to match the main MailWhere tone: shared button styles, softer cards, compact header spacing, and no raw WPF bordered-list feeling.
+
+Additional follow-up candidates:
+
+- Deduplicate or vary developer/sample data so repeated identical rows do not make the board look broken during demos.
+- Add a small visual smoke checklist for Windows screenshots before every release, especially main board, review candidates, settings, edit dialog, and toast.
+- Add main-board keyboard affordances: Enter/open, S/snooze, archive key, Esc-to-hide, with visible but unobtrusive hints.
+- Add review-candidate bulk flow later: multi-select, approve/snooze/ignore selected, and compact “why this is a candidate” detail panel.
+- Consider a very small `WindowChrome`/focus visual polish pass so buttons do not expose default dotted focus rectangles.
+
 ## Release 0.4.0 — unified board and simplified secondary surfaces
 
 Goal: remove the duplicated “MailWhere shell vs 업무 보드” feeling and make tray `열기` land on one compact work surface.
