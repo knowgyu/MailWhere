@@ -48,7 +48,7 @@ Microsoft WPF docs는 Generic Host가 WPF에 기본 내장되지는 않지만 �
   - `IEmailSource` → `OutlookComMailSource`
   - `IFollowUpAnalyzer` / `IAnalysisService` → settings 기반 factory
   - `MailScanService` / `ReminderService` / `DailyBoardService`
-  - `MainWindow`, `DailyBoardWindow`, ViewModels
+  - `MainWindow`, review/settings dialogs, ViewModels
 - `DispatcherTimer` 로직은 UI 표시가 필요한 부분만 남기고, scan/reminder orchestration은 `IHostedService` 또는 application service로 이동한다.
 - CLI/test harness도 같은 services를 조합할 수 있게 한다.
 

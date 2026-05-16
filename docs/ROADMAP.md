@@ -90,6 +90,20 @@ Included:
 - LLM triage is more conservative for replied/forwarded mail, FYI notices, ownership cues, and unclear due dates.
 - LLM sampling is more deterministic for triage (`temperature=0`, `top_p=0.9`) and Ollama keep-alive is longer during scan sessions.
 
+## Release 0.4.1 — compact settings and retry patch
+
+Goal: keep the unified board but reduce vertical waste, remove confusing settings, and make recovered AI endpoints useful without rescanning everything manually.
+
+Included:
+
+- Direct launch opens the 업무 보드; Windows startup registration uses tray-only `--tray` and is requested by default.
+- Header/card spacing is tighter, stop-scan space is reserved, and buttons no longer jump when progress appears.
+- Settings are tabbed: `기본`, `알림`, `AI 분석`, `개발자 도구`.
+- Normal settings hide max mail count, morning board time, and startup delay; recent mail range is 7/30/90 days and reminder timing is `끄기`/`당일만`/`하루 전부터`.
+- Default LLM endpoint/model fields are empty and shown as hints rather than prefilled local-model assumptions.
+- Review candidates can retry transient LLM-failure items with the current analyzer.
+- Core responsibilities are separated for settings choices, startup launch mode, and review-candidate retry so later SDK/skill integrations can call them without scraping WPF controls.
+
 ## Release 0.4.0 — unified board and simplified secondary surfaces
 
 Goal: remove the duplicated “MailWhere shell vs 업무 보드” feeling and make tray `열기` land on one compact work surface.

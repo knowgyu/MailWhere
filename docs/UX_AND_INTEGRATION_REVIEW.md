@@ -1,7 +1,7 @@
 # UX / Integration Review
 
 Date: 2026-05-15
-Updated: 2026-05-16, after tray-first visual QA consolidation
+Updated: 2026-05-17, after v0.4.1 compact settings patch
 
 ## 핵심 제품 정의
 
@@ -33,27 +33,26 @@ MailWhere의 핵심은 “메일 앱을 한 번 더 열어보게 만드는 도�
 ## 현재 반영한 UX 개선
 
 - Korean-first main window: “오늘 봐야 할 항목”, “지금 메일 확인”, “검토 후보”. 진단은 설정의 문제 해결 영역에 둔다.
-- Tray-first lifecycle: 앱은 tray에 상주하고, 메인 창은 설정/검토/진단/수동 확인용 보조 shell로 둔다.
-- Scheduled 업무 보드: 지정 시간에는 보드 창을 먼저 열고, 보드 열기에 실패한 경우에만 알림으로 fallback한다.
-- 빠른 할 일 추가: 제목 + 마감 표현(`내일`, `금요일`, `2026-05-20`)을 바로 입력.
+- Tray-first lifecycle: 직접 실행은 업무 보드를 바로 열고, Windows 자동 시작은 `--tray`로 조용히 시작한다.
+- Scheduled 업무 보드: 지정 시간에는 통합 업무 보드를 먼저 열고, 보드 열기에 실패한 경우에만 알림으로 fallback한다.
 - App-owned toast stack: 앱을 열어보지 않아도 우하단 카드형 toast로 scan summary/reminder/error를 보여주되, 초기/대량 스캔 후보는 후보별 팝업으로 쏟아내지 않음.
 - 검토 후보 표시: LLM 실패/낮은 확신 후보는 앱 검토 후보에서 처리하되, 업무 보드는 확인 필요 스트레스를 줄이고 할 일/일정 중심으로 표시한다.
-- 오늘의 업무 보드: 기본 08:00 또는 앱 시작 후 다음 정시에 오늘/7일 내/30일 내/기한 미정 필터와 `내가 할 일`/`기다리는 중` 2열 카드로 표시한다.
+- 통합 업무 보드: 기본은 `오늘`이며 `오늘`/`이번 주`/`날짜 없음`/`전체` 필터와 단일 목록으로 표시한다.
 - 업무 보드 재접근: 상단 버튼 또는 tray 우클릭 메뉴에서 업무 보드를 다시 열 수 있음.
-- 업무 카드 action model: `열기`, `나중에`, `수정`, `보관`을 기본 액션으로 둔다. `나중에`는 다시 표시되는 snooze, `보관`은 active 목록에서 제외되는 archive다.
+- 업무 카드 action model: `열기`, `나중에`, `보관`을 기본 액션으로 둔다. 편집은 행 더블클릭으로 처리한다.
 - 대량 메일 확인 진행 상태: Outlook 읽기/분석 진행 상태를 표시하고 확인 중 주요 버튼을 잠가 “렉/멈춤”처럼 보이지 않게 함.
 - 긴 LLM 확인 제어: 확인 중지 버튼을 제공하고, timeout은 검토 후보로 남긴 뒤 다음 항목을 계속 처리한다.
 - LLM 가시성: 연결 테스트와 확인별 LLM 시도/성공/fallback/실패/평균 응답 시간을 표시.
 - LLM 속도: Ollama는 `think=false`, 짧은 JSON schema prompt, 출력 길이 제한, 8건 batch 호출과 부분 batch 실패 보정으로 대량 확인 체감 속도를 개선한다.
 - LLM 판단 품질: 답장/전달 메일, 담당자 표현, FYI/공지, 불명확한 마감을 더 보수적으로 판단하도록 개선한다.
-- LLM-first 정책: LLM을 켠 경우 LLM을 먼저 시도한다. 기본은 `LlmOnly`이고, 규칙 기반 fallback은 사용자가 고급 설정 또는 실패 모달에서 명시적으로 허용한 경우에만 사용한다.
+- LLM-first 정책: LLM을 켠 경우 LLM을 먼저 시도한다. 기본은 `LlmOnly`이고, 규칙 기반 fallback은 사용자가 설정 > AI 분석 또는 실패 모달에서 명시적으로 허용한 경우에만 사용한다.
 - 모델 선택 UX: 기본 모델명은 비워두고, endpoint 입력 후 Ollama `/api/tags` 또는 OpenAI-compatible `/v1/models`에서 모델 목록을 불러와 dropdown으로 선택할 수 있다. 목록이 없으면 직접 입력한다.
 - LLM 실패 재분석: 실패 후보는 같은 source에 중복 생성하지 않고, LLM 복구 후 재분석이 성공하면 기존 실패 후보를 정리한다.
-- 업무 보드: 메일 제목/신뢰도/긴 근거보다 사용자가 해야 할 일과 마감 bucket을 우선 표시하고, 검토 후보는 개수와 CTA로 접어둔다. 항목 더블클릭 또는 수정 버튼으로 AI 추출값을 바로잡는다.
+- 업무 보드: 메일 제목/신뢰도/긴 근거보다 사용자가 해야 할 일, 사람 말투 날짜, 보낸 사람을 우선 표시하고, 검토 후보는 별도 창 CTA로 접어둔다. 항목 더블클릭으로 AI 추출값을 바로잡는다.
 - Reminder timer: 앱이 켜져 있는 동안 30분마다 due reminder 후보를 재검토.
-- 새 메일 자동 확인은 수동 확인 성공과 운영 readiness check 이후에만 보수적으로 read-only 확인을 수행한다.
-- LLM 설정 UI: ON/OFF는 토글로만 표현하고, provider는 OllamaNative/OpenAiChatCompletions/OpenAiResponses 같은 실제 endpoint 방식만 표시한다. fallback/token은 고급 설정으로 둔다.
-- 진단 UX: 진단/알림 테스트는 매일 보는 header/tab에서 빼고 설정의 문제 해결 영역에 둔다.
+- 새 메일 자동 확인은 설정에서 켜되 내부 readiness check를 통과한 경우에만 보수적으로 read-only 확인을 수행한다.
+- 설정 UI: `기본`, `알림`, `AI 분석`, `개발자 도구` 탭으로 나누고, max mail count/startup delay 같은 운영자성 숫자는 일반 사용자 화면에서 제거한다.
+- 진단/개발자 UX: 알림/샘플/필터 테스트는 매일 보는 header에서 빼고 설정의 개발자 도구 탭에 둔다.
 - App icon: 실행 파일/tray/window에 같은 심볼을 사용.
 - Portable artifact 정리: `START_HERE_시작하기.txt`, README, docs, assets, sample settings 포함.
 

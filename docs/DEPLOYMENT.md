@@ -33,7 +33,7 @@ It runs on:
 The workflow performs the Windows verification path and uploads:
 
 ```text
-artifacts/MailWhere-v0.4.0-win-x64-portable.zip
+artifacts/MailWhere-v0.4.1-win-x64-portable.zip
 ```
 
 The zip contains the published app, README, operator docs, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`.
@@ -75,7 +75,7 @@ Optional parameters:
 2. Unzip to a user-owned folder, for example `%USERPROFILE%\Apps\MailWhere`.
 3. Start `MailWhere.exe`.
 4. Run diagnostics first.
-5. Keep 새 메일 자동 확인 disabled until `docs/MANAGED_PC_SMOKE_TEST.md` passes.
+5. Keep 새 메일 자동 확인 disabled until `docs/MANAGED_PC_SMOKE_TEST.md` passes. Direct launch opens the board; Windows startup uses the tray-only `--tray` command.
 6. Do not enable external LLM providers unless approved policy explicitly allows it.
 
 ## Artifact safety boundaries

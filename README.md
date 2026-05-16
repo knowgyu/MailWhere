@@ -10,21 +10,21 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 
 ## 현재 제품 모델
 
-- **Tray-first**: 앱 시작 시 메인 창을 오래 띄워두는 구조가 아니라 tray에서 조용히 동작합니다.
+- **Tray-first**: 자동 시작은 tray만 띄우고, 사용자가 직접 실행하면 업무 보드를 바로 엽니다.
 - **지정 시간 업무 보드**: 기본 08:00에 오늘 업무 보드를 열어 빠르게 훑게 합니다. 보드 열기에 실패한 경우에만 알림으로 fallback합니다.
 - **통합 업무 보드**: tray의 `열기`가 곧 업무 보드입니다. 기본은 `오늘`이고 필터는 `오늘`/`이번 주`/`날짜 없음`/`전체` 순서입니다.
 - **한 줄 업무 행**: 업무는 “제목 · 날짜 · 보낸 사람”만 먼저 보이고, 오른쪽에 `열기`, `나중에`, `보관`만 둡니다. 제목/기한은 더블클릭으로 수정합니다.
-- **분리된 보조 화면**: 검토 후보, 설정, 개발자 도구는 main 탭이 아니라 별도 창으로 열어 업무 목록을 방해하지 않습니다.
+- **분리된 보조 화면**: 검토 후보는 별도 창, 설정/개발자 도구는 설정 창 탭으로 열어 업무 목록을 방해하지 않습니다.
 - **보관 모델**: 여러 종료/제외 액션을 사용자-facing 개념으로 나누지 않고 `보관`으로 통합합니다. 보관된 항목은 active 목록에서 사라지고 자동으로 다시 뜨지 않습니다.
 
 ## 지금 되는 것
 
 - Classic Outlook COM 기반 read-only Inbox/Sent Items 메일 읽기
-- **지금 메일 확인**: 기본은 최근 30일, 갯수 제한 없이 날짜 기준으로 확인
+- **지금 메일 확인**: 기본은 최근 30일, 갯수 제한 없이 날짜 기준으로 확인하며 설정에서는 7/30/90일 선택지만 노출
 - 규칙 기반 업무 후보 탐지와 선택형 LLM 분석
 - Ollama native `/api/chat`, OpenAI-compatible `/v1/chat/completions`, `/v1/responses` endpoint 지원
 - endpoint 모델 목록 불러오기와 LLM 연결 테스트
-- LLM 시도/성공/fallback/실패 요약과 retryable 실패 후보 처리
+- LLM 시도/성공/fallback/실패 요약과 검토 후보 창의 **AI 실패 후보 다시 분석**
 - 답장/전달 메일, To/CC 수신 여부, 담당자 표현을 보수적으로 판단
 - 같은 스레드의 동일 업무 후보 중복 생성 억제
 - 낮은 확신/LLM 실패 후보는 기본 업무 보드에 섞지 않고 별도 검토 후보 창에서 처리
@@ -34,7 +34,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - 가능한 경우 `열기`로 Outlook 원본 메일 열기
 - D-day, D-7/D-1/D-day reminder planning, snooze-due reminder
 - MailWhere 자체 우하단 toast stack과 tray 메뉴
-- 개발자 도구 창의 샘플 데이터/알림/필터 테스트와 `scripts/reset-local-data.ps1`
+- 설정 > 개발자 도구 탭의 샘플 데이터/알림/필터 테스트와 `scripts/reset-local-data.ps1`
 - GitHub Actions Windows portable zip 빌드
 
 ## 안전 기본값
@@ -44,7 +44,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - vendor-specific mailbox export 파일 직접 parsing 없음
 - 외부/endpoint LLM 기본 OFF
 - raw mail body와 prompt 로그 저장 없음
-- 수동 확인 성공 전 새 메일 자동 확인 비활성
+- 새 메일 자동 확인은 설정에서 켜되, 앱이 안전 조건을 만족할 때만 read-only로 동작
 
 ## 다운로드해서 실행
 
@@ -58,8 +58,8 @@ zip 안의 `START_HERE_시작하기.txt`를 먼저 읽는 것을 권장합니다
 
 ## 기본 사용 흐름
 
-1. `MailWhere.exe`를 실행하면 앱이 tray에 상주합니다.
-2. tray 메뉴의 **열기**로 오늘 기준 업무 보드를 엽니다.
+1. `MailWhere.exe`를 직접 실행하면 오늘 기준 업무 보드가 열리고 앱은 tray에도 상주합니다. Windows 자동 시작은 tray-only로 실행됩니다.
+2. tray 메뉴의 **열기**로 언제든 같은 업무 보드를 다시 엽니다.
 3. **지금 메일 확인**으로 최근 메일을 읽어 로컬 업무 후보를 만듭니다.
 4. 지정 시간에 열리는 **오늘 업무 보드**를 훑고, 필요하면 tray의 **오늘 업무 보기**로 다시 엽니다.
 5. 업무 행에서 `열기`, `나중에`, `보관`으로 정리하고, 제목/기한은 더블클릭으로 바로잡습니다.
@@ -89,7 +89,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.4.0-win-x64-portable.zip
+artifacts/MailWhere-v0.4.1-win-x64-portable.zip
 ```
 
 ## LLM endpoint
@@ -103,7 +103,7 @@ artifacts/MailWhere-v0.4.0-win-x64-portable.zip
 {
   "ExternalLlmEnabled": true,
   "LlmProvider": "OllamaNative",
-  "LlmEndpoint": "http://localhost:11434",
+  "LlmEndpoint": "",
   "LlmModel": "",
   "LlmTimeoutSeconds": 90,
   "LlmFallbackPolicy": "LlmOnly"
