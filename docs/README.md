@@ -21,6 +21,7 @@
 ## 제품/기획
 
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.
+- [`releases/v0.4.0.md`](releases/v0.4.0.md): 통합 업무 보드 릴리즈 노트.
 - [`UX_AND_INTEGRATION_REVIEW.md`](UX_AND_INTEGRATION_REVIEW.md): UX 원칙과 OfficeWhere/Agentic AI 연결 방향.
 - [`PRODUCT_ARCHITECTURE_AND_AGENT_CLI.md`](PRODUCT_ARCHITECTURE_AND_AGENT_CLI.md): 제품 아키텍처 확장과 read-only Agent CLI 통합 연구.
 - [`ASSUMPTIONS.md`](ASSUMPTIONS.md): 아직 검증 중인 가정.
@@ -35,6 +36,8 @@
 
 - 사용자-facing CTA는 `지금 메일 확인`을 씁니다. 내부 구현 설명에서만 scan이라는 표현을 허용합니다.
 - `새 메일 자동 확인`은 수동 확인 성공과 운영 정책 확인 뒤 켜는 기능입니다. 내부 문서의 safety gate는 사용자 화면에 그대로 노출하지 않습니다.
-- 카드 1차 액션은 `열기`, `나중에`, `보관`입니다. 편집은 카드 더블클릭, 기한 변경은 날짜/기한 영역에서 처리합니다.
+- 기본 화면은 통합 업무 보드이며 필터는 `오늘`, `이번 주`, `날짜 없음`, `전체` 순서입니다.
+- 업무 행 1차 액션은 `열기`, `나중에`, `보관`입니다. 편집은 행 더블클릭으로 처리합니다.
+- 검토 후보, 설정, 개발자 도구는 main 탭이 아니라 별도 창입니다.
 - `나중에`는 다시 표시되는 snooze이고, `보관`은 active 목록에서 제외되어 자동으로 다시 뜨지 않습니다.
 - Outlook 원본 메일은 read-only입니다. MailWhere의 상태 변경은 로컬 DB에만 적용됩니다.

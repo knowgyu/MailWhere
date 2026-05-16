@@ -63,7 +63,13 @@ Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다
 }
 ```
 
-`LlmApiKeyEnvironmentVariable`는 브라우저 로그인이나 Enterprise 계정 재사용 기능이 아닙니다. 로컬/내부 서버가 Bearer token을 요구할 때만 설정 파일에 토큰 값을 직접 쓰지 않고 Windows 환경 변수 이름으로 참조하기 위한 고급 옵션입니다.
+인증이 필요한 endpoint는 설정 창의 **AI 서버 인증**에서 고릅니다.
+
+- `인증 없음`: Ollama/local endpoint처럼 token이 필요 없는 경우.
+- `API 키 입력`: 개인 PC에서 바로 테스트할 때 사용합니다. 화면에는 키를 다시 노출하지 않고, probe/진단 로그에도 쓰지 않습니다.
+- `환경 변수에서 읽기`: `OPENAI_API_KEY`처럼 Windows 환경 변수에 저장된 값을 참조합니다.
+
+`LlmApiKeyEnvironmentVariable`는 브라우저 로그인이나 Enterprise 계정 재사용 기능이 아닙니다. 로컬/내부 서버가 인증 키를 요구할 때 키 값 대신 Windows 환경 변수 이름으로 참조하기 위한 옵션입니다. `LlmApiKey`가 함께 있으면 직접 입력한 키가 우선합니다.
 
 ## Fallback 정책
 
@@ -87,7 +93,7 @@ endpoint가 이미 `/v1`로 끝나면 중복으로 `/v1/v1/models`가 되지 않
 
 ## 연결 테스트
 
-앱 설정의 **LLM 연결 테스트**는 메일 내용이 아닌 작은 JSON probe만 보냅니다.
+앱 설정의 **연결 테스트**는 메일 내용이 아닌 작은 JSON probe만 보냅니다.
 
 - 성공: endpoint/model/provider 조합이 JSON object 응답을 반환함
 - `not-configured`: provider/model/endpoint가 비어 있거나 LLM이 꺼져 있음

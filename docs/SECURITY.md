@@ -1,6 +1,7 @@
 # Security and Privacy
 
 - External LLM providers are disabled by default in managed mode.
+- AI endpoint keys can be supplied directly for local testing or read from an environment variable. They must stay out of diagnostics, probe logs, sample defaults, and committed artifacts.
 - Raw mail body is transient by default and is not part of the SQLite task schema.
 - Evidence snippets are capped at 240 characters and can be deleted.
 - Deleting source-derived data redacts task titles/reasons and review-candidate titles/reasons, not only evidence snippets.

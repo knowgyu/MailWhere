@@ -15,9 +15,11 @@ Core may define small semantic routing contracts such as scheduled board origins
 Current product surface:
 
 - `App` starts in tray-first mode and keeps shutdown explicit so closing the shell does not kill the assistant accidentally.
-- `MainWindow` is a supplemental shell for settings, diagnostics, review candidates, and manual mail checks.
-- `DailyBoardWindow` is the primary glance surface for active tasks. It renders one unified task list and exposes only `열기`, `나중에`, `보관` plus clickable due-date changes; double-click opens the bounded edit dialog.
-- Scheduled daily-board time opens or updates the board first. Notification is a fallback only when the board cannot be surfaced.
+- `MainWindow` is now the primary 업무 보드 surface. Tray `열기`, tray `오늘 업무 보기`, scheduled daily-board routes, and toast CTAs converge here.
+- The primary board defaults to `오늘`, then offers `이번 주`, `날짜 없음`, and `전체`. `DailyBoardWindow` remains as compatibility code but is no longer the primary route target.
+- Review candidates, settings, and developer tools are separate WPF windows so the task list stays compact.
+- Task rows expose only `열기`, `나중에`, `보관`; double-click opens the bounded edit dialog with Enter/Esc behavior.
+- Scheduled daily-board time opens or updates the unified board first. Notification is a fallback only when the board cannot be surfaced.
 - `LocalTaskStatus.Archived` is the active-list exit state for the user-facing `보관` action. Legacy `Done`/`Dismissed` values remain readable but are not primary UI actions.
 - Future-snoozed tasks and archived tasks are excluded from primary active lists by `FollowUpPresentation.IsVisibleInPrimary`.
 

@@ -90,7 +90,27 @@ Included:
 - LLM triage is more conservative for replied/forwarded mail, FYI notices, ownership cues, and unclear due dates.
 - LLM sampling is more deterministic for triage (`temperature=0`, `top_p=0.9`) and Ollama keep-alive is longer during scan sessions.
 
-## Current main — tray-first visual QA consolidation
+## Release 0.4.0 — unified board and simplified secondary surfaces
+
+Goal: remove the duplicated “MailWhere shell vs 업무 보드” feeling and make tray `열기` land on one compact work surface.
+
+Included:
+
+- `MainWindow` is the primary 업무 보드, defaulting to `오늘`.
+- Main filters are `오늘`, `이번 주`, `날짜 없음`, `전체`; old 7/30-day wording is no longer the primary UI.
+- Task rows use a compact one-line structure: action title, human due label, `보낸 사람: ...`, then right-aligned `열기`/`나중에`/`보관`.
+- Review candidates, settings, and developer tools moved out of the main tab stack into separate windows.
+- Settings labels use product language such as `AI 분석`, `주소`, `AI 서버 인증`, `API 키`, and support direct API key or environment-variable auth.
+- Developer tools expose safe 샘플 데이터, filter, toast, and daily-board marker checks.
+- Edit/date/manual dialogs now surface `저장(Enter)` and `취소(Esc)`.
+
+Not included:
+
+- Full MVVM extraction of `MainWindow`.
+- Windows 실기기 visual/tray/scaling smoke automation.
+- Native Windows Credential Manager storage for direct API keys.
+
+## Release 0.3.x — tray-first visual QA consolidation
 
 Goal: visual QA feedback moved MailWhere from “main window task manager” toward a tray-first assistant whose primary daily surface is the scheduled 업무 보드.
 
