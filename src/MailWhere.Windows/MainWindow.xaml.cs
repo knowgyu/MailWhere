@@ -677,14 +677,11 @@ public partial class MainWindow : Window
         var tasks = await store.ListOpenTasksAsync();
         TasksList.Items.Clear();
         var now = DateTimeOffset.Now;
+        TasksList.Visibility = tasks.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        TasksEmptyText.Visibility = tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         foreach (var task in tasks)
         {
             TasksList.Items.Add(TaskListItem.FromTask(task, now));
-        }
-
-        if (tasks.Count == 0)
-        {
-            TasksList.Items.Add(TaskListItem.Empty("아직 표시할 할 일이 없습니다. 최근 1개월 스캔을 실행해보세요."));
         }
     }
 
@@ -693,17 +690,14 @@ public partial class MainWindow : Window
         var store = await GetStoreAsync();
         var candidates = await store.ListReviewCandidatesAsync();
         ReviewCandidatesList.Items.Clear();
+        ReviewCandidatesList.Visibility = candidates.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        ReviewCandidatesEmptyText.Visibility = candidates.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         foreach (var candidate in candidates)
         {
             var due = candidate.Analysis.DueAt is null ? "마감 불명" : $"{DdayFormatter.Format(candidate.Analysis.DueAt.Value, DateTimeOffset.Now)} · {candidate.Analysis.DueAt.Value:MM/dd HH:mm}";
             ReviewCandidatesList.Items.Add(new ReviewCandidateListItem(
                 candidate,
                 $"{KoreanLabels.Kind(candidate.Analysis.Kind)} · {due}\n{CompactLine(candidate.Analysis.SuggestedTitle, 54)}"));
-        }
-
-        if (candidates.Count == 0)
-        {
-            ReviewCandidatesList.Items.Add("검토 대기 후보가 없습니다.");
         }
 
         return candidates;
@@ -1351,8 +1345,6 @@ public partial class MainWindow : Window
         public bool CanOpen => !string.IsNullOrWhiteSpace(Task?.SourceId);
         public string DueButtonText => Task?.DueAt is null ? "기한 설정" : "기한 변경";
         public Visibility DueButtonVisibility => Task is null ? Visibility.Collapsed : Visibility.Visible;
-
-        public static TaskListItem Empty(string message) => new(null, message, string.Empty);
 
         public static TaskListItem FromTask(LocalTaskItem task, DateTimeOffset now)
         {

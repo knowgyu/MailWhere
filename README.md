@@ -75,7 +75,7 @@ cd MailWhere
 출력:
 
 ```text
-artifacts/MailWhere-v0.3.0-win-x64-portable.zip
+artifacts/MailWhere-v0.3.1-win-x64-portable.zip
 ```
 
 ## LLM endpoint

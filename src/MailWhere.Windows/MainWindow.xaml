@@ -114,27 +114,30 @@
                                     <TextBlock Text="마감은 비워둘 수 있습니다. '내일', '금요일', '2026-05-20'을 우선 지원합니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
-                            <ListBox x:Name="TasksList" FontSize="14">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                            </Grid.RowDefinitions>
-                                            <DockPanel Grid.Row="0" LastChildFill="True">
-                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
-                                                    <Button Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="SetTaskDueButton_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,6,0"/>
-                                                    <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTaskButton_Click" Style="{StaticResource MwButton.Base}" Margin="0,0,6,0"/>
-                                                    <Button Content="숨김" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="DismissTaskButton_Click" Style="{StaticResource MwButton.Danger}"/>
-                                                </StackPanel>
-                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                            </DockPanel>
-                                            <TextBlock Grid.Row="1" Text="{Binding Meta}" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
-                                        </Grid>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                            <Grid MinHeight="220">
+                                <ListBox x:Name="TasksList" FontSize="14">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <DockPanel Grid.Row="0" LastChildFill="True">
+                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+                                                        <Button Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="SetTaskDueButton_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,6,0"/>
+                                                        <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTaskButton_Click" Style="{StaticResource MwButton.Base}" Margin="0,0,6,0"/>
+                                                        <Button Content="숨김" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="DismissTaskButton_Click" Style="{StaticResource MwButton.Danger}"/>
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                </DockPanel>
+                                                <TextBlock Grid.Row="1" Text="{Binding Meta}" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock x:Name="TasksEmptyText" Text="표시할 업무가 없습니다." Visibility="Collapsed" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
                         </DockPanel>
                     </TabItem>
 
@@ -152,7 +155,10 @@
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
-                            <ListBox x:Name="ReviewCandidatesList" FontSize="14" MouseDoubleClick="OpenSelectedReviewMail_DoubleClick"/>
+                            <Grid MinHeight="220">
+                                <ListBox x:Name="ReviewCandidatesList" FontSize="14" MouseDoubleClick="OpenSelectedReviewMail_DoubleClick"/>
+                                <TextBlock x:Name="ReviewCandidatesEmptyText" Text="표시할 검토 후보가 없습니다." Visibility="Collapsed" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
                         </DockPanel>
                     </TabItem>
 

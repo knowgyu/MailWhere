@@ -90,6 +90,20 @@ Included:
 - LLM triage is more conservative for replied/forwarded mail, FYI notices, ownership cues, and unclear due dates.
 - LLM sampling is more deterministic for triage (`temperature=0`, `top_p=0.9`) and Ollama keep-alive is longer during scan sessions.
 
+## Release 0.3.1 — board header and empty-state patch
+
+Goal: 업무 보드가 불필요한 출처/하단 설명 없이, 실제 표시 항목이 있을 때만 카드처럼 보이도록 정리한다.
+
+- 업무 보드의 출처 배지, 하단 안내문, 하단 닫기 버튼을 제거하고 닫기는 창 X와 Esc로 통일한다.
+- 표시할 업무가 없으면 홈/업무 보드 모두 가운데 muted copy로 empty state를 표시한다.
+- 업무 보드 헤더는 갱신 시간, 검토 후보, 필터 요약, `+ 직접 추가` 순서로 정리해 직접 추가를 가장 오른쪽에 둔다.
+- 어색한 문구(`활성 항목 전체 원장`, `기본 보드 시간`)를 제거하고 간결한 전문 도구 톤으로 바꾼다.
+
+Not included:
+
+- GitHub Release 생성.
+- Windows 실기기 visual/tray/scaling smoke 자동화.
+
 ## Release 0.3.0 — polished tray-first board and replayable Today Brief
 
 Goal: MailWhere should feel like a tray-resident professional mail-task assistant, with 업무 보드 as the durable source of truth and 오늘 브리핑 as a lightweight re-entry trigger.

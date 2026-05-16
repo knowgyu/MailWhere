@@ -1,11 +1,13 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using MailWhere.Core.Domain;
 using MailWhere.Core.Reminders;
 using MailWhere.Core.Scheduling;
 using WpfButton = System.Windows.Controls.Button;
 using WpfContextMenu = System.Windows.Controls.ContextMenu;
+using WpfListBox = System.Windows.Controls.ListBox;
 using WpfMenuItem = System.Windows.Controls.MenuItem;
 using WpfSeparator = System.Windows.Controls.Separator;
 
@@ -23,7 +25,7 @@ public partial class DailyBoardWindow : Window
     private readonly Func<string, DateTimeOffset?, Task<LocalTaskItem?>> _addTaskAsync;
     private readonly Func<Task> _openReviewCandidatesAsync;
     private DateTimeOffset _now;
-    private string _dailyBoardTime;
+    private string? _statusMessage;
     private DailyBoardOpenOptions _options;
     private BoardRouteFilter _filter;
 
@@ -42,10 +44,10 @@ public partial class DailyBoardWindow : Window
         Func<Task> openReviewCandidatesAsync)
     {
         InitializeComponent();
+        _ = dailyBoardTime;
         _tasks = tasks.ToList();
         _candidates = candidates.ToList();
         _now = now;
-        _dailyBoardTime = dailyBoardTime;
         _options = options;
         _filter = options.Filter;
         _openTaskAsync = openTaskAsync;
@@ -66,10 +68,10 @@ public partial class DailyBoardWindow : Window
         IReadOnlyList<LocalTaskItem> tasks,
         IReadOnlyList<ReviewCandidate> candidates)
     {
+        _ = dailyBoardTime;
         _options = options;
         _filter = options.Filter;
         _now = now;
-        _dailyBoardTime = dailyBoardTime;
         _tasks.Clear();
         _tasks.AddRange(tasks);
         _candidates.Clear();
@@ -85,8 +87,9 @@ public partial class DailyBoardWindow : Window
 
         TitleText.Text = "업무 보드";
         SubtitleText.Text = _options.ShowBriefSummary
-            ? $"{_now:yyyy-MM-dd HH:mm} 기준 · 오늘 브리핑에서 이어서 관리합니다. 기본 보드 시간 {_dailyBoardTime}"
-            : $"{_now:yyyy-MM-dd HH:mm} 기준 · 활성 항목 전체 원장입니다. 기본 보드 시간 {_dailyBoardTime}";
+            ? "오늘 브리핑에서 이어지는 오늘 보기입니다."
+            : "메일에서 만든 할 일과 기다리는 일을 정리합니다.";
+        UpdatedAtText.Text = $"{_now:MM/dd HH:mm} 기준";
         SummaryText.Text = $"{FilterLabel(_filter)} · 할 일 {actions.Length} · 대기 {waiting.Length}";
         BriefSummaryPanel.Visibility = _options.ShowBriefSummary ? Visibility.Visible : Visibility.Collapsed;
         BriefSummaryBodyText.Text = brief.TotalHighlights == 0
@@ -95,14 +98,15 @@ public partial class DailyBoardWindow : Window
         BriefSummaryMetaText.Text = brief.HiddenCandidateCount > 0
             ? $"검토 후보 {brief.HiddenCandidateCount}개는 필요할 때 검토 후보 탭에서 확인합니다."
             : "업무 보드의 오늘 필터와 같은 원장을 사용합니다.";
-        OriginText.Text = OriginLabel(_options.Origin);
-        FooterText.Text = _options.ShowBriefSummary
-            ? "오늘 브리핑은 업무 보드에서 다시 볼 수 있습니다. 숨김/완료는 MailWhere 로컬 상태만 바꿉니다."
-            : "숨김/완료는 MailWhere 업무 보드에서만 처리합니다. Outlook 원본은 그대로 유지됩니다.";
         ReviewCandidatesButton.Visibility = hiddenCandidateCount > 0 ? Visibility.Visible : Visibility.Collapsed;
         ReviewCandidatesButton.Content = $"검토 후보 {hiddenCandidateCount}개 보기";
-        FillList(ActionList, actions, "표시할 할 일이 없습니다.");
-        FillList(WaitingList, waiting, "표시할 대기 항목이 없습니다.");
+        FillList(ActionList, actions);
+        FillList(WaitingList, waiting);
+        var hasVisibleItems = actions.Length + waiting.Length > 0;
+        BoardColumnsGrid.Visibility = hasVisibleItems ? Visibility.Visible : Visibility.Collapsed;
+        BoardEmptyText.Visibility = hasVisibleItems ? Visibility.Collapsed : Visibility.Visible;
+        BoardEmptyText.Text = "표시할 업무가 없습니다.";
+        UpdateStatusText();
         HighlightFilter();
     }
 
@@ -128,12 +132,8 @@ public partial class DailyBoardWindow : Window
         return (actions, waiting, candidateCount);
     }
 
-    private void FillList(System.Windows.Controls.ListBox list, IReadOnlyList<LocalTaskItem> tasks, string emptyText)
-    {
-        list.ItemsSource = tasks.Count == 0
-            ? new[] { BoardCardItem.Empty(emptyText) }
-            : tasks.Select(task => BoardCardItem.FromTask(task, _now)).ToArray();
-    }
+    private void FillList(WpfListBox list, IReadOnlyList<LocalTaskItem> tasks) =>
+        list.ItemsSource = tasks.Select(task => BoardCardItem.FromTask(task, _now)).ToArray();
 
     private static DateTimeOffset SortKey(LocalTaskItem task) =>
         task.DueAt ?? task.SnoozeUntil ?? DateTimeOffset.MaxValue;
@@ -146,14 +146,6 @@ public partial class DailyBoardWindow : Window
         BoardRouteFilter.Month => "30일 내",
         BoardRouteFilter.NoDue => "기한 미정",
         _ => "전체"
-    };
-
-    private static string OriginLabel(BoardOrigin origin) => origin switch
-    {
-        BoardOrigin.TrayToday => "트레이에서 열었습니다",
-        BoardOrigin.DailyBriefToast => "오늘 브리핑 알림에서 열었습니다",
-        BoardOrigin.ScheduledBriefFallback => "오늘 브리핑 대체 경로로 열었습니다",
-        _ => "수동으로 열었습니다"
     };
 
     private void HighlightFilter()
@@ -199,7 +191,7 @@ public partial class DailyBoardWindow : Window
         }
         catch (Exception ex)
         {
-            FooterText.Text = $"원본 메일을 열지 못했습니다: {ex.GetType().Name}";
+            SetStatus($"원본 메일을 열지 못했습니다: {ex.GetType().Name}");
         }
     }
 
@@ -214,42 +206,17 @@ public partial class DailyBoardWindow : Window
 
             if (!await _completeTaskAsync(task))
             {
-                FooterText.Text = "이미 처리된 항목입니다.";
+                SetStatus("이미 처리된 항목입니다.");
                 return;
             }
 
             _tasks.RemoveAll(item => item.Id == task.Id);
-            FooterText.Text = "완료 처리했습니다.";
+            SetStatus("완료 처리했습니다.");
             Render();
         }
         catch (Exception ex)
         {
-            FooterText.Text = $"완료 처리에 실패했습니다: {ex.GetType().Name}";
-        }
-    }
-
-    private async void DismissTask_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (GetCard(sender) is not { Task: { } task })
-            {
-                return;
-            }
-
-            if (!await _dismissTaskAsync(task))
-            {
-                FooterText.Text = "이미 처리된 항목입니다.";
-                return;
-            }
-
-            _tasks.RemoveAll(item => item.Id == task.Id);
-            FooterText.Text = "업무보드에서 숨겼습니다. Outlook 원본 메일은 그대로 유지됩니다.";
-            Render();
-        }
-        catch (Exception ex)
-        {
-            FooterText.Text = $"숨김 처리에 실패했습니다: {ex.GetType().Name}";
+            SetStatus($"완료 처리에 실패했습니다: {ex.GetType().Name}");
         }
     }
 
@@ -302,7 +269,7 @@ public partial class DailyBoardWindow : Window
             }
             catch (Exception ex)
             {
-                FooterText.Text = $"작업을 처리하지 못했습니다: {ex.GetType().Name}";
+                SetStatus($"작업을 처리하지 못했습니다: {ex.GetType().Name}");
             }
         };
         menu.Items.Add(item);
@@ -314,17 +281,17 @@ public partial class DailyBoardWindow : Window
         {
             if (!await _dismissTaskAsync(task))
             {
-                FooterText.Text = "이미 처리된 항목입니다.";
+                SetStatus("이미 처리된 항목입니다.");
                 return;
             }
 
             _tasks.RemoveAll(item => item.Id == task.Id);
-            FooterText.Text = "업무 보드에서 숨겼습니다. Outlook 원본 메일은 그대로 유지됩니다.";
+            SetStatus("업무 보드에서 숨겼습니다.");
             Render();
         }
         catch (Exception ex)
         {
-            FooterText.Text = $"숨김 처리에 실패했습니다: {ex.GetType().Name}";
+            SetStatus($"숨김 처리에 실패했습니다: {ex.GetType().Name}");
         }
     }
 
@@ -334,7 +301,7 @@ public partial class DailyBoardWindow : Window
         var effectiveUntil = until <= now ? now.AddHours(1) : until;
         if (!await _snoozeTaskAsync(task, effectiveUntil))
         {
-            FooterText.Text = "이미 처리된 항목이라 나중에 보기로 바꾸지 못했습니다.";
+            SetStatus("이미 처리된 항목이라 나중에 보기로 바꾸지 못했습니다.");
             return;
         }
 
@@ -344,7 +311,7 @@ public partial class DailyBoardWindow : Window
             _tasks[index] = task with { Status = LocalTaskStatus.Snoozed, SnoozeUntil = effectiveUntil, UpdatedAt = DateTimeOffset.UtcNow };
         }
 
-        FooterText.Text = effectiveUntil == until ? message : $"{effectiveUntil:MM/dd HH:mm}에 다시 표시합니다.";
+        SetStatus(effectiveUntil == until ? message : $"{effectiveUntil:MM/dd HH:mm}에 다시 표시합니다.");
         Render();
     }
 
@@ -361,7 +328,7 @@ public partial class DailyBoardWindow : Window
         }
         catch (Exception ex)
         {
-            FooterText.Text = $"기한 설정에 실패했습니다: {ex.GetType().Name}";
+            SetStatus($"기한 설정에 실패했습니다: {ex.GetType().Name}");
         }
     }
 
@@ -378,7 +345,7 @@ public partial class DailyBoardWindow : Window
 
         if (!await _setTaskDueAsync(task, dueAt))
         {
-            FooterText.Text = "이미 처리된 항목이라 기한을 바꾸지 못했습니다.";
+            SetStatus("이미 처리된 항목이라 기한을 바꾸지 못했습니다.");
             return;
         }
 
@@ -388,7 +355,7 @@ public partial class DailyBoardWindow : Window
             _tasks[index] = task with { DueAt = dueAt, Status = task.Status == LocalTaskStatus.Snoozed ? LocalTaskStatus.Open : task.Status, SnoozeUntil = null, UpdatedAt = DateTimeOffset.UtcNow };
         }
 
-        FooterText.Text = $"기한을 {dueAt:MM/dd}로 설정했습니다.";
+        SetStatus($"기한을 {dueAt:MM/dd}로 설정했습니다.");
         Render();
     }
 
@@ -408,17 +375,17 @@ public partial class DailyBoardWindow : Window
             var created = await _addTaskAsync(dialog.TaskTitle, dialog.DueAt);
             if (created is null)
             {
-                FooterText.Text = "직접 추가에 실패했습니다.";
+                SetStatus("직접 추가에 실패했습니다.");
                 return;
             }
 
             _tasks.Add(created);
-            FooterText.Text = "직접 추가한 할 일을 보드에 넣었습니다.";
+            SetStatus("직접 추가한 할 일을 보드에 넣었습니다.");
             Render();
         }
         catch (Exception ex)
         {
-            FooterText.Text = $"직접 추가에 실패했습니다: {ex.GetType().Name}";
+            SetStatus($"직접 추가에 실패했습니다: {ex.GetType().Name}");
         }
     }
 
@@ -430,14 +397,35 @@ public partial class DailyBoardWindow : Window
         }
         catch (Exception ex)
         {
-            FooterText.Text = $"검토 후보를 열지 못했습니다: {ex.GetType().Name}";
+            SetStatus($"검토 후보를 열지 못했습니다: {ex.GetType().Name}");
         }
     }
 
     private static BoardCardItem? GetCard(object sender) =>
         sender is FrameworkElement { Tag: BoardCardItem item } ? item : null;
 
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
+    private void DailyBoardWindow_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        Close();
+    }
+
+    private void SetStatus(string message)
+    {
+        _statusMessage = message;
+        UpdateStatusText();
+    }
+
+    private void UpdateStatusText()
+    {
+        BoardStatusText.Text = _statusMessage ?? string.Empty;
+        BoardStatusText.Visibility = string.IsNullOrWhiteSpace(_statusMessage) ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     private sealed class BoardCardItem
     {
@@ -457,8 +445,6 @@ public partial class DailyBoardWindow : Window
         public bool CanOpen => !string.IsNullOrWhiteSpace(Task?.SourceId);
         public string DueButtonText => "기한 설정";
         public Visibility DueButtonVisibility => Task is null ? Visibility.Collapsed : Visibility.Visible;
-
-        public static BoardCardItem Empty(string message) => new(null, message, string.Empty, "-");
 
         public static BoardCardItem FromTask(LocalTaskItem task, DateTimeOffset now)
         {
