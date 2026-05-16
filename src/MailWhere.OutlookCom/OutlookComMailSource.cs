@@ -15,6 +15,17 @@ public sealed class OutlookComMailSource : IEmailSource
         return OutlookStaExecutor.RunAsync(() => ReadRecentInboxMessages(request, cancellationToken), cancellationToken);
     }
 
+    public Task<EmailSnapshot?> TryReadBySourceIdAsync(string? sourceId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            return Task.FromResult<EmailSnapshot?>(null);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return OutlookStaExecutor.RunAsync(() => TryReadBySourceIdOnSta(sourceId, cancellationToken), cancellationToken);
+    }
+
     public EmailReadResult ReadRecentInboxMessages(int maxItems, bool includeBody, CancellationToken cancellationToken = default) =>
         ReadRecentInboxMessages(new MailReadRequest(maxItems, includeBody), cancellationToken);
 
@@ -155,37 +166,19 @@ public sealed class OutlookComMailSource : IEmailSource
                 try
                 {
                     item = ((dynamic)items)[i];
-                    dynamic itemDynamic = item;
-                    var itemDate = TryReadDateTime(item, datePropertyName)
-                                   ?? TryReadDateTime(item, "ReceivedTime")
-                                   ?? TryReadDateTime(item, "SentOn")
-                                   ?? DateTime.Now;
-                    var receivedAt = new DateTimeOffset(itemDate);
-                    if (request.Since is not null && receivedAt < request.Since.Value)
+                    var snapshot = ReadItemSnapshot(
+                        item,
+                        folderCode,
+                        datePropertyName,
+                        request.IncludeBody,
+                        mailboxIdentity,
+                        fallbackSourceId: $"unknown-{folderCode}-{i}");
+                    if (request.Since is not null && snapshot.ReceivedAt < request.Since.Value)
                     {
                         break;
                     }
 
-                    string entryId = Convert.ToString(itemDynamic.EntryID) ?? $"unknown-{folderCode}-{i}";
-                    string subject = Convert.ToString(itemDynamic.Subject) ?? string.Empty;
-                    string sender = Convert.ToString(itemDynamic.SenderName) ?? string.Empty;
-                    string? body = request.IncludeBody ? Convert.ToString(itemDynamic.Body) : null;
-                    string? conversationId = TryReadString(item, "ConversationID");
-                    var recipients = SplitRecipients(TryReadString(item, "To"), TryReadString(item, "CC"));
-                    var recipientRole = folderCode == "sent"
-                        ? MailboxRecipientRole.Other
-                        : TryResolveMailboxRecipientRole(item, mailboxIdentity);
-
-                    messages.Add(new EmailSnapshot(
-                        entryId,
-                        receivedAt,
-                        sender,
-                        subject,
-                        body,
-                        conversationId,
-                        mailboxIdentity.DisplayName,
-                        recipients,
-                        recipientRole));
+                    messages.Add(snapshot);
                 }
                 catch (OperationCanceledException)
                 {
@@ -216,6 +209,97 @@ public sealed class OutlookComMailSource : IEmailSource
         }
 
         return messages;
+    }
+
+    private static EmailSnapshot? TryReadBySourceIdOnSta(string sourceId, CancellationToken cancellationToken)
+    {
+        object? outlook = null;
+        object? session = null;
+        object? item = null;
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var outlookType = Type.GetTypeFromProgID("Outlook.Application", throwOnError: false);
+            if (outlookType is null)
+            {
+                throw new OutlookSourceLookupException("OutlookProgIdUnavailable");
+            }
+
+            try
+            {
+                outlook = Activator.CreateInstance(outlookType);
+            }
+            catch (Exception ex)
+            {
+                throw new OutlookSourceLookupException("OutlookCreateInstanceFailed", ex);
+            }
+
+            if (outlook is null)
+            {
+                throw new OutlookSourceLookupException("OutlookCreateInstanceReturnedNull");
+            }
+
+            dynamic outlookDynamic = outlook;
+            session = outlookDynamic.Session;
+            dynamic sessionDynamic = session;
+            item = sessionDynamic.GetItemFromID(sourceId);
+            if (item is null)
+            {
+                return null;
+            }
+
+            var mailboxIdentity = TryReadCurrentUserIdentity(session);
+            return ReadItemSnapshot(
+                item,
+                folderCode: "single",
+                datePropertyName: "ReceivedTime",
+                includeBody: true,
+                mailboxIdentity,
+                fallbackSourceId: sourceId);
+        }
+        finally
+        {
+            ComRelease.FinalRelease(item);
+            ComRelease.FinalRelease(session);
+            ComRelease.FinalRelease(outlook);
+        }
+    }
+
+    private static EmailSnapshot ReadItemSnapshot(
+        object item,
+        string folderCode,
+        string datePropertyName,
+        bool includeBody,
+        MailboxIdentity mailboxIdentity,
+        string fallbackSourceId)
+    {
+        dynamic itemDynamic = item;
+        var itemDate = TryReadDateTime(item, datePropertyName)
+                       ?? TryReadDateTime(item, "ReceivedTime")
+                       ?? TryReadDateTime(item, "SentOn")
+                       ?? DateTime.Now;
+        var receivedAt = new DateTimeOffset(itemDate);
+        string entryId = Convert.ToString(itemDynamic.EntryID) ?? fallbackSourceId;
+        string subject = Convert.ToString(itemDynamic.Subject) ?? string.Empty;
+        string sender = Convert.ToString(itemDynamic.SenderName) ?? string.Empty;
+        string? body = includeBody ? Convert.ToString(itemDynamic.Body) : null;
+        string? conversationId = TryReadString(item, "ConversationID");
+        var recipients = SplitRecipients(TryReadString(item, "To"), TryReadString(item, "CC"));
+        var recipientRole = folderCode == "sent"
+            ? MailboxRecipientRole.Other
+            : TryResolveMailboxRecipientRole(item, mailboxIdentity);
+
+        return new EmailSnapshot(
+            entryId,
+            receivedAt,
+            sender,
+            subject,
+            body,
+            conversationId,
+            mailboxIdentity.DisplayName,
+            recipients,
+            recipientRole);
     }
 
     private static DateTime? TryReadDateTime(object item, string propertyName)

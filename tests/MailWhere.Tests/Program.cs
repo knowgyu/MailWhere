@@ -53,6 +53,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Runtime settings map OpenAI Responses endpoint", RuntimeSettingsMapOpenAiResponsesEndpoint),
     ("Runtime settings serialize canonical provider names", RuntimeSettingsSerializeCanonicalProviderNames),
     ("Runtime settings default unlimited recent scan", RuntimeSettingsDefaultUnlimitedRecentScan),
+    ("Runtime settings simple setting choices map", RuntimeSettingsSimpleSettingChoicesMap),
+    ("Startup launch mode maps tray argument", StartupLaunchModeMapsTrayArgument),
     ("Runtime settings default daily board time", RuntimeSettingsDefaultDailyBoardTime),
     ("Runtime settings default daily board startup delay", RuntimeSettingsDefaultDailyBoardStartupDelay),
     ("Daily board planner schedules next whole hour", DailyBoardPlannerSchedulesNextWholeHour),
@@ -87,6 +89,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Batch LLM rejects one-based ids", BatchLlmRejectsOneBasedIds),
     ("Batch LLM rejects duplicate ids", BatchLlmRejectsDuplicateIds),
     ("LLM failure review candidate retries after recovery", LlmFailureReviewCandidateRetriesAfterRecovery),
+    ("LLM failure retry service reprocesses active candidate", LlmFailureRetryServiceReprocessesActiveCandidate),
+    ("LLM failure retry service reports missing source", LlmFailureRetryServiceReportsMissingSource),
+    ("LLM failure retry service reports source lookup failure", LlmFailureRetryServiceReportsSourceLookupFailure),
     ("Repeated LLM failure does not duplicate review candidate", RepeatedLlmFailureDoesNotDuplicateReviewCandidate),
     ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
     ("OpenAI Responses client extracts output text", OpenAiResponsesClientExtractsOutputText),
@@ -607,7 +612,7 @@ static Task RuntimeSettingsMapOllamaEndpoint()
           "LlmEndpoint": "http://localhost:11434",
           "LlmModel": "qwen3.6",
           "LlmApiKeyEnvironmentVariable": "OAS_TEST_KEY",
-          "RecentScanDays": 45,
+          "RecentScanDays": 999,
           "RecentScanMaxItems": 5000,
           "ReminderLookAheadHours": 999
         }
@@ -620,7 +625,7 @@ static Task RuntimeSettingsMapOllamaEndpoint()
         Assert(endpoint.CanCall, "Expected callable LLM endpoint.");
         Assert(endpoint.Provider == LlmProviderKind.OllamaNative, "Expected Ollama-native provider.");
         Assert(endpoint.ApiKey == "test-token", "Expected API key to resolve from environment variable.");
-        Assert(settings.RecentScanDays == 31, "Expected scan days clamp.");
+        Assert(settings.RecentScanDays == 90, "Expected scan days clamp.");
         Assert(settings.RecentScanMaxItems == 5000, "Expected explicit max items to be preserved.");
         Assert(settings.ReminderLookAheadHours == 24 * 14, "Expected lookahead clamp.");
         return Task.CompletedTask;
@@ -709,11 +714,34 @@ static Task RuntimeSettingsDefaultUnlimitedRecentScan()
     Assert(defaults.RecentScanDays == 30, "Expected recent scan days default.");
     Assert(defaults.RecentScanMaxItems == 0, "Expected default scan max to mean unlimited.");
     Assert(defaults.LlmFallbackPolicy == LlmFallbackPolicy.LlmOnly, "Expected default LLM failure handling to require explicit fallback consent.");
+    Assert(defaults.WindowsStartupRequested, "Expected startup tray registration to be requested by default.");
+    Assert(defaults.LlmEndpoint.Length == 0, "Expected default LLM endpoint to stay empty until user input.");
     Assert(defaults.LlmModel.Length == 0, "Expected default LLM model to stay empty until model discovery or user input.");
 
     var explicitUnlimited = RuntimeSettingsSerializer.ParseOrDefault("""{"RecentScanMaxItems":0,"LlmFallbackPolicy":"LlmThenRules"}""");
     Assert(explicitUnlimited.RecentScanMaxItems == 0, "Expected explicit unlimited scan max.");
     Assert(explicitUnlimited.LlmFallbackPolicy == LlmFallbackPolicy.LlmThenRules, "Expected explicit fallback policy to be preserved.");
+    return Task.CompletedTask;
+}
+
+static Task RuntimeSettingsSimpleSettingChoicesMap()
+{
+    Assert(RecentMailRangeChoices.NormalizeDays(3) == 7, "Expected short custom range to normalize to 7-day UI choice.");
+    Assert(RecentMailRangeChoices.NormalizeDays(20) == 30, "Expected mid custom range to normalize to 30-day UI choice.");
+    Assert(RecentMailRangeChoices.NormalizeDays(45) == 90, "Expected long custom range to normalize to 90-day UI choice.");
+    Assert(ReminderNotificationChoices.FromLookAheadHours(0) == ReminderNotificationMode.Off, "Expected zero lookahead to mean notifications off.");
+    Assert(ReminderNotificationChoices.FromLookAheadHours(1) == ReminderNotificationMode.DueToday, "Expected one-hour lookahead to mean due-today alerts.");
+    Assert(ReminderNotificationChoices.ToLookAheadHours(ReminderNotificationMode.DayBefore) == 24, "Expected day-before mode to map to 24 hours.");
+    return Task.CompletedTask;
+}
+
+static Task StartupLaunchModeMapsTrayArgument()
+{
+    Assert(StartupLaunchModeResolver.FromArgs(Array.Empty<string>()) == StartupLaunchMode.ShowMainWindow, "Expected direct launch to show the main board.");
+    Assert(StartupLaunchModeResolver.FromArgs(new[] { "--tray" }) == StartupLaunchMode.TrayOnly, "Expected --tray to start in tray mode.");
+    var command = StartupLaunchModeResolver.BuildTrayStartupCommand(@"C:\Apps\MailWhere.exe");
+    Assert(command == "\"C:\\Apps\\MailWhere.exe\" --tray", "Expected startup command to include tray-only flag.");
+    Assert(StartupLaunchModeResolver.MatchesExecutable(command, @"C:\Apps\MailWhere.exe"), "Expected startup command parser to match executable path.");
     return Task.CompletedTask;
 }
 
@@ -1596,6 +1624,98 @@ static async Task LlmFailureReviewCandidateRetriesAfterRecovery()
     Assert(store.Candidates.Count == 1, "Expected stale failure candidate to be preserved only as resolved history.");
     Assert(store.Candidates.Single().Suppressed, "Expected stale LLM failure candidate to be suppressed after reanalysis.");
     Assert(store.Processed.Contains(mail.SourceHash), "Expected successfully reanalyzed source to be marked processed.");
+}
+
+static async Task LlmFailureRetryServiceReprocessesActiveCandidate()
+{
+    var store = new FakeStore();
+    var mail = Mail("자료 요청", "내일까지 검토 후 회신 부탁드립니다.", "llm-service-retry-source");
+    var candidate = ReviewCandidate.FromAnalysis(mail, LlmFailureAnalysis(mail), DateTimeOffset.UtcNow);
+    await store.SaveReviewCandidateAsync(candidate);
+    var pipeline = new FollowUpPipeline(new SequenceAnalyzer(new FollowUpAnalysis(
+            FollowUpKind.Deadline,
+            AnalysisDisposition.AutoCreateTask,
+            0.91,
+            "자료 검토 후 회신",
+            "LLM 복구 후 업무로 등록했습니다.",
+            "내일까지 검토 후 회신",
+            new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)))),
+        store);
+    var service = new ReviewCandidateRetryService(
+        store,
+        pipeline,
+        (reviewCandidate, _) => Task.FromResult<EmailSnapshot?>(reviewCandidate.SourceId == mail.SourceId ? mail : null));
+
+    var summary = await service.RetryTransientLlmFailuresAsync();
+
+    Assert(summary.EligibleCount == 1, "Expected one retryable LLM failure candidate.");
+    Assert(summary.TaskCreatedCount == 1, "Expected retry to create a recovered task.");
+    Assert(summary.MissingSourceCount == 0, "Expected source resolver to provide the original message.");
+    Assert(summary.SourceLookupFailureCount == 0, "Expected no source lookup failure when resolver succeeds.");
+    Assert(store.Tasks.Count == 1, "Expected recovered task to be saved.");
+    Assert(store.Candidates.Single().Suppressed, "Expected stale failure candidate to be suppressed.");
+}
+
+static async Task LlmFailureRetryServiceReportsMissingSource()
+{
+    var store = new FakeStore();
+    var mail = Mail("자료 요청", "내일까지 검토 후 회신 부탁드립니다.", "llm-service-missing-source");
+    var candidate = ReviewCandidate.FromAnalysis(mail, LlmFailureAnalysis(mail), DateTimeOffset.UtcNow);
+    await store.SaveReviewCandidateAsync(candidate);
+    var pipeline = new FollowUpPipeline(new SequenceAnalyzer(new FollowUpAnalysis(
+            FollowUpKind.Deadline,
+            AnalysisDisposition.AutoCreateTask,
+            0.91,
+            "자료 검토 후 회신",
+            "이 분석은 원본 메일이 없으면 실행되면 안 됩니다.",
+            "내일까지 검토 후 회신",
+            new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)))),
+        store);
+    var service = new ReviewCandidateRetryService(
+        store,
+        pipeline,
+        (_, _) => Task.FromResult<EmailSnapshot?>(null));
+
+    var summary = await service.RetryTransientLlmFailuresAsync();
+
+    Assert(summary.EligibleCount == 1, "Expected one retryable LLM failure candidate.");
+    Assert(summary.RetriedCount == 0, "Expected no retry without an original source mail.");
+    Assert(summary.MissingSourceCount == 1, "Expected missing source to be reported.");
+    Assert(summary.SourceLookupFailureCount == 0, "Expected no lookup failure when resolver returns null.");
+    Assert(summary.TaskCreatedCount == 0, "Expected no task to be created from stale failure metadata.");
+    Assert(store.Tasks.Count == 0, "Expected no recovered task without source mail.");
+    Assert(!store.Candidates.Single().Suppressed, "Expected missing-source candidate to remain active for later retry.");
+}
+
+static async Task LlmFailureRetryServiceReportsSourceLookupFailure()
+{
+    var store = new FakeStore();
+    var mail = Mail("자료 요청", "내일까지 검토 후 회신 부탁드립니다.", "llm-service-source-lookup-failure");
+    var candidate = ReviewCandidate.FromAnalysis(mail, LlmFailureAnalysis(mail), DateTimeOffset.UtcNow);
+    await store.SaveReviewCandidateAsync(candidate);
+    var pipeline = new FollowUpPipeline(new SequenceAnalyzer(new FollowUpAnalysis(
+            FollowUpKind.Deadline,
+            AnalysisDisposition.AutoCreateTask,
+            0.91,
+            "자료 검토 후 회신",
+            "이 분석은 원본 조회가 실패하면 실행되면 안 됩니다.",
+            "내일까지 검토 후 회신",
+            new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)))),
+        store);
+    var service = new ReviewCandidateRetryService(
+        store,
+        pipeline,
+        (_, _) => throw new InvalidOperationException("source lookup unavailable"));
+
+    var summary = await service.RetryTransientLlmFailuresAsync();
+
+    Assert(summary.EligibleCount == 1, "Expected one retryable LLM failure candidate.");
+    Assert(summary.RetriedCount == 0, "Expected no retry when source lookup fails.");
+    Assert(summary.MissingSourceCount == 0, "Expected lookup failure to be distinct from missing source.");
+    Assert(summary.SourceLookupFailureCount == 1, "Expected source lookup failure to be reported.");
+    Assert(summary.TaskCreatedCount == 0, "Expected no task to be created from stale failure metadata.");
+    Assert(store.Tasks.Count == 0, "Expected no recovered task when source lookup fails.");
+    Assert(!store.Candidates.Single().Suppressed, "Expected lookup-failure candidate to remain active for later retry.");
 }
 
 static async Task RepeatedLlmFailureDoesNotDuplicateReviewCandidate()
