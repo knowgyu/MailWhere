@@ -27,7 +27,7 @@ public static class FeatureGate
 
         if (!input.SmokeGatePassed)
         {
-            reasons.Add("Phase 0 smoke gate must pass before automatic watching.");
+            reasons.Add("Run one successful manual mail check before enabling automatic mail checks.");
         }
 
         if (!input.OutlookComAvailable)

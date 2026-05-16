@@ -24,7 +24,7 @@ public static class ReminderPlanner
 {
     public static IReadOnlyList<ReminderCandidate> Plan(LocalTaskItem task, DateTimeOffset now, IReadOnlyList<ReminderRule>? rules = null)
     {
-        if (task.Status is LocalTaskStatus.Done or LocalTaskStatus.Dismissed or LocalTaskStatus.NotATask
+        if (task.Status is LocalTaskStatus.Archived or LocalTaskStatus.Done or LocalTaskStatus.Dismissed or LocalTaskStatus.NotATask
             || FollowUpPresentation.IsSnoozedForFuture(task, now))
         {
             return Array.Empty<ReminderCandidate>();

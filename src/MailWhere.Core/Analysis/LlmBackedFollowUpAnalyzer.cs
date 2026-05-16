@@ -260,7 +260,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             $"LLM 분석 실패({failureCode})로 자동 등록하지 않았습니다.",
             null,
             null,
-            "LLM endpoint 상태를 확인한 뒤 다시 스캔하세요.");
+            "LLM endpoint 상태를 확인한 뒤 다시 메일을 확인하세요.");
     }
 
     private static bool TryParse(string raw, EmailSnapshot email, out FollowUpAnalysis parsed)

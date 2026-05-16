@@ -9,7 +9,6 @@ using WpfButton = System.Windows.Controls.Button;
 using WpfContextMenu = System.Windows.Controls.ContextMenu;
 using WpfListBox = System.Windows.Controls.ListBox;
 using WpfMenuItem = System.Windows.Controls.MenuItem;
-using WpfSeparator = System.Windows.Controls.Separator;
 
 namespace MailWhere.Windows;
 
@@ -18,10 +17,10 @@ public partial class DailyBoardWindow : Window
     private readonly List<LocalTaskItem> _tasks;
     private readonly List<ReviewCandidate> _candidates;
     private readonly Func<LocalTaskItem, Task> _openTaskAsync;
-    private readonly Func<LocalTaskItem, Task<bool>> _completeTaskAsync;
-    private readonly Func<LocalTaskItem, Task<bool>> _dismissTaskAsync;
+    private readonly Func<LocalTaskItem, Task<bool>> _archiveTaskAsync;
     private readonly Func<LocalTaskItem, DateTimeOffset, Task<bool>> _snoozeTaskAsync;
     private readonly Func<LocalTaskItem, DateTimeOffset, Task<bool>> _setTaskDueAsync;
+    private readonly Func<LocalTaskItem, TaskEditRequest, Task<LocalTaskItem?>> _updateTaskAsync;
     private readonly Func<string, DateTimeOffset?, Task<LocalTaskItem?>> _addTaskAsync;
     private readonly Func<Task> _openReviewCandidatesAsync;
     private DateTimeOffset _now;
@@ -36,10 +35,10 @@ public partial class DailyBoardWindow : Window
         string dailyBoardTime,
         DailyBoardOpenOptions options,
         Func<LocalTaskItem, Task> openTaskAsync,
-        Func<LocalTaskItem, Task<bool>> completeTaskAsync,
-        Func<LocalTaskItem, Task<bool>> dismissTaskAsync,
+        Func<LocalTaskItem, Task<bool>> archiveTaskAsync,
         Func<LocalTaskItem, DateTimeOffset, Task<bool>> snoozeTaskAsync,
         Func<LocalTaskItem, DateTimeOffset, Task<bool>> setTaskDueAsync,
+        Func<LocalTaskItem, TaskEditRequest, Task<LocalTaskItem?>> updateTaskAsync,
         Func<string, DateTimeOffset?, Task<LocalTaskItem?>> addTaskAsync,
         Func<Task> openReviewCandidatesAsync)
     {
@@ -51,10 +50,10 @@ public partial class DailyBoardWindow : Window
         _options = options;
         _filter = options.Filter;
         _openTaskAsync = openTaskAsync;
-        _completeTaskAsync = completeTaskAsync;
-        _dismissTaskAsync = dismissTaskAsync;
+        _archiveTaskAsync = archiveTaskAsync;
         _snoozeTaskAsync = snoozeTaskAsync;
         _setTaskDueAsync = setTaskDueAsync;
+        _updateTaskAsync = updateTaskAsync;
         _addTaskAsync = addTaskAsync;
         _openReviewCandidatesAsync = openReviewCandidatesAsync;
 
@@ -195,7 +194,7 @@ public partial class DailyBoardWindow : Window
         }
     }
 
-    private async void CompleteTask_Click(object sender, RoutedEventArgs e)
+    private async void ArchiveTask_Click(object sender, RoutedEventArgs e)
     {
         try
         {
@@ -204,19 +203,19 @@ public partial class DailyBoardWindow : Window
                 return;
             }
 
-            if (!await _completeTaskAsync(task))
+            if (!await _archiveTaskAsync(task))
             {
                 SetStatus("이미 처리된 항목입니다.");
                 return;
             }
 
             _tasks.RemoveAll(item => item.Id == task.Id);
-            SetStatus("완료 처리했습니다.");
+            SetStatus("보관했습니다. 이 목록에는 다시 표시되지 않습니다.");
             Render();
         }
         catch (Exception ex)
         {
-            SetStatus($"완료 처리에 실패했습니다: {ex.GetType().Name}");
+            SetStatus($"보관에 실패했습니다: {ex.GetType().Name}");
         }
     }
 
@@ -252,8 +251,6 @@ public partial class DailyBoardWindow : Window
         AddMenuItem(menu, "내일 아침 다시 보기", () => SnoozeTaskAsync(task, SnoozePlanner.Plan(SnoozePreset.TomorrowMorning, DateTimeOffset.Now), "내일 아침 다시 표시합니다."));
         AddMenuItem(menu, "다음 월요일 다시 보기", () => SnoozeTaskAsync(task, SnoozePlanner.Plan(SnoozePreset.NextMondayMorning, DateTimeOffset.Now), "다음 주 월요일 다시 표시합니다."));
         AddMenuItem(menu, "직접 날짜 선택", () => SnoozeCustomTaskAsync(task));
-        menu.Items.Add(new WpfSeparator());
-        AddMenuItem(menu, "보드에서 숨기기 (Outlook 유지)", () => DismissTaskFromMenuAsync(task));
         button.ContextMenu = menu;
         menu.IsOpen = true;
     }
@@ -275,26 +272,6 @@ public partial class DailyBoardWindow : Window
         menu.Items.Add(item);
     }
 
-    private async Task DismissTaskFromMenuAsync(LocalTaskItem task)
-    {
-        try
-        {
-            if (!await _dismissTaskAsync(task))
-            {
-                SetStatus("이미 처리된 항목입니다.");
-                return;
-            }
-
-            _tasks.RemoveAll(item => item.Id == task.Id);
-            SetStatus("업무 보드에서 숨겼습니다.");
-            Render();
-        }
-        catch (Exception ex)
-        {
-            SetStatus($"숨김 처리에 실패했습니다: {ex.GetType().Name}");
-        }
-    }
-
     private async Task SnoozeTaskAsync(LocalTaskItem task, DateTimeOffset until, string message)
     {
         var now = DateTimeOffset.Now;
@@ -312,6 +289,59 @@ public partial class DailyBoardWindow : Window
         }
 
         SetStatus(effectiveUntil == until ? message : $"{effectiveUntil:MM/dd HH:mm}에 다시 표시합니다.");
+        Render();
+    }
+
+    private async void EditTask_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (GetCard(sender) is { Task: { } task })
+            {
+                await EditTaskAsync(task);
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"업무 수정에 실패했습니다: {ex.GetType().Name}");
+        }
+    }
+
+    private async void BoardCard_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        try
+        {
+            if (sender is WpfListBox { SelectedItem: BoardCardItem { Task: { } task } })
+            {
+                await EditTaskAsync(task);
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"업무 수정에 실패했습니다: {ex.GetType().Name}");
+        }
+    }
+
+    private async Task EditTaskAsync(LocalTaskItem task)
+    {
+        var dialog = new TaskEditDialog(task)
+        {
+            Owner = this
+        };
+        if (dialog.ShowDialog() != true || dialog.EditRequest is not { } edit)
+        {
+            return;
+        }
+
+        var updated = await _updateTaskAsync(task, edit);
+        if (updated is null)
+        {
+            SetStatus("이미 처리된 항목이라 수정하지 못했습니다.");
+            return;
+        }
+
+        ReplaceTask(updated);
+        SetStatus("업무 내용을 수정했습니다.");
         Render();
     }
 
@@ -404,6 +434,15 @@ public partial class DailyBoardWindow : Window
     private static BoardCardItem? GetCard(object sender) =>
         sender is FrameworkElement { Tag: BoardCardItem item } ? item : null;
 
+    private void ReplaceTask(LocalTaskItem updated)
+    {
+        var index = _tasks.FindIndex(item => item.Id == updated.Id);
+        if (index >= 0)
+        {
+            _tasks[index] = updated;
+        }
+    }
+
     private void DailyBoardWindow_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key != Key.Escape)
@@ -429,12 +468,13 @@ public partial class DailyBoardWindow : Window
 
     private sealed class BoardCardItem
     {
-        private BoardCardItem(LocalTaskItem? task, string title, string meta, string badge)
+        private BoardCardItem(LocalTaskItem? task, string title, string meta, string badge, string dueButtonText)
         {
             Task = task;
             Title = title;
             Meta = meta;
             Badge = badge;
+            DueButtonText = dueButtonText;
         }
 
         public LocalTaskItem? Task { get; }
@@ -443,12 +483,12 @@ public partial class DailyBoardWindow : Window
         public string Badge { get; }
         public bool HasTask => Task is not null;
         public bool CanOpen => !string.IsNullOrWhiteSpace(Task?.SourceId);
-        public string DueButtonText => "기한 설정";
+        public string DueButtonText { get; }
         public Visibility DueButtonVisibility => Task is null ? Visibility.Collapsed : Visibility.Visible;
 
         public static BoardCardItem FromTask(LocalTaskItem task, DateTimeOffset now)
         {
-            var due = task.DueAt is null ? "기한 미정" : DdayFormatter.Format(task.DueAt.Value, now);
+            var due = task.DueAt is null ? "기한 미정" : $"{DdayFormatter.Format(task.DueAt.Value, now)} · {task.DueAt.Value:MM/dd HH:mm}";
             var snooze = task.Status == LocalTaskStatus.Snoozed && task.SnoozeUntil is not null
                 ? $" · 나중에 {task.SnoozeUntil:MM/dd HH:mm}"
                 : string.Empty;
@@ -456,9 +496,10 @@ public partial class DailyBoardWindow : Window
             var received = task.SourceReceivedAt ?? task.CreatedAt;
             return new BoardCardItem(
                 task,
-                CompactLine(task.Title, 44),
-                $"{due}{snooze} | {sender} | {received:MM/dd HH:mm}",
-                FollowUpPresentation.CompactBadge(task.Kind));
+                CompactLine(task.Title, 120),
+                $"{due}{snooze} · {sender} · {received:MM/dd HH:mm}",
+                FollowUpPresentation.CompactBadge(task.Kind),
+                task.DueAt is null ? "기한 추가" : "기한 변경");
         }
 
         private static string CompactLine(string? value, int maxChars)

@@ -37,6 +37,9 @@ public static class FollowUpPresentation
     public static bool IsActive(LocalTaskItem task) =>
         task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed;
 
+    public static bool IsVisibleInPrimary(LocalTaskItem task, DateTimeOffset now) =>
+        IsActive(task) && !IsSnoozedForFuture(task, now);
+
     public static bool IsSnoozedForFuture(LocalTaskItem task, DateTimeOffset now) =>
         task.Status == LocalTaskStatus.Snoozed
         && task.SnoozeUntil is not null

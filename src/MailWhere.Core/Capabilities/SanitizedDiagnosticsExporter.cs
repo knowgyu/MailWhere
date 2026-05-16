@@ -147,14 +147,13 @@ public static class SanitizedDiagnosticsExporter
     private static string ToGateReasonCode(string reason) =>
         reason switch
         {
-            "Phase 0 smoke gate must pass before automatic watching." => "phase0-smoke-gate-required",
-            "Managed mode requires a passing Phase 0 smoke gate before automatic watching." => "phase0-smoke-gate-required",
+            "Run one successful manual mail check before enabling automatic mail checks." => "manual-mail-check-required",
             "Outlook COM is unavailable." => "outlook-com-unavailable",
             "Outlook Inbox is not readable." => "outlook-inbox-unreadable",
             "Local storage is not writable." => "storage-not-writable",
             "LLM endpoint is unavailable and rule-only mode is not accepted." => "llm-unavailable-rule-only-not-accepted",
             "Mail body is not readable; manual selected-text mode should be used." => "mail-body-unreadable-manual-mode",
-            "Automatic watcher is not requested in settings." => "automatic-watcher-not-requested",
+            "Automatic mail check is not requested in settings." => "automatic-check-not-requested",
             _ => "unspecified"
         };
 }

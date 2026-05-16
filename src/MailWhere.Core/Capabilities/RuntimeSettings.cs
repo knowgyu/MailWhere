@@ -167,7 +167,7 @@ public static class RuntimeGateComposer
             gate = GateResult.Disabled(
                 "manual",
                 gate.Reasons
-                    .Concat(new[] { "Automatic watcher is not requested in settings." })
+                    .Concat(new[] { "Automatic mail check is not requested in settings." })
                     .Distinct(StringComparer.Ordinal)
                     .ToArray());
         }

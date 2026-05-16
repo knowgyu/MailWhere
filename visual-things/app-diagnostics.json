@@ -1,0 +1,93 @@
+{
+  "CreatedAt": "2026-05-16T12:41:38.7490393+00:00",
+  "AutomaticWatcherGate": {
+    "AutomaticWatcherEnabled": false,
+    "Mode": "manual",
+    "ReasonCodes": [
+      "outlook-com-unavailable",
+      "outlook-inbox-unreadable",
+      "automatic-watcher-not-requested"
+    ]
+  },
+  "Results": [
+    {
+      "Id": "outlook-com",
+      "Status": "Failed",
+      "Severity": "Blocked",
+      "SafeCode": "blocked",
+      "Details": {
+        "errorClass": "ProgIdUnavailable"
+      }
+    },
+    {
+      "Id": "notification-capability",
+      "Status": "Passed",
+      "Severity": "Info",
+      "SafeCode": "passed",
+      "Details": {
+        "feature": "in-app-toast",
+        "enabled": "true"
+      }
+    },
+    {
+      "Id": "rule-only-mode",
+      "Status": "Passed",
+      "Severity": "Info",
+      "SafeCode": "passed",
+      "Details": {
+        "feature": "rule-only",
+        "enabled": "true"
+      }
+    },
+    {
+      "Id": "llm-endpoint",
+      "Status": "Warning",
+      "Severity": "Degraded",
+      "SafeCode": "warning",
+      "Details": {
+        "feature": "llm-endpoint",
+        "enabled": "false"
+      }
+    },
+    {
+      "Id": "storage-writable",
+      "Status": "Passed",
+      "Severity": "Info",
+      "SafeCode": "passed",
+      "Details": {
+        "feature": "local-storage",
+        "statusCode": "writable"
+      }
+    },
+    {
+      "Id": "startup-toggle",
+      "Status": "Passed",
+      "Severity": "Info",
+      "SafeCode": "passed",
+      "Details": {
+        "feature": "startup-toggle",
+        "statusCode": "writable"
+      }
+    },
+    {
+      "Id": "runtime-settings",
+      "Status": "Passed",
+      "Severity": "Info",
+      "SafeCode": "passed",
+      "Details": {
+        "feature": "runtime-settings",
+        "mode": "manual"
+      }
+    },
+    {
+      "Id": "llm-endpoint",
+      "Status": "Warning",
+      "Severity": "Degraded",
+      "SafeCode": "warning",
+      "Details": {
+        "feature": "llm-endpoint",
+        "enabled": "false"
+      }
+    }
+  ]
+}

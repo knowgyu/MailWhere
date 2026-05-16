@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -34,6 +35,8 @@ public partial class MainWindow : Window
     private readonly DateTimeOffset _appStartedAt = DateTimeOffset.Now;
     private bool _scanInProgress;
     private bool _fallbackPromptShownThisSession;
+    private bool _backgroundStarted;
+    private bool _allowExit;
     private DailyBoardWindow? _dailyBoardWindow;
     private AnalysisTelemetry _lastAnalysisTelemetry = AnalysisTelemetry.Empty;
 
@@ -43,7 +46,8 @@ public partial class MainWindow : Window
         _settings = UpgradeRuntimeSettings(WindowsRuntimeSettingsStore.Load());
         StartupToggle.IsChecked = IsStartupRegistered();
         ApplySettingsToControls(_settings);
-        Loaded += async (_, _) => await OnLoadedAsync();
+        Loaded += async (_, _) => await StartBackgroundAsync();
+        Closing += MainWindow_Closing;
     }
 
     private static RuntimeSettings UpgradeRuntimeSettings(RuntimeSettings settings) =>
@@ -54,6 +58,40 @@ public partial class MainWindow : Window
     public void SetNotificationSink(IUserNotificationSink notificationSink)
     {
         _notificationSink = notificationSink;
+    }
+
+    public async Task StartBackgroundAsync()
+    {
+        if (_backgroundStarted)
+        {
+            return;
+        }
+
+        _backgroundStarted = true;
+        await OnLoadedAsync();
+    }
+
+    public void ShowShell()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    public void ReportStatus(string message) => StatusText.Text = message;
+
+    public void AllowExit() => _allowExit = true;
+
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_allowExit)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        Hide();
+        StatusText.Text = "창을 닫아도 트레이에서 계속 실행됩니다.";
     }
 
     private async void RunDiagnostics_Click(object sender, RoutedEventArgs e)
@@ -92,7 +130,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync("최근 메일 스캔 실패", ex);
+            await ShowErrorAsync("메일 확인 실패", ex);
         }
     }
 
@@ -104,7 +142,7 @@ public partial class MainWindow : Window
         }
 
         _scanCancellationSource.Cancel();
-        StatusText.Text = "스캔 중지를 요청했습니다. 현재 LLM 요청이 정리되면 멈춥니다.";
+        StatusText.Text = "메일 확인 중지를 요청했습니다. 현재 LLM 요청이 정리되면 멈춥니다.";
         ScanProgressText.Text = "중지 요청됨…";
     }
 
@@ -136,18 +174,13 @@ public partial class MainWindow : Window
 
     private async Task OpenDailyBoardAsync(DailyBoardOpenOptions options)
     {
-        Show();
-        WindowState = WindowState.Normal;
-        Activate();
         await ShowDailyBoardAsync(DateTimeOffset.Now, _settings.DailyBoardTime, options);
     }
 
     public void OpenReviewTab()
     {
-        Show();
-        WindowState = WindowState.Normal;
+        ShowShell();
         MainTabs.SelectedItem = ReviewTab;
-        Activate();
     }
 
     private async void OpenTaskButton_Click(object sender, RoutedEventArgs e)
@@ -165,18 +198,48 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void DismissTaskButton_Click(object sender, RoutedEventArgs e)
+    private async void ArchiveTaskButton_Click(object sender, RoutedEventArgs e)
     {
         try
         {
-            if (GetTaskListItem(sender) is { Task: { } task } && await DismissTaskWithConfirmationAsync(task))
+            if (GetTaskListItem(sender) is { Task: { } task })
             {
-                await RefreshTasksAsync();
+                await ArchiveTaskAsync(task);
             }
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"할 일을 삭제하지 못했습니다: {ex.GetType().Name}";
+            StatusText.Text = $"업무를 보관하지 못했습니다: {ex.GetType().Name}";
+        }
+    }
+
+    private async void EditTaskButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (GetTaskListItem(sender) is { Task: { } task })
+            {
+                await EditTaskAsync(task);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"업무를 수정하지 못했습니다: {ex.GetType().Name}";
+        }
+    }
+
+    private async void TaskList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        try
+        {
+            if (TasksList.SelectedItem is TaskListItem { Task: { } task })
+            {
+                await EditTaskAsync(task);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"업무를 수정하지 못했습니다: {ex.GetType().Name}";
         }
     }
 
@@ -196,7 +259,6 @@ public partial class MainWindow : Window
             if (dialog.ShowDialog() == true && dialog.SelectedDueAt is { } dueAt)
             {
                 await SetTaskDueAsync(task, dueAt);
-                await RefreshTasksAsync();
             }
         }
         catch (Exception ex)
@@ -361,7 +423,7 @@ public partial class MainWindow : Window
         _scanCancellationSource?.Dispose();
         _scanCancellationSource = new CancellationTokenSource();
         var scanCancellationToken = _scanCancellationSource.Token;
-        SetScanBusy(true, "스캔 준비 중입니다…");
+        SetScanBusy(true, "메일 확인 준비 중입니다…");
         try
         {
             if (refreshSettingsFromControls)
@@ -370,7 +432,7 @@ public partial class MainWindow : Window
                 WindowsRuntimeSettingsStore.Save(_settings);
             }
 
-            StatusText.Text = "최근 1개월 메일을 읽고 할 일 후보를 분석하는 중입니다…";
+            StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일을 읽고 업무 후보를 분석하는 중입니다…";
             await Dispatcher.Yield(DispatcherPriority.Background);
 
             var store = await GetStoreAsync();
@@ -394,7 +456,7 @@ public partial class MainWindow : Window
             var smokeGateRecorded = showSummaryNotification && MarkSmokeGatePassedAfterManualScan(summary);
             if (showSummaryNotification && smokeGateRecorded)
             {
-                StatusText.Text = "수동 스캔이 성공해 자동 watcher smoke gate를 통과 처리했습니다.";
+                StatusText.Text = "수동 확인이 성공해 자동 메일 확인을 켤 수 있습니다.";
                 if (_settings.AutomaticWatcherRequested)
                 {
                     StartAutomaticScanTimer();
@@ -412,12 +474,12 @@ public partial class MainWindow : Window
             var llmSummary = _lastAnalysisTelemetry.ToKoreanSummary();
             LlmStatusText.Text = llmSummary;
             StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 새 검토 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {llmSummary}"
-                + (smokeGateRecorded ? " · smoke gate 통과" : string.Empty);
+                + (smokeGateRecorded ? " · 자동 확인 준비 완료" : string.Empty);
             if (showSummaryNotification)
             {
                 await _notificationSink.ShowAsync(new UserNotification(
                     UserNotificationKind.ScanSummary,
-                    "최근 메일 스캔 완료",
+                    "메일 확인 완료",
                     $"할 일 {summary.TaskCreatedCount}건, 새 검토 후보 {newReviewCandidateCount}건을 찾았습니다. 검토는 MailWhere 보드에서 확인하세요.",
                     "scan-summary"));
             }
@@ -430,8 +492,8 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) when (scanCancellationToken.IsCancellationRequested)
         {
-            StatusText.Text = "사용자 요청으로 스캔을 중지했습니다. 이미 처리된 항목은 유지됩니다.";
-            ScanProgressText.Text = "스캔 중지됨";
+            StatusText.Text = "사용자 요청으로 메일 확인을 중지했습니다. 이미 처리된 항목은 유지됩니다.";
+            ScanProgressText.Text = "메일 확인 중지됨";
             return new MailScanSummary(0, 0, 0, 0, 0, 0, Array.Empty<MailReadWarning>());
         }
         finally
@@ -536,13 +598,13 @@ public partial class MainWindow : Window
     {
         if (_scanInProgress)
         {
-            StatusText.Text = "스캔 중에는 업무 데이터를 초기화할 수 없습니다. 스캔을 중지하거나 끝난 뒤 다시 시도하세요.";
+            StatusText.Text = "메일 확인 중에는 업무 데이터를 초기화할 수 없습니다. 확인을 중지하거나 끝난 뒤 다시 시도하세요.";
             return;
         }
 
         var result = System.Windows.MessageBox.Show(
             this,
-            "저장된 할 일, 검토 후보, 스캔 중복 기록을 지웁니다.\n설정과 Windows 시작 등록은 유지합니다.",
+	            "저장된 할 일, 검토 후보, 메일 확인 중복 기록을 지웁니다.\n설정과 Windows 시작 등록은 유지합니다.",
             "MailWhere 업무 데이터 초기화",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
@@ -559,7 +621,7 @@ public partial class MainWindow : Window
             var deleted = WindowsRuntimeDiagnostics.DeleteFollowUpDatabaseFiles();
             await RefreshTasksAsync();
             await RefreshReviewCandidatesAsync();
-            StatusText.Text = "업무 데이터를 초기화했습니다. 다음 스캔은 새 데이터베이스에서 시작합니다.";
+            StatusText.Text = "업무 데이터를 초기화했습니다. 다음 메일 확인은 새 데이터베이스에서 시작합니다.";
             DiagnosticsText.Text = JsonSerializer.Serialize(new
             {
                 localDataReset = new
@@ -718,7 +780,7 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(sourceId))
         {
-            StatusText.Text = "이 항목은 원본 메일 연결 정보가 없습니다. 새 버전에서 다시 스캔한 항목부터 열 수 있습니다.";
+            StatusText.Text = "이 항목은 원본 메일 연결 정보가 없습니다. 새 버전에서 다시 확인한 항목부터 열 수 있습니다.";
             return;
         }
 
@@ -750,35 +812,70 @@ public partial class MainWindow : Window
             return;
         }
 
-        var tasks = await store.ListOpenTasksAsync();
-        var candidates = await store.ListReviewCandidatesAsync();
-        var snapshot = DailyBriefPlanner.Build(tasks, candidates, now);
         try
         {
-            await DailyBriefNotificationEmitter.EmitAndMarkShownAsync(_notificationSink, store, plan, snapshot);
-            WindowsRuntimeDiagnostics.RecordUiEvent("daily-brief-notification-emitted", new Dictionary<string, string>
+            await ShowDailyBoardAsync(now, plan.DailyBoardTime, DailyBoardOpenOptions.TodayBrief(BoardOrigin.ScheduledDailyBoard));
+            await store.SetAppStateAsync(DailyBoardPlanner.LastShownDateKey, plan.TodayKey);
+            WindowsRuntimeDiagnostics.RecordUiEvent("daily-board-scheduled-opened", new Dictionary<string, string>
             {
                 ["todayKey"] = plan.TodayKey,
-                ["surface"] = "notification"
+                ["surface"] = "window"
             });
-            StatusText.Text = "오늘 브리핑 알림을 보냈습니다. 업무 보드에서 다시 볼 수 있습니다.";
+            StatusText.Text = "오늘 업무 보드를 열었습니다. 트레이에서 다시 볼 수 있습니다.";
         }
         catch (OperationCanceledException)
         {
-            WindowsRuntimeDiagnostics.RecordUiEvent("daily-brief-notification-canceled-not-marked", new Dictionary<string, string>
+            WindowsRuntimeDiagnostics.RecordUiEvent("daily-board-scheduled-open-canceled-not-marked", new Dictionary<string, string>
             {
                 ["todayKey"] = plan.TodayKey
             });
-            StatusText.Text = "오늘 브리핑 알림이 취소되어 오늘 표시로 기록하지 않았습니다.";
+            StatusText.Text = "오늘 업무 보드 열기가 취소되어 오늘 표시로 기록하지 않았습니다.";
         }
         catch (Exception ex)
         {
-            WindowsRuntimeDiagnostics.RecordUiEvent("daily-brief-notification-failed-not-marked", new Dictionary<string, string>
+            WindowsRuntimeDiagnostics.RecordUiEvent("daily-board-scheduled-open-failed", new Dictionary<string, string>
             {
                 ["todayKey"] = plan.TodayKey,
                 ["errorClass"] = ex.GetType().Name
             });
-            StatusText.Text = $"오늘 브리핑 알림을 보내지 못해 오늘 표시로 기록하지 않았습니다: {ex.GetType().Name}";
+            await TryDailyBriefNotificationFallbackAsync(store, plan, now, ex);
+        }
+    }
+
+    private async Task TryDailyBriefNotificationFallbackAsync(SqliteFollowUpStore store, DailyBoardPlan plan, DateTimeOffset now, Exception boardException)
+    {
+        try
+        {
+            var tasks = await store.ListOpenTasksAsync();
+            var candidates = await store.ListReviewCandidatesAsync();
+            var snapshot = DailyBriefPlanner.Build(tasks, candidates, now);
+            await DailyBriefNotificationEmitter.EmitAndMarkShownAsync(_notificationSink, store, plan, snapshot);
+            WindowsRuntimeDiagnostics.RecordUiEvent("daily-brief-notification-fallback-emitted", new Dictionary<string, string>
+            {
+                ["todayKey"] = plan.TodayKey,
+                ["boardErrorClass"] = boardException.GetType().Name,
+                ["surface"] = "notification"
+            });
+            StatusText.Text = "업무 보드를 바로 열지 못해 오늘 브리핑 알림으로 대신 안내했습니다.";
+        }
+        catch (OperationCanceledException)
+        {
+            WindowsRuntimeDiagnostics.RecordUiEvent("daily-brief-notification-fallback-canceled-not-marked", new Dictionary<string, string>
+            {
+                ["todayKey"] = plan.TodayKey,
+                ["boardErrorClass"] = boardException.GetType().Name
+            });
+            StatusText.Text = "오늘 브리핑 알림이 취소되어 오늘 표시로 기록하지 않았습니다.";
+        }
+        catch (Exception fallbackException) when (fallbackException is not OperationCanceledException)
+        {
+            WindowsRuntimeDiagnostics.RecordUiEvent("daily-brief-notification-fallback-failed-not-marked", new Dictionary<string, string>
+            {
+                ["todayKey"] = plan.TodayKey,
+                ["boardErrorClass"] = boardException.GetType().Name,
+                ["fallbackErrorClass"] = fallbackException.GetType().Name
+            });
+            StatusText.Text = $"오늘 업무 보드와 알림을 열지 못해 오늘 표시로 기록하지 않았습니다: {fallbackException.GetType().Name}";
         }
     }
 
@@ -815,15 +912,16 @@ public partial class MainWindow : Window
             dailyBoardTime,
             options,
             OpenTaskSourceAsync,
-            CompleteTaskAsync,
-            DismissTaskWithConfirmationAsync,
+            ArchiveTaskAsync,
             SnoozeTaskAsync,
             SetTaskDueAsync,
+            UpdateTaskDetailsAsync,
             CreateManualTaskAsync,
-            OpenReviewCandidatesFromBoardAsync)
+            OpenReviewCandidatesFromBoardAsync);
+        if (IsVisible)
         {
-            Owner = this
-        };
+            _dailyBoardWindow.Owner = this;
+        }
         _dailyBoardWindow.Closed += (_, _) => _dailyBoardWindow = null;
         _dailyBoardWindow.Show();
         if (options.BringToFront)
@@ -896,7 +994,7 @@ public partial class MainWindow : Window
             var snoozed = await store.SnoozeReviewCandidateAsync(candidate.Id, until, now);
             await RefreshReviewCandidatesAsync();
             StatusText.Text = snoozed
-                ? "검토 후보를 내일까지 숨겼습니다. 필요하면 다음 스캔/보드에서 다시 표시됩니다."
+                ? "검토 후보는 내일까지 다시 표시하지 않습니다."
                 : "이미 처리된 검토 후보입니다.";
         }
         catch (Exception ex)
@@ -941,47 +1039,19 @@ public partial class MainWindow : Window
         await OpenSourceMailAsync(task.SourceId);
     }
 
-    private async Task<bool> DismissTaskWithConfirmationAsync(LocalTaskItem task)
+    private async Task<bool> ArchiveTaskAsync(LocalTaskItem task)
     {
         var store = await GetStoreAsync();
-        var shouldAsk = await store.GetAppStateAsync("confirm-dismiss-task") != "false";
-        if (shouldAsk)
-        {
-            var dialog = new ConfirmDismissDialog
-            {
-                Owner = this
-            };
-            if (dialog.ShowDialog() != true)
-            {
-                return false;
-            }
-
-            if (dialog.DoNotAskAgain)
-            {
-                await store.SetAppStateAsync("confirm-dismiss-task", "false");
-            }
-        }
-
-        var dismissed = await store.DismissTaskAsync(task.Id, DateTimeOffset.UtcNow);
-        StatusText.Text = dismissed
-            ? "업무보드에서 숨겼습니다. Outlook 원본 메일은 그대로 유지됩니다."
-            : "이미 처리된 항목입니다.";
-        return dismissed;
-    }
-
-    private async Task<bool> CompleteTaskAsync(LocalTaskItem task)
-    {
-        var store = await GetStoreAsync();
-        var completed = await store.CompleteTaskAsync(task.Id, DateTimeOffset.UtcNow);
-        if (completed)
+        var archived = await store.ArchiveTaskAsync(task.Id, DateTimeOffset.UtcNow);
+        if (archived)
         {
             await RefreshTasksAsync();
         }
 
-        StatusText.Text = completed
-            ? "완료 처리했습니다."
+        StatusText.Text = archived
+            ? "보관했습니다. 이 목록에는 다시 표시되지 않습니다."
             : "이미 처리된 항목입니다.";
-        return completed;
+        return archived;
     }
 
     private async Task<bool> SnoozeTaskAsync(LocalTaskItem task, DateTimeOffset until)
@@ -1003,10 +1073,44 @@ public partial class MainWindow : Window
     {
         var store = await GetStoreAsync();
         var updated = await store.UpdateTaskDueAtAsync(task.Id, dueAt, DateTimeOffset.UtcNow);
+        if (updated)
+        {
+            await RefreshTasksAsync();
+        }
+
         StatusText.Text = updated
             ? $"기한을 {dueAt:MM/dd}로 설정했습니다."
             : "이미 처리된 항목이라 기한을 바꾸지 못했습니다.";
         return updated;
+    }
+
+    private async Task<LocalTaskItem?> UpdateTaskDetailsAsync(LocalTaskItem task, TaskEditRequest edit)
+    {
+        var store = await GetStoreAsync();
+        var updated = await store.UpdateTaskDetailsAsync(task.Id, edit, DateTimeOffset.UtcNow);
+        if (updated is not null)
+        {
+            await RefreshTasksAsync();
+        }
+
+        StatusText.Text = updated is null
+            ? "이미 처리된 항목이라 수정하지 못했습니다."
+            : "업무 내용을 수정했습니다.";
+        return updated;
+    }
+
+    private async Task EditTaskAsync(LocalTaskItem task)
+    {
+        var dialog = new TaskEditDialog(task)
+        {
+            Owner = this
+        };
+        if (dialog.ShowDialog() != true || dialog.EditRequest is not { } edit)
+        {
+            return;
+        }
+
+        await UpdateTaskDetailsAsync(task, edit);
     }
 
     private async Task<LocalTaskItem?> CreateManualTaskAsync(string title, DateTimeOffset? dueAt)
@@ -1208,7 +1312,7 @@ public partial class MainWindow : Window
         _fallbackPromptShownThisSession = true;
         var result = System.Windows.MessageBox.Show(
             this,
-            "LLM 연결 또는 분석이 실패했습니다.\n\n기본값은 실패한 메일을 검토 후보로 보관하고, LLM 연결이 복구되면 다시 분석하는 방식입니다.\n그래도 다음 스캔부터 규칙 기반 fallback을 허용할까요?\n\n나중에 고급 설정의 'LLM 분석 실패 처리'에서 바꿀 수 있습니다.",
+            "LLM 연결 또는 분석이 실패했습니다.\n\n기본값은 실패한 메일을 검토 후보로 보관하고, LLM 연결이 복구되면 다시 분석하는 방식입니다.\n그래도 다음 메일 확인부터 규칙 기반 fallback을 허용할까요?\n\n나중에 고급 설정의 'LLM 분석 실패 처리'에서 바꿀 수 있습니다.",
             "LLM 실패 처리",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -1220,7 +1324,7 @@ public partial class MainWindow : Window
         _settings = _settings with { LlmFallbackPolicy = LlmFallbackPolicy.LlmThenRules };
         WindowsRuntimeSettingsStore.Save(_settings);
         ApplyFallbackPolicyToControls(_settings.LlmFallbackPolicy);
-        StatusText.Text = "다음 스캔부터 LLM 실패 시 규칙 기반 fallback을 허용합니다.";
+        StatusText.Text = "다음 메일 확인부터 LLM 실패 시 규칙 기반 fallback을 허용합니다.";
     }
 
     private static int ParseInt(string? value, int fallback) =>
@@ -1351,7 +1455,7 @@ public partial class MainWindow : Window
             var due = task.DueAt is null ? "기한 미정" : DdayFormatter.Format(task.DueAt.Value, now);
             var sender = string.IsNullOrWhiteSpace(task.SourceSenderDisplay) ? "직접 추가" : CompactLine(task.SourceSenderDisplay, 18);
             var received = task.SourceReceivedAt ?? task.CreatedAt;
-            return new TaskListItem(task, CompactLine(task.Title, 54), $"{due} | {sender} | {received:MM/dd HH:mm}");
+            return new TaskListItem(task, CompactLine(task.Title, 120), $"{due} · {sender} · {received:MM/dd HH:mm}");
         }
 
         public override string ToString() => Title;

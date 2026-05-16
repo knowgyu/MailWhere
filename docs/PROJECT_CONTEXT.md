@@ -45,5 +45,5 @@ The current codebase already contains the implementation artifacts created from 
 - Missing COM/LLM/notification/storage capabilities should degrade features rather than crash the whole app.
 - Daily Brief and 업무 보드는 분리한다: Daily Brief는 foreground highlight summary, 업무 보드는 active ledger.
 - Low-confidence confirmation candidates are explicit-on-demand, not default noise.
-- Snooze/complete/hide are local MailWhere task-state actions; Outlook 원본은 mutate하지 않는다.
+- Snooze and archive are local MailWhere task-state actions; Outlook 원본은 mutate하지 않는다. `나중에`는 다시 표시되고 `보관`은 active board에서 제외된다.
 - Agent CLI/skill/hook 연계는 sanitized read-only export seam으로 염두에 두되, 현재 제품 코드에는 MCP/full work-agent를 구현하지 않는다.

@@ -84,7 +84,7 @@ public sealed class MailActionScanner
             }
         }
 
-        progress?.Report(new MailScanProgress("completed", processed, result.Messages.Count, "최근 1개월 스캔이 완료되었습니다."));
+        progress?.Report(new MailScanProgress("completed", processed, result.Messages.Count, "메일 확인이 완료되었습니다."));
         return new MailScanSummary(result.Messages.Count, created, review, ignored, duplicate, result.SkippedCount, result.Warnings);
     }
 }

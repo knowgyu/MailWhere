@@ -28,8 +28,7 @@ public static class DailyBriefPlanner
         options ??= new DailyBriefOptions();
 
         var highlights = tasks
-            .Where(FollowUpPresentation.IsActive)
-            .Where(task => !FollowUpPresentation.IsSnoozedForFuture(task, now))
+            .Where(task => FollowUpPresentation.IsVisibleInPrimary(task, now))
             .Where(task => ShouldHighlight(task, now, options))
             .OrderBy(task => task.DueAt ?? DateTimeOffset.MaxValue)
             .ThenByDescending(task => task.Confidence)
@@ -52,7 +51,7 @@ public static class DailyBriefPlanner
     {
         options ??= new DailyBriefOptions();
 
-        if (!FollowUpPresentation.IsActive(task) || FollowUpPresentation.IsSnoozedForFuture(task, now))
+        if (!FollowUpPresentation.IsVisibleInPrimary(task, now))
         {
             return false;
         }

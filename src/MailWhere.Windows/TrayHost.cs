@@ -49,20 +49,21 @@ public sealed class TrayHost : IDisposable, IUserNotificationSink
         menu.Items.Add("열기", null, (_, _) => ShowWindow());
         menu.Items.Add("오늘 업무 보기", null, async (_, _) => await ShowTodayBoardAsync());
         menu.Items.Add("알림 테스트", null, async (_, _) => await ShowAsync(new UserNotification(UserNotificationKind.Reminder, "내일 마감 · 비용 자료 회신", "09:00까지 검토 후 회신이 필요합니다.", "tray-notification-test")));
-        menu.Items.Add("종료", null, (_, _) => System.Windows.Application.Current.Shutdown());
+        menu.Items.Add("종료", null, (_, _) =>
+        {
+            _window.AllowExit();
+            System.Windows.Application.Current.Shutdown();
+        });
         return menu;
     }
 
     private void ShowWindow()
     {
-        _window.Show();
-        _window.WindowState = WindowState.Normal;
-        _window.Activate();
+        _window.ShowShell();
     }
 
     private async Task ShowTodayBoardAsync()
     {
-        ShowWindow();
         WindowsRuntimeDiagnostics.RecordUiEvent("tray-today-route-opened-today-brief", new Dictionary<string, string>
         {
             ["origin"] = BoardOrigin.TrayToday.ToString()
@@ -83,7 +84,6 @@ public sealed class TrayHost : IDisposable, IUserNotificationSink
         switch (NotificationActionResolver.Resolve(notification.Kind).PrimaryTarget)
         {
             case NotificationPrimaryActionTarget.OpenDailyBoardTodayBrief:
-                ShowWindow();
                 WindowsRuntimeDiagnostics.RecordUiEvent("daily-brief-cta-opened-today-brief", new Dictionary<string, string>
                 {
                     ["origin"] = BoardOrigin.DailyBriefToast.ToString(),
@@ -93,7 +93,6 @@ public sealed class TrayHost : IDisposable, IUserNotificationSink
                 break;
 
             case NotificationPrimaryActionTarget.OpenDailyBoard:
-                ShowWindow();
                 await _window.OpenDailyBoardAsync();
                 break;
 

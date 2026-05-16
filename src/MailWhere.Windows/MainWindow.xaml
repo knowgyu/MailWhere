@@ -71,8 +71,8 @@
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Click="OpenDailyBoard_Click" Style="{StaticResource MwButton.Secondary}">업무 보드</Button>
-                    <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Style="{StaticResource MwButton.Primary}">최근 1개월 스캔</Button>
-                    <Button x:Name="StopScanButton" Click="StopScan_Click" Visibility="Collapsed" Style="{StaticResource MwButton.Danger}">스캔 중지</Button>
+                    <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Style="{StaticResource MwButton.Primary}">지금 메일 확인</Button>
+                    <Button x:Name="StopScanButton" Click="StopScan_Click" Visibility="Collapsed" Style="{StaticResource MwButton.Danger}">확인 중지</Button>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -86,7 +86,7 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0">
                         <TextBlock Text="오늘 업무" FontSize="18" FontWeight="Bold"/>
-                        <TextBlock x:Name="StatusText" Text="대기 중입니다. 최근 1개월 스캔을 실행하면 내가 할 일과 기다리는 일을 모아줍니다." Foreground="{StaticResource MwBrush.TextMuted}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="StatusText" Text="트레이에서 대기 중입니다. 필요할 때 메일을 확인하고 업무 보드에서 다시 봅니다." Foreground="{StaticResource MwBrush.TextMuted}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         <ProgressBar x:Name="ScanProgressBar" Height="4" IsIndeterminate="True" Visibility="Collapsed" Margin="0,10,0,4"/>
                         <TextBlock x:Name="ScanProgressText" Text="대기 중입니다." Visibility="Collapsed" Foreground="{StaticResource MwBrush.Primary}" FontWeight="SemiBold" FontSize="12"/>
                     </StackPanel>
@@ -115,7 +115,7 @@
                                 </StackPanel>
                             </Border>
                             <Grid MinHeight="220">
-                                <ListBox x:Name="TasksList" FontSize="14">
+                                <ListBox x:Name="TasksList" FontSize="14" MouseDoubleClick="TaskList_DoubleClick">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <Grid>
@@ -127,9 +127,10 @@
                                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
                                                         <Button Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="SetTaskDueButton_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,6,0"/>
                                                         <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTaskButton_Click" Style="{StaticResource MwButton.Base}" Margin="0,0,6,0"/>
-                                                        <Button Content="숨김" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="DismissTaskButton_Click" Style="{StaticResource MwButton.Danger}"/>
+                                                        <Button Content="수정" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="EditTaskButton_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,6,0"/>
+                                                        <Button Content="보관" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="ArchiveTaskButton_Click" Style="{StaticResource MwButton.Danger}"/>
                                                     </StackPanel>
-                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" MaxHeight="42"/>
                                                 </DockPanel>
                                                 <TextBlock Grid.Row="1" Text="{Binding Meta}" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
                                             </Grid>
@@ -177,7 +178,7 @@
                                                 <TextBlock Text="일반" FontSize="16" FontWeight="Bold"/>
                                                 <TextBlock Text="매일 쓰는 동작만 먼저 둡니다." Foreground="{StaticResource MwBrush.TextMuted}" Margin="0,4,0,12"/>
                                                 <CheckBox x:Name="StartupToggle" Content="Windows 시작 시 실행" Click="StartupToggle_Click" Margin="0,0,0,10"/>
-                                                <TextBlock Text="최근 스캔 기간(일)" FontWeight="SemiBold"/>
+	                                                <TextBlock Text="메일 확인 기간(일)" FontWeight="SemiBold"/>
                                                 <TextBox x:Name="ScanDaysText"/>
                                                 <Button Click="SaveSettings_Click" HorizontalAlignment="Left" Style="{StaticResource MwButton.Primary}">설정 저장</Button>
                                             </StackPanel>
@@ -190,7 +191,7 @@
                                                 <TextBlock Text="알림 미리 보기(시간)" FontWeight="SemiBold"/>
                                                 <TextBox x:Name="ReminderLookAheadText"/>
                                                 <TextBlock Text="오늘 브리핑 시간" FontWeight="SemiBold"/>
-                                                <TextBox x:Name="DailyBoardTimeText" ToolTip="기본 08:00. 이 시간이 지난 뒤 앱이 켜지면 다음 정시에 한 번 알립니다."/>
+                                                <TextBox x:Name="DailyBoardTimeText" ToolTip="기본 08:00. 이 시간이 지나고 앱이 켜져 있으면 오늘 업무 보드를 한 번 엽니다."/>
                                                 <TextBlock Text="시작 후 대기(분)" FontWeight="SemiBold"/>
                                                 <TextBox x:Name="DailyBoardStartupDelayText" ToolTip="Windows 시작 직후 Outlook/LLM 등 다른 프로세스가 준비될 시간을 둡니다. 기본 10분."/>
                                             </StackPanel>
@@ -230,7 +231,7 @@
                                         <Border Style="{StaticResource SectionCard}">
                                             <StackPanel>
                                                 <TextBlock Text="고급" FontSize="16" FontWeight="Bold"/>
-                                                <CheckBox x:Name="AutoWatcherToggle" Content="자동 watcher 요청(운영 smoke gate 후 활성)" Margin="0,8,0,10"/>
+                                                <CheckBox x:Name="AutoWatcherToggle" Content="새 메일 자동 확인(수동 확인 성공 후 활성)" Margin="0,8,0,10"/>
                                                 <TextBlock Text="최대 메일 수(비우면 최근 기간 전체)" FontWeight="SemiBold"/>
                                                 <TextBox x:Name="MaxItemsText" ToolTip="문제 진단 때만 숫자를 넣으세요."/>
                                                 <TextBlock Text="LLM timeout(초)" FontWeight="SemiBold"/>
@@ -257,7 +258,7 @@
                                             <Button Click="TestNotification_Click">알림 테스트</Button>
                                             <Button Click="ResetLocalData_Click" Style="{StaticResource MwButton.Danger}">업무 데이터 초기화</Button>
                                         </StackPanel>
-                                        <TextBlock Text="초기화는 테스트/개발용입니다. 저장된 할 일·검토 후보·스캔 중복 기록만 지우고 설정은 유지합니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                        <TextBlock Text="초기화는 문제 해결용입니다. 저장된 할 일·검토 후보·메일 확인 중복 기록만 지우고 설정은 유지합니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                         <TextBox x:Name="DiagnosticsText" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsReadOnly="True" FontFamily="Consolas" MinHeight="140" Text="진단을 실행하면 안전한 코드와 상태만 표시됩니다."/>
                                     </StackPanel>
                                 </Border>

@@ -101,7 +101,7 @@ internal static class WindowsRuntimeDiagnostics
             new Dictionary<string, string>
             {
                 ["feature"] = "runtime-settings",
-                ["mode"] = settings.AutomaticWatcherRequested ? "watcher-requested" : "manual"
+                ["mode"] = settings.AutomaticWatcherRequested ? "auto-check-requested" : "manual"
             });
 
     public static string GetAppDataDirectory()

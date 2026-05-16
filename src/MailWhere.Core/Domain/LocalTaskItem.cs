@@ -4,6 +4,7 @@ public enum LocalTaskStatus
 {
     Open,
     Snoozed,
+    Archived,
     Done,
     Dismissed,
     NotATask
@@ -64,10 +65,27 @@ public sealed record LocalTaskItem(
         SnoozeUntil = null
     };
 
+    public LocalTaskItem Archive(DateTimeOffset now) => this with
+    {
+        Status = LocalTaskStatus.Archived,
+        UpdatedAt = now,
+        SnoozeUntil = null
+    };
+
     public LocalTaskItem SnoozeUntilTime(DateTimeOffset until, DateTimeOffset now) => this with
     {
         Status = LocalTaskStatus.Snoozed,
         SnoozeUntil = until,
+        UpdatedAt = now
+    };
+
+    public LocalTaskItem UpdateDetails(TaskEditRequest edit, DateTimeOffset now) => this with
+    {
+        Title = edit.Title,
+        Kind = edit.Kind,
+        DueAt = edit.DueAt,
+        Status = Status == LocalTaskStatus.Snoozed ? LocalTaskStatus.Open : Status,
+        SnoozeUntil = null,
         UpdatedAt = now
     };
 

@@ -6,6 +6,7 @@ namespace MailWhere.Storage;
 
 public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 {
+    private const string TaskColumns = "id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted, source_sender_display, source_received_at, source_recipient_role, kind";
     private readonly string _connectionString;
 
     public SqliteFollowUpStore(string databasePath)
@@ -161,12 +162,17 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted, source_sender_display, source_received_at, source_recipient_role, kind FROM tasks WHERE status IN ('Open','Snoozed') ORDER BY due_at IS NULL, due_at, created_at";
+        command.CommandText = $"SELECT {TaskColumns} FROM tasks WHERE status IN ('Open','Snoozed') ORDER BY due_at IS NULL, due_at, created_at";
+        var now = DateTimeOffset.UtcNow;
         var tasks = new List<LocalTaskItem>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            tasks.Add(ReadTask(reader));
+            var task = ReadTask(reader);
+            if (FollowUpPresentation.IsVisibleInPrimary(task, now))
+            {
+                tasks.Add(task);
+            }
         }
 
         return tasks;
@@ -319,6 +325,25 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         return true;
     }
 
+    public async Task<bool> ArchiveTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE tasks
+            SET status = $status,
+                snooze_until = NULL,
+                updated_at = $updatedAt
+            WHERE id = $id
+              AND status IN ('Open','Snoozed')
+            """;
+        command.Parameters.AddWithValue("$id", taskId.ToString());
+        command.Parameters.AddWithValue("$status", LocalTaskStatus.Archived.ToString());
+        command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
     public async Task<bool> DismissTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
         await using var connection = new SqliteConnection(_connectionString);
@@ -395,6 +420,51 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         command.Parameters.AddWithValue("$dueAt", dueAt.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
+    public async Task<LocalTaskItem?> UpdateTaskDetailsAsync(Guid taskId, TaskEditRequest edit, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var normalized = TaskEditRequest.Create(edit.Title, edit.Kind, edit.DueAt);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        using var transaction = connection.BeginTransaction();
+
+        var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText = """
+            UPDATE tasks
+            SET title = $title,
+                due_at = $dueAt,
+                kind = $kind,
+                updated_at = $updatedAt,
+                status = CASE WHEN status = 'Snoozed' THEN 'Open' ELSE status END,
+                snooze_until = NULL
+            WHERE id = $id
+              AND status IN ('Open','Snoozed')
+            """;
+        update.Parameters.AddWithValue("$id", taskId.ToString());
+        update.Parameters.AddWithValue("$title", normalized.Title);
+        update.Parameters.AddWithValue("$dueAt", normalized.DueAt is null ? DBNull.Value : normalized.DueAt.Value.ToString("O"));
+        update.Parameters.AddWithValue("$kind", normalized.Kind.ToString());
+        update.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
+
+        if (await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        var select = connection.CreateCommand();
+        select.Transaction = transaction;
+        select.CommandText = $"SELECT {TaskColumns} FROM tasks WHERE id = $id LIMIT 1";
+        select.Parameters.AddWithValue("$id", taskId.ToString());
+
+        await using var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var updated = await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? ReadTask(reader)
+            : null;
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return updated;
     }
 
     public async Task<string?> GetAppStateAsync(string key, CancellationToken cancellationToken = default)

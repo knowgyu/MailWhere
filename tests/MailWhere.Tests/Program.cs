@@ -32,8 +32,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Sent promise is classified as my work", SentPromiseIsClassifiedAsMyWork),
     ("Sent request is classified as waiting on them", SentRequestIsClassifiedAsWaitingOnThem),
     ("Follow-up presentation buckets promise and waiting", FollowUpPresentationBucketsPromiseAndWaiting),
-    ("Managed mode blocks watcher without smoke gate", ManagedModeBlocksWatcherWithoutGate),
-    ("Smoke gate is required even if managed mode is false", SmokeGateRequiredEvenIfManagedModeFalse),
+    ("Managed mode blocks automatic check before readiness", ManagedModeBlocksWatcherWithoutGate),
+    ("Manual readiness is required even if managed mode is false", SmokeGateRequiredEvenIfManagedModeFalse),
     ("Ambiguous mail does not auto create", AmbiguousMailDoesNotAutoCreate),
     ("Pipeline suppresses duplicate source", PipelineSuppressesDuplicateSource),
     ("Pipeline suppresses semantic thread duplicate", PipelineSuppressesSemanticThreadDuplicate),
@@ -56,12 +56,14 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Daily board planner waits for startup settling delay", DailyBoardPlannerWaitsForStartupSettlingDelay),
     ("Daily board route options map manual and today brief", DailyBoardRouteOptionsMapManualAndTodayBrief),
     ("Daily board Today brief route includes brief highlights", DailyBoardTodayBriefRouteIncludesBriefHighlights),
+    ("Daily board route hides archived and future snooze", DailyBoardRouteHidesArchivedAndFutureSnooze),
     ("Notification action resolver maps daily brief", NotificationActionResolverMapsDailyBrief),
     ("Daily brief notification marks shown after success", DailyBriefNotificationMarksShownAfterSuccess),
     ("Daily brief notification does not mark shown after cancellation", DailyBriefNotificationDoesNotMarkShownAfterCancellation),
     ("Daily brief notification does not mark shown after failure", DailyBriefNotificationDoesNotMarkShownAfterFailure),
     ("Snooze planner computes presets", SnoozePlannerComputesPresets),
     ("Daily brief planner highlights due and hides future snooze", DailyBriefPlannerHighlightsDueAndHidesFutureSnooze),
+    ("Task edit request normalizes simple fields", TaskEditRequestNormalizesSimpleFields),
     ("Korean labels use concise product copy", KoreanLabelsUseConciseProductCopy),
     ("LLM JSON creates calendar task", LlmJsonCreatesCalendarTask),
     ("LLM success does not pre-run fallback rules", LlmSuccessDoesNotPreRunFallbackRules),
@@ -99,6 +101,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("SQLite double review approval is idempotent", SqliteDoubleReviewApprovalIsIdempotent),
     ("SQLite review candidate snooze hides until due", SqliteReviewCandidateSnoozeHidesUntilDue),
     ("SQLite task dismiss and due update persist", SqliteTaskDismissAndDueUpdatePersist),
+    ("SQLite task archive hides from open list", SqliteTaskArchiveHidesFromOpenList),
+    ("SQLite task details edit persists", SqliteTaskDetailsEditPersists),
     ("SQLite task complete and snooze persist", SqliteTaskCompleteAndSnoozePersist),
     ("SQLite stale review ignore does not redact approved task", SqliteStaleReviewIgnoreDoesNotRedactApprovedTask),
     ("SQLite migrates pre daily board schema", SqliteMigratesPreDailyBoardSchema),
@@ -367,7 +371,7 @@ static Task ManagedModeBlocksWatcherWithoutGate()
         StorageWritable: true,
         LlmReachable: true,
         RuleOnlyModeAccepted: false));
-    Assert(!result.AutomaticWatcherEnabled, "Watcher should be disabled without gate.");
+    Assert(!result.AutomaticWatcherEnabled, "Automatic mail check should be disabled without readiness.");
     return Task.CompletedTask;
 }
 
@@ -382,8 +386,8 @@ static Task SmokeGateRequiredEvenIfManagedModeFalse()
         StorageWritable: true,
         LlmReachable: false,
         RuleOnlyModeAccepted: true));
-    Assert(!result.AutomaticWatcherEnabled, "Smoke gate should be unconditional for automatic watching.");
-    Assert(result.Reasons.Any(reason => reason.Contains("smoke gate", StringComparison.OrdinalIgnoreCase)), "Expected smoke-gate reason.");
+    Assert(!result.AutomaticWatcherEnabled, "Manual readiness should be unconditional for automatic mail checks.");
+    Assert(result.Reasons.Any(reason => reason.Contains("manual mail check", StringComparison.OrdinalIgnoreCase)), "Expected manual readiness reason.");
     return Task.CompletedTask;
 }
 
@@ -534,7 +538,7 @@ static Task RuntimeDiagnosticsExportIncludesSafeGateCodes()
     var json = SanitizedDiagnosticsExporter.Export(snapshot);
 
     Assert(json.Contains("AutomaticWatcherGate"), "Expected gate result in diagnostics.");
-    Assert(json.Contains("automatic-watcher-not-requested"), "Expected safe manual-mode reason code.");
+    Assert(json.Contains("automatic-check-not-requested"), "Expected safe manual-mode reason code.");
     Assert(!json.Contains("EndpointNotConfigured", StringComparison.OrdinalIgnoreCase), "Expected raw probe messages omitted.");
     return Task.CompletedTask;
 }
@@ -561,8 +565,8 @@ static Task PartialRuntimeSettingsKeepSafeDefaults()
         CapabilityProbeResult.Warning("llm-endpoint", "EndpointNotConfigured", new Dictionary<string, string> { ["feature"] = "llm-endpoint", ["enabled"] = "false" })
     });
     var snapshot = RuntimeGateComposer.Compose(settings, report);
-    Assert(!snapshot.AutomaticWatcherGate.AutomaticWatcherEnabled, "Partial settings must not bypass smoke gate.");
-    Assert(snapshot.AutomaticWatcherGate.Reasons.Any(reason => reason.Contains("smoke gate", StringComparison.OrdinalIgnoreCase)), "Expected smoke-gate gate reason.");
+    Assert(!snapshot.AutomaticWatcherGate.AutomaticWatcherEnabled, "Partial settings must not bypass manual readiness.");
+    Assert(snapshot.AutomaticWatcherGate.Reasons.Any(reason => reason.Contains("manual mail check", StringComparison.OrdinalIgnoreCase)), "Expected manual readiness gate reason.");
     return Task.CompletedTask;
 }
 
@@ -797,6 +801,25 @@ static Task DailyBoardTodayBriefRouteIncludesBriefHighlights()
     return Task.CompletedTask;
 }
 
+static Task DailyBoardRouteHidesArchivedAndFutureSnooze()
+{
+    var now = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
+    var open = BriefTask("보이는 업무", FollowUpKind.ActionRequested, null, LocalTaskStatus.Open, null, now.AddDays(-1), 0.8);
+    var archived = BriefTask("보관된 업무", FollowUpKind.ActionRequested, null, LocalTaskStatus.Archived, null, now.AddDays(-1), 0.8);
+    var futureSnoozed = BriefTask("내일 다시 볼 업무", FollowUpKind.ActionRequested, null, LocalTaskStatus.Snoozed, now.AddDays(1), now.AddDays(-1), 0.8);
+    var dueSnoozed = BriefTask("다시 나타난 업무", FollowUpKind.ActionRequested, null, LocalTaskStatus.Snoozed, now.AddMinutes(-1), now.AddDays(-1), 0.8);
+
+    var visible = DailyBoardRouteTaskSelector.SelectVisibleTasks(
+        new[] { open, archived, futureSnoozed, dueSnoozed },
+        Array.Empty<ReviewCandidate>(),
+        now,
+        BoardRouteFilter.All,
+        showBriefSummary: false);
+
+    Assert(visible.Select(task => task.Title).OrderBy(title => title, StringComparer.Ordinal).SequenceEqual(new[] { "다시 나타난 업무", "보이는 업무" }), "Primary board should hide archived and future-snoozed tasks.");
+    return Task.CompletedTask;
+}
+
 static async Task DailyBriefNotificationMarksShownAfterSuccess()
 {
     var store = new FakeStore();
@@ -874,6 +897,32 @@ static Task DailyBriefPlannerHighlightsDueAndHidesFutureSnooze()
     Assert(!brief.ActionItems.Concat(brief.WaitingItems).Any(item => item.Title == "내일 다시"), "Future snooze should stay hidden from brief.");
     Assert(!brief.WaitingItems.Any(item => item.Title == "아직 기다림"), "Young waiting item should stay off brief.");
     Assert(brief.HiddenCandidateCount == 1, "Review candidates should be counted but hidden by default.");
+    return Task.CompletedTask;
+}
+
+static Task TaskEditRequestNormalizesSimpleFields()
+{
+    var request = TaskEditRequest.Create(
+        "  제목을 바로잡기  ",
+        FollowUpKind.CalendarEvent,
+        new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero));
+
+    Assert(request.Title == "제목을 바로잡기", "Expected trimmed title.");
+    Assert(request.Kind == FollowUpKind.Meeting, "Calendar-like items should surface as schedule.");
+
+    var waiting = TaskEditRequest.Create("회신 기다리기", FollowUpKind.WaitingForReply, null);
+    Assert(waiting.Kind == FollowUpKind.WaitingForReply, "Waiting category should stay explicit.");
+
+    try
+    {
+        _ = TaskEditRequest.Create("   ", FollowUpKind.ActionRequested, null);
+        Assert(false, "Empty title edits must be rejected.");
+    }
+    catch (ArgumentException)
+    {
+        return Task.CompletedTask;
+    }
+
     return Task.CompletedTask;
 }
 
@@ -1691,7 +1740,7 @@ static Task ReminderPlannerSuppressesFutureSnoozeAndEmitsDueSnooze()
     var now = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
     var futureSnoozed = new LocalTaskItem(
         Guid.NewGuid(),
-        "아직 숨김",
+        "아직 표시되지 않음",
         now,
         null,
         null,
@@ -1989,9 +2038,84 @@ static async Task SqliteTaskDismissAndDueUpdatePersist()
     }
 }
 
-static async Task SqliteTaskCompleteAndSnoozePersist()
+static async Task SqliteTaskArchiveHidesFromOpenList()
 {
     var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new LocalTaskItem(
+            Guid.NewGuid(),
+            "보관 테스트",
+            null,
+            StableHash.Create("archive-source"),
+            "archive-source",
+            0.9,
+            "테스트",
+            null,
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now);
+        await store.SaveTaskAsync(task);
+
+        var archived = await store.ArchiveTaskAsync(task.Id, now.AddMinutes(1));
+        var open = await store.ListOpenTasksAsync();
+
+        Assert(archived, "Expected archive to succeed.");
+        Assert(open.Count == 0, "Archived task should be hidden from open list.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteTaskDetailsEditPersists()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new LocalTaskItem(
+            Guid.NewGuid(),
+            "원래 제목",
+            now.AddDays(1),
+            StableHash.Create("edit-source"),
+            "edit-source",
+            0.9,
+            "테스트",
+            null,
+            LocalTaskStatus.Snoozed,
+            now.AddHours(4),
+            now,
+            now,
+            Kind: FollowUpKind.ActionRequested);
+        await store.SaveTaskAsync(task);
+
+        var edited = await store.UpdateTaskDetailsAsync(
+            task.Id,
+            TaskEditRequest.Create("  회의 일정 확인  ", FollowUpKind.Meeting, null),
+            now.AddMinutes(1));
+        var open = await store.ListOpenTasksAsync();
+
+        Assert(edited is not null, "Expected edit to return updated task.");
+        Assert(edited!.Title == "회의 일정 확인", "Expected normalized title.");
+        Assert(edited.Kind == FollowUpKind.Meeting, "Expected edited visible category.");
+        Assert(edited.DueAt is null, "Expected edit to clear due date.");
+        Assert(edited.Status == LocalTaskStatus.Open, "Editing should unsnooze the task.");
+        Assert(edited.SnoozeUntil is null, "Editing should clear snooze.");
+        Assert(open.Single().Id == task.Id, "Edited task should be visible again.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteTaskCompleteAndSnoozePersist()
+{
+    var (store, dbPath, cleanup) = await CreateTempStoreAsync();
     try
     {
         var now = DateTimeOffset.UtcNow;
@@ -2025,10 +2149,22 @@ static async Task SqliteTaskCompleteAndSnoozePersist()
 
         Assert(completed, "Expected complete to succeed.");
         Assert(snoozed, "Expected snooze to succeed.");
-        Assert(open.Count == 1, "Completed task should be hidden from open list.");
-        Assert(open[0].Id == snoozeTarget.Id, "Expected snoozed task to remain active.");
-        Assert(open[0].Status == LocalTaskStatus.Snoozed, "Expected snoozed status.");
-        Assert(open[0].SnoozeUntil == snoozeUntil, "Expected snooze time persisted.");
+        Assert(open.Count == 0, "Completed and future-snoozed tasks should be hidden from open list.");
+
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = "UPDATE tasks SET snooze_until = $past WHERE id = $id";
+            command.Parameters.AddWithValue("$past", now.AddMinutes(-1).ToString("O"));
+            command.Parameters.AddWithValue("$id", snoozeTarget.Id.ToString());
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var dueOpen = await store.ListOpenTasksAsync();
+        Assert(dueOpen.Count == 1, "Due snoozed task should return to the open list.");
+        Assert(dueOpen[0].Id == snoozeTarget.Id, "Expected snoozed task to return when due.");
+        Assert(dueOpen[0].Status == LocalTaskStatus.Snoozed, "Expected snoozed status.");
     }
     finally
     {
@@ -2346,7 +2482,7 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
     }
 
     public Task<IReadOnlyList<LocalTaskItem>> ListOpenTasksAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<LocalTaskItem>>(Tasks.Where(task => task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed).ToList());
+        Task.FromResult<IReadOnlyList<LocalTaskItem>>(Tasks.Where(task => FollowUpPresentation.IsVisibleInPrimary(task, DateTimeOffset.UtcNow)).ToList());
 
     public Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<ReviewCandidate>>(Candidates
@@ -2428,6 +2564,18 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         return Task.FromResult(true);
     }
 
+    public Task<bool> ArchiveTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = Tasks.FindIndex(task => task.Id == taskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed);
+        if (index < 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        Tasks[index] = Tasks[index] with { Status = LocalTaskStatus.Archived, SnoozeUntil = null, UpdatedAt = now };
+        return Task.FromResult(true);
+    }
+
     public Task<bool> DismissTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
         var index = Tasks.FindIndex(task => task.Id == taskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed);
@@ -2485,6 +2633,19 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
             UpdatedAt = now
         };
         return Task.FromResult(true);
+    }
+
+    public Task<LocalTaskItem?> UpdateTaskDetailsAsync(Guid taskId, TaskEditRequest edit, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = Tasks.FindIndex(task => task.Id == taskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed);
+        if (index < 0)
+        {
+            return Task.FromResult<LocalTaskItem?>(null);
+        }
+
+        var updated = Tasks[index].UpdateDetails(TaskEditRequest.Create(edit.Title, edit.Kind, edit.DueAt), now);
+        Tasks[index] = updated;
+        return Task.FromResult<LocalTaskItem?>(updated);
     }
 
     public Task DeleteSourceDerivedDataAsync(Guid taskId, CancellationToken cancellationToken = default)

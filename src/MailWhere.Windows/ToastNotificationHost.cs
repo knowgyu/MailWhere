@@ -130,9 +130,7 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
 
     private void ShowMainWindow()
     {
-        _mainWindow.Show();
-        _mainWindow.WindowState = WindowState.Normal;
-        _mainWindow.Activate();
+        _mainWindow.ShowShell();
     }
 
     private static ToastNotificationSpec CreateSpec(UserNotification notification)
@@ -164,7 +162,7 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
                 TimeSpan.FromSeconds(14)),
 
             UserNotificationKind.ScanSummary => new ToastNotificationSpec(
-                "메일 스캔 완료",
+                "메일 확인 완료",
                 notification.Title,
                 notification.Message,
                 "검토 후보는 보드의 검토 후보 탭에 모아둡니다",

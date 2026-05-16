@@ -27,5 +27,6 @@ public enum BoardOrigin
     Manual,
     TrayToday,
     DailyBriefToast,
+    ScheduledDailyBoard,
     ScheduledBriefFallback
 }

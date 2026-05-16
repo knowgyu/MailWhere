@@ -11,7 +11,7 @@ public static class DailyBoardRouteTaskSelector
         BoardRouteFilter filter,
         bool showBriefSummary)
     {
-        var activeTasks = tasks.Where(FollowUpPresentation.IsActive).ToArray();
+        var activeTasks = tasks.Where(task => FollowUpPresentation.IsVisibleInPrimary(task, now)).ToArray();
         var filtered = ApplyFilter(activeTasks, now, filter).ToList();
 
         if (showBriefSummary && filter == BoardRouteFilter.Today)
