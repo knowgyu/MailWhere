@@ -32,6 +32,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Sent promise is classified as my work", SentPromiseIsClassifiedAsMyWork),
     ("Sent request is classified as waiting on them", SentRequestIsClassifiedAsWaitingOnThem),
     ("Follow-up presentation buckets promise and waiting", FollowUpPresentationBucketsPromiseAndWaiting),
+    ("Follow-up presentation strips card scaffolding", FollowUpPresentationStripsCardScaffolding),
     ("Managed mode blocks automatic check before readiness", ManagedModeBlocksWatcherWithoutGate),
     ("Manual readiness is required even if managed mode is false", SmokeGateRequiredEvenIfManagedModeFalse),
     ("Ambiguous mail does not auto create", AmbiguousMailDoesNotAutoCreate),
@@ -357,6 +358,16 @@ static Task FollowUpPresentationBucketsPromiseAndWaiting()
     Assert(FollowUpPresentation.CategoryFor(waiting) == FollowUpDisplayCategory.WaitingOnThem, "Waiting item should be waiting-on-them.");
     Assert(FollowUpPresentation.CompactBadge(FollowUpKind.ReplyRequired) == "할 일", "Reply is not a top-level category.");
     Assert(FollowUpPresentation.CompactBadge(FollowUpKind.CalendarEvent) == "일정", "Calendar should use schedule badge.");
+    return Task.CompletedTask;
+}
+
+static Task FollowUpPresentationStripsCardScaffolding()
+{
+    Assert(FollowUpPresentation.ActionTitle("메일 확인: 결제 플로우 문구 확인") == "결제 플로우 문구 확인", "Mail-check prefix should not appear on task cards.");
+    Assert(FollowUpPresentation.ActionTitle("오늘 회신 · 보안팀 확인 요청") == "보안팀 확인 요청", "Today/reply scaffolding should not appear on task cards.");
+    Assert(FollowUpPresentation.ActionTitle("대기 · OAuth 기준 회신") == "OAuth 기준 회신", "Waiting badge text should stay internal.");
+    Assert(FollowUpPresentation.ActionTitle("Action required: launch FAQ") == "launch FAQ", "Generic action-required prefix should be stripped.");
+    Assert(FollowUpPresentation.ActionTitle("Action required") == "요청 내용 확인", "Bare action-required subject needs a usable Korean fallback.");
     return Task.CompletedTask;
 }
 
@@ -1069,6 +1080,7 @@ static async Task LlmPromptContainsTriagePolicyAndFewShots()
     Assert(prompt.Contains("quotedHistoryPreview만 있는 과거 요청", StringComparison.Ordinal), "Expected stale quoted history policy.");
     Assert(prompt.Contains("다른 사람에게 명시 배정", StringComparison.Ordinal), "Expected explicit other-assignee policy.");
     Assert(prompt.Contains("마감일을 상상하지 마세요", StringComparison.Ordinal), "Expected due-date hallucination guard.");
+    Assert(prompt.Contains("분류/상태 접두어를 쓰지 마세요", StringComparison.Ordinal), "Expected action-title prefix guard.");
     Assert(prompt.Contains("promisedByMe", StringComparison.Ordinal), "Expected my-promise kind in prompt schema.");
     Assert(prompt.Contains("waitingForReply", StringComparison.Ordinal), "Expected waiting-on-them kind in prompt schema.");
 }

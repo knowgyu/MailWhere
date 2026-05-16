@@ -319,11 +319,15 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             var title = EvidencePolicy.Truncate(response.SuggestedTitle);
             if (string.IsNullOrWhiteSpace(title) && disposition != AnalysisDisposition.Ignore)
             {
-                title = EvidencePolicy.Truncate($"메일 확인: {context.SubjectCore}") ?? "메일 확인";
+                title = FollowUpPresentation.ActionTitle(context.SubjectCore);
             }
             else if (string.IsNullOrWhiteSpace(title))
             {
                 title = "후속 조치 없음";
+            }
+            else
+            {
+                title = FollowUpPresentation.ActionTitle(title);
             }
 
             var analysis = new FollowUpAnalysis(
@@ -445,11 +449,15 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         var title = EvidencePolicy.Truncate(response.SuggestedTitle);
         if (string.IsNullOrWhiteSpace(title) && disposition != AnalysisDisposition.Ignore)
         {
-            title = EvidencePolicy.Truncate($"메일 확인: {context.SubjectCore}") ?? "메일 확인";
+            title = FollowUpPresentation.ActionTitle(context.SubjectCore);
         }
         else if (string.IsNullOrWhiteSpace(title))
         {
             title = "후속 조치 없음";
+        }
+        else
+        {
+            title = FollowUpPresentation.ActionTitle(title);
         }
 
         var analysis = new FollowUpAnalysis(
@@ -576,7 +584,8 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         7. 명확한 action/deadline/reply/meeting이면 autoCreateTask, FYI/공지/감사/단순 확인은 ignore입니다. review는 LLM이 정말 판단 불가할 때만 씁니다.
         8. dueAt은 메일에 근거가 있을 때만 ISO-8601로 쓰고, 없으면 null입니다. 마감일을 상상하지 마세요.
         9. 보낸 사람이 mailboxOwner이면 사용자가 보낸 메일입니다. 사용자가 "제가 보내겠습니다/공유드리겠습니다"처럼 한 약속은 promisedByMe, 사용자가 상대에게 요청하고 기다리는 것은 waitingForReply입니다.
-        10. reason/evidenceSnippet/summary는 UI 보조용이므로 각각 50자 이내로 짧게 쓰세요.
+        10. suggestedTitle에는 "메일 확인", "오늘 회신", "D-day", "할 일", "대기" 같은 분류/상태 접두어를 쓰지 마세요.
+        11. reason/evidenceSnippet/summary는 UI 보조용이므로 각각 50자 이내로 짧게 쓰세요.
 
         Few-shot:
         - "영희님 내일까지 비용 자료 검토 후 회신 부탁드립니다" + mailboxOwner "김영희" => autoCreateTask, deadline/replyRequired.

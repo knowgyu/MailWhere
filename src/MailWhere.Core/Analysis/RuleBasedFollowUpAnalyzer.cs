@@ -185,8 +185,13 @@ public sealed class RuleBasedFollowUpAnalyzer : IFollowUpAnalyzer
 
     private static string BuildTitle(string subject, string keyword)
     {
-        var cleanSubject = string.IsNullOrWhiteSpace(subject) ? "email" : subject.Trim();
-        return EvidencePolicy.Truncate($"메일 확인: {cleanSubject}") ?? $"메일 확인: {keyword}";
+        var actionTitle = FollowUpPresentation.ActionTitle(subject);
+        if (!string.Equals(actionTitle, "메일 확인", StringComparison.Ordinal))
+        {
+            return actionTitle;
+        }
+
+        return EvidencePolicy.Truncate($"{keyword} 확인") ?? "요청 내용 확인";
     }
 
     private static string? EvidenceAround(string text, int index)

@@ -81,54 +81,49 @@ public partial class DailyBoardWindow : Window
     private void Render()
     {
         _now = DateTimeOffset.Now;
-        var (actions, waiting, hiddenCandidateCount) = BuildBoardSections();
+        var (items, hiddenCandidateCount) = BuildBoardItems();
         var brief = DailyBriefPlanner.Build(_tasks, _candidates, _now);
 
         TitleText.Text = "업무 보드";
         SubtitleText.Text = _options.ShowBriefSummary
-            ? "오늘 브리핑에서 이어지는 오늘 보기입니다."
-            : "메일에서 만든 할 일과 기다리는 일을 정리합니다.";
+            ? "오늘 볼 업무만 한 줄씩 정리합니다."
+            : "메일에서 만든 업무를 한 목록으로 봅니다.";
         UpdatedAtText.Text = $"{_now:MM/dd HH:mm} 기준";
-        SummaryText.Text = $"{FilterLabel(_filter)} · 할 일 {actions.Length} · 대기 {waiting.Length}";
+        SummaryText.Text = $"{FilterLabel(_filter)} · 업무 {items.Length}";
         BriefSummaryPanel.Visibility = _options.ShowBriefSummary ? Visibility.Visible : Visibility.Collapsed;
         BriefSummaryBodyText.Text = brief.TotalHighlights == 0
-            ? "오늘 바로 볼 항목은 없습니다. 전체 보드에서 흐름을 확인하세요."
-            : $"할 일 {brief.ActionItems.Count}개 · 대기 {brief.WaitingItems.Count}개";
+            ? "오늘 바로 볼 업무는 없습니다."
+            : $"오늘 볼 업무 {brief.TotalHighlights}개";
         BriefSummaryMetaText.Text = brief.HiddenCandidateCount > 0
-            ? $"검토 후보 {brief.HiddenCandidateCount}개는 필요할 때 검토 후보 탭에서 확인합니다."
-            : "업무 보드의 오늘 필터와 같은 원장을 사용합니다.";
+            ? $"검토 후보 {brief.HiddenCandidateCount}개"
+            : string.Empty;
         ReviewCandidatesButton.Visibility = hiddenCandidateCount > 0 ? Visibility.Visible : Visibility.Collapsed;
         ReviewCandidatesButton.Content = $"검토 후보 {hiddenCandidateCount}개 보기";
-        FillList(ActionList, actions);
-        FillList(WaitingList, waiting);
-        var hasVisibleItems = actions.Length + waiting.Length > 0;
-        BoardColumnsGrid.Visibility = hasVisibleItems ? Visibility.Visible : Visibility.Collapsed;
+        BriefReviewCandidatesButton.Visibility = hiddenCandidateCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        BriefReviewCandidatesButton.Content = $"검토 후보 {hiddenCandidateCount}개 보기";
+        BriefSummaryMetaText.Visibility = string.IsNullOrWhiteSpace(BriefSummaryMetaText.Text) ? Visibility.Collapsed : Visibility.Visible;
+        FillList(TaskList, items);
+        var hasVisibleItems = items.Length > 0;
+        BoardListPanel.Visibility = hasVisibleItems ? Visibility.Visible : Visibility.Collapsed;
         BoardEmptyText.Visibility = hasVisibleItems ? Visibility.Collapsed : Visibility.Visible;
         BoardEmptyText.Text = "표시할 업무가 없습니다.";
         UpdateStatusText();
         HighlightFilter();
     }
 
-    private (LocalTaskItem[] Actions, LocalTaskItem[] Waiting, int HiddenCandidateCount) BuildBoardSections()
+    private (LocalTaskItem[] Items, int HiddenCandidateCount) BuildBoardItems()
     {
-        var visible = DailyBoardRouteTaskSelector.SelectVisibleTasks(
-            _tasks,
-            _candidates,
-            _now,
-            _filter,
-            _options.ShowBriefSummary).ToArray();
-        var actions = visible
-            .Where(task => FollowUpPresentation.CategoryFor(task) == FollowUpDisplayCategory.ActionForMe)
-            .OrderBy(SortKey)
-            .ThenBy(task => task.CreatedAt)
-            .ToArray();
-        var waiting = visible
-            .Where(task => FollowUpPresentation.CategoryFor(task) == FollowUpDisplayCategory.WaitingOnThem)
+        var items = DailyBoardRouteTaskSelector.SelectVisibleTasks(
+                _tasks,
+                _candidates,
+                _now,
+                _filter,
+                _options.ShowBriefSummary)
             .OrderBy(SortKey)
             .ThenBy(task => task.CreatedAt)
             .ToArray();
         var candidateCount = _candidates.Count(candidate => !candidate.Suppressed && (candidate.SnoozeUntil is null || candidate.SnoozeUntil <= _now));
-        return (actions, waiting, candidateCount);
+        return (items, candidateCount);
     }
 
     private void FillList(WpfListBox list, IReadOnlyList<LocalTaskItem> tasks) =>
@@ -292,21 +287,6 @@ public partial class DailyBoardWindow : Window
         Render();
     }
 
-    private async void EditTask_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (GetCard(sender) is { Task: { } task })
-            {
-                await EditTaskAsync(task);
-            }
-        }
-        catch (Exception ex)
-        {
-            SetStatus($"업무 수정에 실패했습니다: {ex.GetType().Name}");
-        }
-    }
-
     private async void BoardCard_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         try
@@ -468,38 +448,51 @@ public partial class DailyBoardWindow : Window
 
     private sealed class BoardCardItem
     {
-        private BoardCardItem(LocalTaskItem? task, string title, string meta, string badge, string dueButtonText)
+        private BoardCardItem(LocalTaskItem? task, string title, string meta, string dueText)
         {
             Task = task;
             Title = title;
             Meta = meta;
-            Badge = badge;
-            DueButtonText = dueButtonText;
+            DueText = dueText;
         }
 
         public LocalTaskItem? Task { get; }
         public string Title { get; }
         public string Meta { get; }
-        public string Badge { get; }
         public bool HasTask => Task is not null;
         public bool CanOpen => !string.IsNullOrWhiteSpace(Task?.SourceId);
-        public string DueButtonText { get; }
+        public string DueText { get; }
         public Visibility DueButtonVisibility => Task is null ? Visibility.Collapsed : Visibility.Visible;
 
         public static BoardCardItem FromTask(LocalTaskItem task, DateTimeOffset now)
         {
-            var due = task.DueAt is null ? "기한 미정" : $"{DdayFormatter.Format(task.DueAt.Value, now)} · {task.DueAt.Value:MM/dd HH:mm}";
-            var snooze = task.Status == LocalTaskStatus.Snoozed && task.SnoozeUntil is not null
-                ? $" · 나중에 {task.SnoozeUntil:MM/dd HH:mm}"
-                : string.Empty;
             var sender = string.IsNullOrWhiteSpace(task.SourceSenderDisplay) ? "직접 추가" : CompactLine(task.SourceSenderDisplay, 18);
             var received = task.SourceReceivedAt ?? task.CreatedAt;
+            var snooze = task.Status == LocalTaskStatus.Snoozed && task.SnoozeUntil is not null
+                ? $"나중에 {FormatDate(task.SnoozeUntil.Value, now)} · "
+                : string.Empty;
             return new BoardCardItem(
                 task,
-                CompactLine(task.Title, 120),
-                $"{due}{snooze} · {sender} · {received:MM/dd HH:mm}",
-                FollowUpPresentation.CompactBadge(task.Kind),
-                task.DueAt is null ? "기한 추가" : "기한 변경");
+                CompactLine(FollowUpPresentation.ActionTitle(task.Title), 120),
+                $"{snooze}{sender} · {received:MM/dd HH:mm}",
+                task.DueAt is null ? "기한 추가" : FormatDate(task.DueAt.Value, now));
+        }
+
+        private static string FormatDate(DateTimeOffset value, DateTimeOffset now)
+        {
+            var date = value.LocalDateTime.Date;
+            var today = now.LocalDateTime.Date;
+            if (date == today)
+            {
+                return $"오늘 {value:HH:mm}";
+            }
+
+            if (date == today.AddDays(1))
+            {
+                return $"내일 {value:HH:mm}";
+            }
+
+            return $"{DdayFormatter.Format(value, now)} · {value:MM/dd HH:mm}";
         }
 
         private static string CompactLine(string? value, int maxChars)

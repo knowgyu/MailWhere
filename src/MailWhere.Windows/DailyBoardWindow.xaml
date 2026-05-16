@@ -26,26 +26,16 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <Grid Grid.Row="0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Border Grid.Column="0" CornerRadius="9" Background="{StaticResource MwBrush.PrimarySoft}" Padding="7,3" Margin="0,0,8,0" VerticalAlignment="Top">
-                                    <TextBlock Text="{Binding Badge}" Foreground="{StaticResource MwBrush.Primary}" FontSize="11" FontWeight="SemiBold"/>
-                                </Border>
-                                <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" MaxHeight="42"/>
-                            </Grid>
-                            <TextBlock Grid.Row="1" Text="{Binding Meta}" Foreground="#667085" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                            <DockPanel Grid.Row="2" Margin="0,10,0,0" LastChildFill="False">
-                                <Button DockPanel.Dock="Left" Content="{Binding DueButtonText}" Visibility="{Binding DueButtonVisibility}" Tag="{Binding}" Click="SetDue_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,8,0"/>
-                                <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
-                                    <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTask_Click" Style="{StaticResource MwButton.Base}" Margin="0,0,6,6"/>
-                                    <Button Content="나중에" ToolTip="지정한 시간까지 잠시 보이지 않게 합니다." IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="MoreActions_Click" Style="{StaticResource MwButton.Ghost}" Margin="0,0,6,6"/>
-                                    <Button Content="수정" ToolTip="제목, 유형, 기한을 바로잡습니다." IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="EditTask_Click" Style="{StaticResource MwButton.Secondary}" Margin="0,0,6,6"/>
-                                    <Button Content="보관" ToolTip="목록에서 제외하고 다시 표시하지 않습니다." IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="ArchiveTask_Click" Style="{StaticResource MwButton.Danger}" Margin="0,0,0,6"/>
-                                </WrapPanel>
-                            </DockPanel>
+                            <TextBlock Grid.Row="0" Text="{Binding Title}" FontWeight="Bold" FontSize="15" TextWrapping="Wrap" MaxHeight="44"/>
+                            <WrapPanel Grid.Row="1" Margin="0,7,0,0" VerticalAlignment="Center">
+                                <Button Content="{Binding DueText}" Visibility="{Binding DueButtonVisibility}" Tag="{Binding}" Click="SetDue_Click" Style="{StaticResource MwButton.Ghost}" Margin="0,0,8,4" Padding="8,4"/>
+                                <TextBlock Text="{Binding Meta}" Foreground="#667085" FontSize="12" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                            </WrapPanel>
+                            <WrapPanel Grid.Row="2" Margin="0,10,0,0" HorizontalAlignment="Right">
+                                <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTask_Click" Style="{StaticResource MwButton.Base}" Margin="0,0,6,6"/>
+                                <Button Content="나중에" ToolTip="지정한 시간까지 잠시 보이지 않게 합니다." IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="MoreActions_Click" Style="{StaticResource MwButton.Ghost}" Margin="0,0,6,6"/>
+                                <Button Content="보관" ToolTip="목록에서 제외하고 다시 표시하지 않습니다." IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="ArchiveTask_Click" Style="{StaticResource MwButton.Danger}" Margin="0,0,0,6"/>
+                            </WrapPanel>
                         </Grid>
                     </DataTemplate>
                 </Setter.Value>
@@ -86,7 +76,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Left">
                     <TextBlock x:Name="TitleText" Text="업무 보드" FontSize="24" FontWeight="Bold" Foreground="{StaticResource MwBrush.TextStrong}"/>
-                    <TextBlock x:Name="SubtitleText" Text="오늘 챙길 할 일과 일정을 메일 기반으로 정리합니다." Margin="0,5,0,0" Foreground="{StaticResource MwBrush.TextMuted}"/>
+                    <TextBlock x:Name="SubtitleText" Text="메일에서 만든 업무를 한 목록으로 봅니다." Margin="0,5,0,0" Foreground="{StaticResource MwBrush.TextMuted}"/>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
                     <TextBlock x:Name="BoardStatusText" Visibility="Collapsed" Foreground="{StaticResource MwBrush.TextMuted}" VerticalAlignment="Center" Margin="0,0,12,0" TextTrimming="CharacterEllipsis" MaxWidth="260"/>
@@ -115,7 +105,7 @@
                             <TextBlock x:Name="BriefSummaryBodyText" Text="요약 계산 중" Margin="0,5,0,0" Foreground="{StaticResource MwBrush.Primary}" FontWeight="SemiBold"/>
                             <TextBlock x:Name="BriefSummaryMetaText" Text="업무 보드에서 계속 관리합니다." Margin="0,4,0,0" Foreground="{StaticResource MwBrush.TextMuted}"/>
                         </StackPanel>
-                        <Button Grid.Column="1" Click="ReviewCandidates_Click" Style="{StaticResource MwButton.Secondary}" VerticalAlignment="Center">검토 후보 보기</Button>
+                        <Button x:Name="BriefReviewCandidatesButton" Grid.Column="1" Click="ReviewCandidates_Click" Style="{StaticResource MwButton.Secondary}" VerticalAlignment="Center">검토 후보 보기</Button>
                     </Grid>
                 </Border>
                 <Border x:Name="FilterPanel" CornerRadius="16" Background="{StaticResource MwBrush.PrimarySoft}" Padding="4" BorderBrush="{StaticResource MwBrush.BorderStrong}" BorderThickness="1">
@@ -130,31 +120,14 @@
             </StackPanel>
 
             <Grid>
-                <Grid x:Name="BoardColumnsGrid">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="1*"/>
-                        <ColumnDefinition Width="1*"/>
-                    </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="16" Margin="0,0,8,0" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
-                        <DockPanel>
-                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                                <TextBlock Text="내가 할 일" FontSize="19" FontWeight="Bold"/>
-                                <TextBlock Text="답장, 약속, 제출, 확인, 일정처럼 내가 처리할 항목입니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,3,0,0"/>
-                            </StackPanel>
-                            <ListBox x:Name="ActionList" Style="{StaticResource CardList}" MouseDoubleClick="BoardCard_MouseDoubleClick"/>
-                        </DockPanel>
-                    </Border>
-
-                    <Border Grid.Column="1" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="16" Margin="8,0,0,0" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
-                        <DockPanel>
-                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                                <TextBlock Text="기다리는 중" FontSize="19" FontWeight="Bold"/>
-                                <TextBlock Text="내가 요청했고 상대 회신/전달을 기다리는 항목입니다." Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" Margin="0,3,0,0"/>
-                            </StackPanel>
-                            <ListBox x:Name="WaitingList" Style="{StaticResource CardList}" MouseDoubleClick="BoardCard_MouseDoubleClick"/>
-                        </DockPanel>
-                    </Border>
-                </Grid>
+                <Border x:Name="BoardListPanel" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="16" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                            <TextBlock Text="업무" FontSize="19" FontWeight="Bold"/>
+                        </StackPanel>
+                        <ListBox x:Name="TaskList" Style="{StaticResource CardList}" MouseDoubleClick="BoardCard_MouseDoubleClick"/>
+                    </DockPanel>
+                </Border>
                 <TextBlock x:Name="BoardEmptyText" Text="표시할 업무가 없습니다." Visibility="Collapsed" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Grid>
         </DockPanel>
