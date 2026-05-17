@@ -41,18 +41,18 @@ Included:
 - LLM model names can be loaded from Ollama `/api/tags` or OpenAI-compatible `/v1/models`.
 - Scan status includes LLM attempts, success, fallback, failure, and average response time.
 - Provider naming is protocol-first: `OllamaNative`, `OpenAiChatCompletions`, `OpenAiResponses`, with legacy config strings kept compatible.
-- Review candidates can be snoozed from 검토 후보 and are hidden until the snooze time.
-- Daily board has card-like list items and can jump directly to 검토 후보.
-- MailWhere 알림 클릭은 dead-end가 아니라 업무 보드/검토 후보으로 이어진다.
+- Review candidates can be snoozed from 확인 필요 and are hidden until the snooze time.
+- Daily board has card-like list items and can jump directly to 확인 필요.
+- MailWhere 알림 클릭은 dead-end가 아니라 업무 보드/확인 필요로 이어진다.
 
 ## Release 0.1.4 — app-owned toast and retryable LLM failures
 
-Goal: Windows 기본 풍선 알림에 기대지 않고 MailWhere 자체 toast로 “놓치지 않는” 알림 UX를 제공하며, LLM endpoint가 복구되면 실패 후보를 다시 분석한다.
+Goal: Windows 기본 풍선 알림에 기대지 않고 MailWhere 자체 toast로 “놓치지 않는” 알림 UX를 제공하며, LLM endpoint가 복구되면 실패 항목을 다시 분석한다.
 
 Included:
 
 - 우하단 MailWhere toast stack: scan summary/reminder/error를 카드형으로 누적 표시.
-- Toast primary/secondary actions: 업무 보드, 검토 후보, 앱 열기.
+- Toast primary/secondary actions: 업무 보드, 확인 필요, 앱 열기.
 - LLM 설정 UI 정리: ON/OFF는 토글, provider는 실제 endpoint 방식만 표시.
 - 기본 LLM model은 빈 값이며 모델 불러오기 후 선택하는 흐름.
 - LLM fallback 정책은 고급 설정으로 이동.
@@ -101,30 +101,30 @@ Included:
 - Settings are tabbed: `기본`, `알림`, `AI 분석`, `개발자 도구`.
 - Normal settings hide max mail count, morning board time, and startup delay; recent mail range is 7/30/90 days and reminder timing is `끄기`/`당일만`/`하루 전부터`.
 - Default LLM endpoint/model fields are empty and shown as hints rather than prefilled local-model assumptions.
-- Review candidates can retry transient LLM-failure items with the current analyzer.
-- Core responsibilities are separated for settings choices, startup launch mode, and review-candidate retry so later SDK/skill integrations can call them without scraping WPF controls.
+- 확인 필요 항목은 현재 analyzer로 transient LLM-failure item을 다시 시도할 수 있다.
+- Core responsibilities are separated for settings choices, startup launch mode, and confirmation retry so later SDK/skill integrations can call them without scraping WPF controls.
 
-## Next patch candidate — v0.4.2 visual follow-up
+## Release 0.4.2 — visual follow-up and prompt payload polish
 
 Goal: fix the v0.4.1 Windows smoke-test rough edges before adding larger product features.
 
-User-reported TODO:
+Included:
 
-- Main header action cluster still feels awkward. Re-align header buttons so the primary action stays cleanly rightmost, secondary buttons do not float oddly, and keyboard focus styling does not look like raw WPF.
-- Change board filter order to `오늘` / `이번 주` / `전체` / `날짜 없음`.
-- Restore developer-tool visibility inside settings. The tools should not be in the daily header, but the existing sample/filter/toast/reset controls must be easy to find and not feel removed.
-- Review candidate shortcuts should be single-key: `등록(Y)`, `나중에(S)`, `무시(I)` instead of `Alt+A/S/I`; they should work without first focusing a row-specific button.
-- Review candidate action order should put `원본 열기` before classification actions.
-- Restyle the review-candidate window to match the main MailWhere tone: shared button styles, softer cards, compact header spacing, and no raw WPF bordered-list feeling.
-- Rename awkward review-copy terms. Avoid user-facing `검토 후보`/`후보`; prefer a clearer label such as `확인 필요` or `확인할 항목`. Replace `AI 실패 후보 다시 분석` with calmer copy such as `AI 분석 다시 시도` or `AI로 다시 확인`.
+- Main header action cluster is grid-aligned with `지금 메일 확인` as the stable rightmost primary action; shared rounded button templates remove raw WPF dotted focus chrome.
+- Board filter order is `오늘` / `이번 주` / `전체` / `날짜 없음`.
+- Settings keeps developer tools visible in a dedicated tab with local screen-test and sample-data groups.
+- User-facing review copy is renamed to `확인 필요`; old `AI 실패 후보 다시 분석` copy becomes `AI 분석 다시 시도`.
+- 확인 필요 row actions are ordered `원본 열기` → `등록(Y)` → `나중에(S)` → `무시(I)`, with single-key shortcuts and `Esc` close.
+- 확인 필요 window uses the same card/list/button tone as the main board.
+- LLM user payloads use `analysisDate` + `timezone` instead of precise `now`, and long mail bodies move to final `content`/`contents` blocks for better KV-cache locality.
 
-Additional follow-up candidates:
+Next patch candidates:
 
 - Deduplicate or vary developer/sample data so repeated identical rows do not make the board look broken during demos.
-- Add a small visual smoke checklist for Windows screenshots before every release, especially main board, review candidates, settings, edit dialog, and toast.
+- Add a small visual smoke checklist for Windows screenshots before every release, especially main board, 확인 필요, settings, edit dialog, and toast.
 - Add main-board keyboard affordances: Enter/open, S/snooze, archive key, Esc-to-hide, with visible but unobtrusive hints.
-- Add review-candidate bulk flow later: multi-select, approve/snooze/ignore selected, and compact “why this is a candidate” detail panel.
-- Consider a very small `WindowChrome`/focus visual polish pass so buttons do not expose default dotted focus rectangles.
+- Add 확인 필요 bulk flow later: multi-select, approve/snooze/ignore selected, and compact “why this is a candidate” detail panel.
+- Decide on a refreshed app/tray icon from the prepared concepts.
 
 ## Release 0.4.0 — unified board and simplified secondary surfaces
 
@@ -133,9 +133,9 @@ Goal: remove the duplicated “MailWhere shell vs 업무 보드” feeling and m
 Included:
 
 - `MainWindow` is the primary 업무 보드, defaulting to `오늘`.
-- Main filters are `오늘`, `이번 주`, `날짜 없음`, `전체`; old 7/30-day wording is no longer the primary UI.
+- Main filters are `오늘`, `이번 주`, `전체`, `날짜 없음`; old 7/30-day wording is no longer the primary UI.
 - Task rows use a compact one-line structure: action title, human due label, `보낸 사람: ...`, then right-aligned `열기`/`나중에`/`보관`.
-- Review candidates, settings, and developer tools moved out of the main tab stack into separate windows.
+- 확인 필요, settings, and developer tools moved out of the main tab stack into separate windows.
 - Settings labels use product language such as `AI 분석`, `주소`, `AI 서버 인증`, `API 키`, and support direct API key or environment-variable auth.
 - Developer tools expose safe 샘플 데이터, filter, toast, and daily-board marker checks.
 - Edit/date/manual dialogs now surface `저장(Enter)` and `취소(Esc)`.
@@ -173,7 +173,7 @@ Goal: 업무 보드가 불필요한 출처/하단 설명 없이, 실제 표시 �
 
 - 업무 보드의 출처 배지, 하단 안내문, 하단 닫기 버튼을 제거하고 닫기는 창 X와 Esc로 통일한다.
 - 표시할 업무가 없으면 홈/업무 보드 모두 가운데 muted copy로 empty state를 표시한다.
-- 업무 보드 헤더는 갱신 시간, 검토 후보, 필터 요약, `+ 직접 추가` 순서로 정리해 직접 추가를 가장 오른쪽에 둔다.
+- 업무 보드 헤더는 갱신 시간, 확인 필요, 필터 요약, `+ 직접 추가` 순서로 정리해 직접 추가를 가장 오른쪽에 둔다.
 - 어색한 문구(`활성 항목 전체 원장`, `기본 보드 시간`)를 제거하고 간결한 전문 도구 톤으로 바꾼다.
 
 Not included:
@@ -219,8 +219,8 @@ Not included:
 Priority: high.
 
 - Rich triage queue: bulk selection, due-date edit, and richer keyboard hints on visible buttons.
-- Conservative 새 메일 자동 확인 timer after readiness checks so new review candidates surface while the app stays in tray.
-- Review tab: approve as task, dismiss as not-a-task, edit title/due date.
+- Conservative 새 메일 자동 확인 timer after readiness checks so new confirmation items surface while the app stays in tray.
+- 확인 필요 tab: approve as task, dismiss as not-a-task, edit title/due date.
 - “왜 이게 떴는지” panel: summary/reason/evidence/confidence/fallback source.
 - Feedback loop: candidate-id not-a-task decisions suppress the current candidate; future duplicate suppression should stay non-destructive and avoid source-wide redaction.
 - Scan result grouping: task created / review / ignored / duplicate / warning.

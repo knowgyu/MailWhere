@@ -182,12 +182,12 @@ Microsoft Outlook docs explain that `EntryID` is assigned by the MAPI store and 
 
 이번 구현 범위는 “메일을 대신 처리하는 agent”가 아니라 **tray에 상주하다가 필요한 때 업무 보드를 열어주는 read-only assistant**로 고정한다.
 
-- **Tray-first**: 앱 시작 시 메인 창을 자동으로 띄우지 않는다. 메인 창은 설정/검토 후보/진단/수동 확인용 보조 shell이다.
+- **Tray-first**: 앱 시작 시 메인 창을 자동으로 띄우지 않는다. 메인 창은 설정/확인 필요/진단/수동 확인용 보조 shell이다.
 - **오늘 업무 보드**: 지정 시간에는 알림보다 보드 창을 먼저 열거나 갱신한다. 보드 열기에 실패한 경우에만 notification fallback을 쓴다.
 - **업무 보드**: 활성 항목 전체 원장이다. 전체/오늘/7일/30일/기한 미정 필터와 `내가 할 일`/`기다리는 중` 2열을 유지한다.
 - **메일 소스**: `기다리는 중`을 실제로 만들 수 있도록 Outlook COM은 read-only로 Inbox와 Sent Items를 함께 읽는다.
 - **알림**: due-day/overdue/snooze-due 같은 interrupt-worthy 항목만 toast로 올리고, 일반 waiting 상태는 보드/brief에서 확인한다.
-- **검토 후보**: 낮은 확신 후보는 기본 화면에 섞지 않는다. 사용자가 `검토 후보 보기`나 검토 후보을 열 때만 처리한다.
+- **확인 필요**: 낮은 확신 항목은 기본 화면에 섞지 않는다. 사용자가 `확인 필요 보기`나 확인 필요 창을 열 때만 처리한다.
 - **액션**: `열기`, `나중에`, `수정`, `보관`을 1차 제품 액션으로 둔다. 기한은 카드의 기한 버튼에서 바꾼다. 답장 초안, 자동 발송/삭제/이동/회신은 범위 밖이다.
 - **상태 모델**: `나중에`는 다시 표시되는 snooze이고, `보관`은 active 목록에서 제외되어 자동 재표시되지 않는 archive다. Legacy `done`/`dismissed`는 호환용 non-active 상태로만 남긴다.
 - **테스트 ergonomics**: fallback/rule scan 결과를 AppData에서 직접 지우지 않도록 앱의 문제 해결 버튼과 `scripts/reset-local-data.ps1`을 제공한다. 기본 reset은 settings를 유지하고 local task/review/processed-source DB만 삭제한다.
@@ -309,7 +309,7 @@ CLI UX examples:
 
 ```text
 $where-desk 오늘 할 일과 관련 문서 찾아서 우선순위 브리프 만들어줘
-$where-desk 검토 후보 중 진짜 내 액션일 가능성이 높은 것만 근거와 함께 묶어줘
+$where-desk 확인 필요 항목 중 진짜 내 액션일 가능성이 높은 것만 근거와 함께 묶어줘
 $where-desk MailWhere task export를 OfficeWhere 검색어로 변환해줘
 ```
 
