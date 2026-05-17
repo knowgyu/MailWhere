@@ -33,6 +33,8 @@ public sealed class FollowUpPipeline
 
     public async Task<PipelineOutcome> ProcessAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
     {
+        await _store.RecordReplyObservationAsync(email, cancellationToken).ConfigureAwait(false);
+
         if (await _store.HasProcessedSourceAsync(email.SourceHash, cancellationToken).ConfigureAwait(false))
         {
             return new PipelineOutcome(PipelineOutcomeKind.Duplicate);
@@ -54,6 +56,8 @@ public sealed class FollowUpPipeline
         var pendingEmails = new List<EmailSnapshot>(emails.Count);
         for (var i = 0; i < emails.Count; i++)
         {
+            await _store.RecordReplyObservationAsync(emails[i], cancellationToken).ConfigureAwait(false);
+
             if (await _store.HasProcessedSourceAsync(emails[i].SourceHash, cancellationToken).ConfigureAwait(false))
             {
                 outcomes[i] = new PipelineOutcome(PipelineOutcomeKind.Duplicate);

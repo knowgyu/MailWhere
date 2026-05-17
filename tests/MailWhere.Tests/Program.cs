@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using MailWhere.Core.Analysis;
 using MailWhere.Core.Capabilities;
 using MailWhere.Core.Domain;
+using MailWhere.Core.Export;
 using MailWhere.Core.LLM;
 using MailWhere.Core.Localization;
 using MailWhere.Core.Mail;
@@ -114,6 +115,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("SQLite review candidate snooze hides until due", SqliteReviewCandidateSnoozeHidesUntilDue),
     ("SQLite task dismiss and due update persist", SqliteTaskDismissAndDueUpdatePersist),
     ("SQLite task archive hides from open list", SqliteTaskArchiveHidesFromOpenList),
+    ("SQLite archived tasks can be listed and restored", SqliteArchivedTasksCanBeListedAndRestored),
+    ("Pipeline records multi-recipient reply progress", PipelineRecordsMultiRecipientReplyProgress),
+    ("MailWhere export omits source ids and includes reply progress", MailWhereExportOmitsSourceIdsAndIncludesReplyProgress),
     ("SQLite task details edit persists", SqliteTaskDetailsEditPersists),
     ("SQLite task complete and snooze persist", SqliteTaskCompleteAndSnoozePersist),
     ("SQLite stale review ignore does not redact approved task", SqliteStaleReviewIgnoreDoesNotRedactApprovedTask),
@@ -146,7 +150,8 @@ static EmailSnapshot Mail(
     string? conversationId = null,
     string? mailboxOwner = null,
     MailboxRecipientRole recipientRole = MailboxRecipientRole.Direct,
-    string? sender = null) => new(
+    string? sender = null,
+    IReadOnlyList<string>? recipients = null) => new(
     id ?? Guid.NewGuid().ToString("N"),
     new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9)),
     sender ?? "tester",
@@ -154,7 +159,7 @@ static EmailSnapshot Mail(
     body,
     conversationId,
     mailboxOwner,
-    null,
+    recipients,
     recipientRole);
 
 static async Task KoreanDeadlineRequestCreatesAutoTask()
@@ -2374,6 +2379,181 @@ static async Task SqliteTaskArchiveHidesFromOpenList()
     }
 }
 
+static async Task SqliteArchivedTasksCanBeListedAndRestored()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new LocalTaskItem(
+            Guid.NewGuid(),
+            "복원 테스트",
+            now.AddDays(1),
+            StableHash.Create("restore-source"),
+            "restore-source",
+            0.9,
+            "테스트",
+            null,
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now);
+        await store.SaveTaskAsync(task);
+
+        var archived = await store.ArchiveTaskAsync(task.Id, now.AddMinutes(1));
+        var archiveList = await store.ListArchivedTasksAsync();
+        var restored = await store.RestoreArchivedTaskAsync(task.Id, now.AddMinutes(2));
+        var open = await store.ListOpenTasksAsync();
+        var archiveAfterRestore = await store.ListArchivedTasksAsync();
+
+        Assert(archived, "Expected archive to succeed.");
+        Assert(archiveList.Count == 1 && archiveList[0].Id == task.Id, "Expected archived task in archive list.");
+        Assert(restored, "Expected archived task restore to succeed.");
+        Assert(open.Count == 1 && open[0].Id == task.Id, "Expected restored task in open list.");
+        Assert(open[0].Status == LocalTaskStatus.Open, "Expected restored task status to be Open.");
+        Assert(archiveAfterRestore.Count == 0, "Expected restored task to leave archive list.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task PipelineRecordsMultiRecipientReplyProgress()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var sentAt = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
+        var sent = new EmailSnapshot(
+            "sent-request",
+            sentAt,
+            "Me",
+            "정산 확인 요청",
+            "비용 정산 범위 확인 부탁드립니다.",
+            "conversation-1",
+            "Me",
+            new[] { "Finance Team", "Design Partner", "QA User" },
+            MailboxRecipientRole.Other);
+        var replyOne = new EmailSnapshot(
+            "reply-finance",
+            sentAt.AddHours(1),
+            "Finance Team",
+            "RE: 정산 확인 요청",
+            "확인했습니다.",
+            "conversation-1",
+            "Me",
+            null,
+            MailboxRecipientRole.Direct);
+        var replyTwo = new EmailSnapshot(
+            "reply-qa",
+            sentAt.AddHours(2),
+            "QA User",
+            "RE: 정산 확인 요청",
+            "QA 기준 확인했습니다.",
+            "conversation-1",
+            "Me",
+            null,
+            MailboxRecipientRole.Direct);
+
+        var analyzer = new SequenceAnalyzer(
+            new FollowUpAnalysis(
+                FollowUpKind.WaitingForReply,
+                AnalysisDisposition.AutoCreateTask,
+                0.88,
+                "정산 확인 요청",
+                "다자 회신 대기",
+                "확인 부탁드립니다",
+                sentAt.AddDays(2)),
+            FollowUpAnalysis.Ignore("reply"),
+            FollowUpAnalysis.Ignore("reply"));
+        var pipeline = new FollowUpPipeline(analyzer, store);
+
+        await pipeline.ProcessAsync(sent);
+        await pipeline.ProcessAsync(replyOne);
+        await pipeline.ProcessAsync(replyTwo);
+
+        var progress = (await store.ListReplyProgressAsync()).Single();
+        Assert(progress.ExpectedCount == 3, "Expected three reply participants.");
+        Assert(progress.ReceivedCount == 2, "Expected two received replies.");
+        Assert(progress.SummaryText == "2/3명 회신", "Expected compact Korean summary.");
+        Assert(progress.Participants.Any(participant => participant.DisplayName == "Design Partner" && !participant.HasReplied), "Expected missing participant to remain visible.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task MailWhereExportOmitsSourceIdsAndIncludesReplyProgress()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var openTask = new LocalTaskItem(
+            Guid.NewGuid(),
+            "열린 업무",
+            now.AddDays(1),
+            StableHash.Create("export-open-source"),
+            "export-open-source",
+            0.9,
+            "원문 기반 사유",
+            "원문 기반 증거",
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now,
+            SourceSenderDisplay: "Finance Team");
+        var archiveTask = openTask with
+        {
+            Id = Guid.NewGuid(),
+            Title = "보관 업무",
+            SourceIdHash = StableHash.Create("export-archived-source"),
+            SourceId = "export-archived-source"
+        };
+        var waitingTask = openTask with
+        {
+            Id = Guid.NewGuid(),
+            Title = "다자 요청",
+            SourceIdHash = StableHash.Create("export-waiting-source"),
+            SourceId = "export-waiting-source",
+            Kind = FollowUpKind.WaitingForReply,
+            SourceConversationId = "export-conversation",
+            SourceRecipientDisplayNames = new[] { "Finance Team", "Design Partner" }
+        };
+        var reviewMail = Mail("검토 요청", "확인 부탁드립니다.", "export-review-source");
+        var review = ReviewCandidate.FromAnalysis(
+            reviewMail,
+            new FollowUpAnalysis(FollowUpKind.ReviewNeeded, AnalysisDisposition.Review, 0.55, "검토 항목", "원문 기반 후보", "원문 증거", null),
+            now);
+
+        await store.SaveTaskAsync(openTask);
+        await store.SaveTaskAsync(archiveTask);
+        await store.SaveTaskAsync(waitingTask);
+        await store.ArchiveTaskAsync(archiveTask.Id, now.AddMinutes(1));
+        await store.SaveReviewCandidateAsync(review);
+        await store.RecordReplyObservationAsync(new EmailSnapshot("reply-export", now.AddMinutes(5), "Finance Team", "RE", null, "export-conversation"));
+
+        var snapshot = await new MailWhereExportService(store).BuildSnapshotAsync(now);
+        var json = MailWhereExportService.ToJson(snapshot);
+
+        Assert(snapshot.OpenTasks.Count == 2, "Expected open export tasks.");
+        Assert(snapshot.ArchivedTasks.Count == 1, "Expected archived export task.");
+        Assert(snapshot.ReviewItems.Count == 1, "Expected review export item.");
+        Assert(snapshot.ReplyProgress.Single().SummaryText == "1/2명 회신", "Expected reply progress in export.");
+        Assert(json.Contains("열린 업무", StringComparison.Ordinal), "Expected safe task title in export.");
+        Assert(!json.Contains("export-open-source", StringComparison.Ordinal), "Expected source ids omitted from export.");
+        Assert(!json.Contains(StableHash.Create("export-open-source"), StringComparison.Ordinal), "Expected source hashes omitted from export.");
+        Assert(!json.Contains("원문 기반 증거", StringComparison.Ordinal), "Expected evidence snippets omitted from export.");
+        Assert(!json.Contains("sourceId", StringComparison.OrdinalIgnoreCase), "Expected no source id field in export JSON.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
 static async Task SqliteTaskDetailsEditPersists()
 {
     var (store, _, cleanup) = await CreateTempStoreAsync();
@@ -2723,6 +2903,7 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
 {
     public List<LocalTaskItem> Tasks { get; } = [];
     public List<ReviewCandidate> Candidates { get; } = [];
+    public List<ReplyReceipt> ReplyReceipts { get; } = [];
     public HashSet<string> Processed { get; } = [];
     public Dictionary<string, string> AppState { get; } = new(StringComparer.Ordinal);
 
@@ -2784,8 +2965,39 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         return Task.CompletedTask;
     }
 
+    public Task RecordReplyObservationAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email.ConversationId) || string.IsNullOrWhiteSpace(email.SenderDisplay))
+        {
+            return Task.CompletedTask;
+        }
+
+        var key = ReplyProgressMatcher.NormalizeParticipantKey(email.SenderDisplay);
+        if (ReplyReceipts.Any(receipt => receipt.ConversationId == email.ConversationId && ReplyProgressMatcher.NormalizeParticipantKey(receipt.ParticipantDisplay) == key))
+        {
+            return Task.CompletedTask;
+        }
+
+        ReplyReceipts.Add(new ReplyReceipt(email.ConversationId, email.SenderDisplay, email.ReceivedAt, email.SourceHash));
+        return Task.CompletedTask;
+    }
+
     public Task<IReadOnlyList<LocalTaskItem>> ListOpenTasksAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<LocalTaskItem>>(Tasks.Where(task => FollowUpPresentation.IsVisibleInPrimary(task, DateTimeOffset.UtcNow)).ToList());
+
+    public Task<IReadOnlyList<LocalTaskItem>> ListArchivedTasksAsync(int limit = 100, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<LocalTaskItem>>(Tasks
+            .Where(task => task.Status == LocalTaskStatus.Archived)
+            .OrderByDescending(task => task.UpdatedAt)
+            .Take(Math.Clamp(limit, 1, 500))
+            .ToList());
+
+    public Task<IReadOnlyList<ReplyProgressItem>> ListReplyProgressAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<ReplyProgressItem>>(Tasks
+            .Select(task => ReplyProgressMatcher.Build(task, ReplyReceipts))
+            .Where(progress => progress is not null)
+            .Cast<ReplyProgressItem>()
+            .ToList());
 
     public Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<ReviewCandidate>>(Candidates
@@ -2876,6 +3088,18 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         }
 
         Tasks[index] = Tasks[index] with { Status = LocalTaskStatus.Archived, SnoozeUntil = null, UpdatedAt = now };
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> RestoreArchivedTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = Tasks.FindIndex(task => task.Id == taskId && task.Status == LocalTaskStatus.Archived);
+        if (index < 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        Tasks[index] = Tasks[index] with { Status = LocalTaskStatus.Open, SnoozeUntil = null, UpdatedAt = now };
         return Task.FromResult(true);
     }
 

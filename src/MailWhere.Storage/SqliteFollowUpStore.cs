@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using MailWhere.Core.Domain;
 using MailWhere.Core.Storage;
@@ -6,7 +7,7 @@ namespace MailWhere.Storage;
 
 public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 {
-    private const string TaskColumns = "id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted, source_sender_display, source_received_at, source_recipient_role, kind";
+    private const string TaskColumns = "id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted, source_sender_display, source_received_at, source_recipient_role, kind, source_conversation_id, source_recipient_display_names";
     private readonly string _connectionString;
 
     public SqliteFollowUpStore(string databasePath)
@@ -45,6 +46,8 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         await EnsureColumnAsync(connection, "tasks", "source_received_at", "TEXT NULL", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "tasks", "source_recipient_role", "TEXT NOT NULL DEFAULT 'Direct'", cancellationToken).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "tasks", "kind", "TEXT NOT NULL DEFAULT 'ActionRequested'", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "tasks", "source_conversation_id", "TEXT NULL", cancellationToken).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "tasks", "source_recipient_display_names", "TEXT NULL", cancellationToken).ConfigureAwait(false);
 
         command.CommandText = Schema.IndexesSql;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -157,6 +160,35 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task RecordReplyObservationAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email.ConversationId) || string.IsNullOrWhiteSpace(email.SenderDisplay))
+        {
+            return;
+        }
+
+        var participantKey = ReplyProgressMatcher.NormalizeParticipantKey(email.SenderDisplay);
+        if (participantKey.Length == 0)
+        {
+            return;
+        }
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO reply_receipts
+            (conversation_id, participant_key, participant_display, received_at, source_id_hash)
+            VALUES ($conversation, $participantKey, $participantDisplay, $receivedAt, $sourceHash)
+            """;
+        command.Parameters.AddWithValue("$conversation", email.ConversationId.Trim());
+        command.Parameters.AddWithValue("$participantKey", participantKey);
+        command.Parameters.AddWithValue("$participantDisplay", EvidencePolicy.Truncate(email.SenderDisplay) ?? email.SenderDisplay.Trim());
+        command.Parameters.AddWithValue("$receivedAt", email.ReceivedAt.ToString("O"));
+        command.Parameters.AddWithValue("$sourceHash", email.SourceHash);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<LocalTaskItem>> ListOpenTasksAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = new SqliteConnection(_connectionString);
@@ -176,6 +208,66 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         }
 
         return tasks;
+    }
+
+    public async Task<IReadOnlyList<LocalTaskItem>> ListArchivedTasksAsync(int limit = 100, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = $"SELECT {TaskColumns} FROM tasks WHERE status = 'Archived' ORDER BY updated_at DESC LIMIT $limit";
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 500));
+        var tasks = new List<LocalTaskItem>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            tasks.Add(ReadTask(reader));
+        }
+
+        return tasks;
+    }
+
+    public async Task<IReadOnlyList<ReplyProgressItem>> ListReplyProgressAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        var tasks = new List<LocalTaskItem>();
+        var taskCommand = connection.CreateCommand();
+        taskCommand.CommandText = $"SELECT {TaskColumns} FROM tasks WHERE status IN ('Open','Snoozed') AND kind = 'WaitingForReply' AND source_conversation_id IS NOT NULL ORDER BY due_at IS NULL, due_at, created_at";
+        await using (var reader = await taskCommand.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                tasks.Add(ReadTask(reader));
+            }
+        }
+
+        if (tasks.Count == 0)
+        {
+            return Array.Empty<ReplyProgressItem>();
+        }
+
+        var receipts = new List<ReplyReceipt>();
+        var receiptCommand = connection.CreateCommand();
+        receiptCommand.CommandText = "SELECT conversation_id, participant_display, received_at, source_id_hash FROM reply_receipts";
+        await using (var reader = await receiptCommand.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                receipts.Add(new ReplyReceipt(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    DateTimeOffset.Parse(reader.GetString(2)),
+                    reader.IsDBNull(3) ? null : reader.GetString(3)));
+            }
+        }
+
+        return tasks
+            .Select(task => ReplyProgressMatcher.Build(task, receipts))
+            .Where(progress => progress is not null)
+            .Cast<ReplyProgressItem>()
+            .ToArray();
     }
 
     public async Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default)
@@ -340,6 +432,25 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             """;
         command.Parameters.AddWithValue("$id", taskId.ToString());
         command.Parameters.AddWithValue("$status", LocalTaskStatus.Archived.ToString());
+        command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
+    public async Task<bool> RestoreArchivedTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE tasks
+            SET status = $status,
+                snooze_until = NULL,
+                updated_at = $updatedAt
+            WHERE id = $id
+              AND status = 'Archived'
+            """;
+        command.Parameters.AddWithValue("$id", taskId.ToString());
+        command.Parameters.AddWithValue("$status", LocalTaskStatus.Open.ToString());
         command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
     }
@@ -510,7 +621,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 
         var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "UPDATE tasks SET title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL, source_sender_display = NULL, source_received_at = NULL, source_recipient_role = $recipientRole, source_derived_data_deleted = 1, updated_at = $updated WHERE id = $id";
+        command.CommandText = "UPDATE tasks SET title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL, source_sender_display = NULL, source_received_at = NULL, source_recipient_role = $recipientRole, source_conversation_id = NULL, source_recipient_display_names = NULL, source_derived_data_deleted = 1, updated_at = $updated WHERE id = $id";
         command.Parameters.AddWithValue("$id", taskId.ToString());
         command.Parameters.AddWithValue("$title", LocalTaskItem.RedactedTitle);
         command.Parameters.AddWithValue("$reason", LocalTaskItem.RedactedReason);
@@ -539,7 +650,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
     {
         var taskCommand = connection.CreateCommand();
         taskCommand.Transaction = transaction;
-        taskCommand.CommandText = "UPDATE tasks SET title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL, source_sender_display = NULL, source_received_at = NULL, source_recipient_role = $recipientRole, source_derived_data_deleted = 1, updated_at = $updated WHERE source_id_hash = $source";
+        taskCommand.CommandText = "UPDATE tasks SET title = $title, reason = $reason, evidence_snippet = NULL, source_id = NULL, source_sender_display = NULL, source_received_at = NULL, source_recipient_role = $recipientRole, source_conversation_id = NULL, source_recipient_display_names = NULL, source_derived_data_deleted = 1, updated_at = $updated WHERE source_id_hash = $source";
         taskCommand.Parameters.AddWithValue("$source", sourceIdHash);
         taskCommand.Parameters.AddWithValue("$title", LocalTaskItem.RedactedTitle);
         taskCommand.Parameters.AddWithValue("$reason", LocalTaskItem.RedactedReason);
@@ -563,8 +674,8 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         command.Transaction = transaction;
         command.CommandText = """
             INSERT OR REPLACE INTO tasks
-            (id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted, source_sender_display, source_received_at, source_recipient_role, kind)
-            VALUES ($id, $title, $dueAt, $source, $sourceId, $confidence, $reason, $evidence, $status, $snooze, $created, $updated, $deleted, $sender, $receivedAt, $recipientRole, $kind)
+            (id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted, source_sender_display, source_received_at, source_recipient_role, kind, source_conversation_id, source_recipient_display_names)
+            VALUES ($id, $title, $dueAt, $source, $sourceId, $confidence, $reason, $evidence, $status, $snooze, $created, $updated, $deleted, $sender, $receivedAt, $recipientRole, $kind, $conversation, $recipients)
             """;
         command.Parameters.AddWithValue("$id", task.Id.ToString());
         command.Parameters.AddWithValue("$title", EvidencePolicy.Truncate(task.Title) ?? LocalTaskItem.RedactedTitle);
@@ -583,6 +694,8 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         command.Parameters.AddWithValue("$receivedAt", (object?)task.SourceReceivedAt?.ToString("O") ?? DBNull.Value);
         command.Parameters.AddWithValue("$recipientRole", task.SourceRecipientRole.ToString());
         command.Parameters.AddWithValue("$kind", task.Kind.ToString());
+        command.Parameters.AddWithValue("$conversation", (object?)EvidencePolicy.Truncate(task.SourceConversationId) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$recipients", (object?)SerializeRecipients(task.SourceRecipientDisplayNames) ?? DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -636,6 +749,44 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         }
     }
 
+    private static string? SerializeRecipients(IReadOnlyList<string>? recipients)
+    {
+        if (recipients is null || recipients.Count == 0)
+        {
+            return null;
+        }
+
+        var compact = recipients
+            .Where(recipient => !string.IsNullOrWhiteSpace(recipient))
+            .Select(recipient => EvidencePolicy.Truncate(recipient.Trim()) ?? recipient.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return compact.Length == 0 ? null : JsonSerializer.Serialize(compact);
+    }
+
+    private static IReadOnlyList<string>? DeserializeRecipients(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        try
+        {
+            var recipients = JsonSerializer.Deserialize<string[]>(raw);
+            var compact = recipients?
+                .Where(recipient => !string.IsNullOrWhiteSpace(recipient))
+                .Select(recipient => recipient.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return compact is { Length: > 0 } ? compact : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static LocalTaskItem ReadTask(SqliteDataReader reader)
     {
         static DateTimeOffset? MaybeDate(object value) => value == DBNull.Value ? null : DateTimeOffset.Parse((string)value);
@@ -657,7 +808,9 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             reader.IsDBNull(13) ? null : reader.GetString(13),
             MaybeDate(reader.GetValue(14)),
             Enum.TryParse<MailboxRecipientRole>(reader.IsDBNull(15) ? null : reader.GetString(15), out var role) ? role : MailboxRecipientRole.Direct,
-            Enum.TryParse<FollowUpKind>(reader.IsDBNull(16) ? null : reader.GetString(16), out var kind) ? kind : FollowUpKind.ActionRequested);
+            Enum.TryParse<FollowUpKind>(reader.IsDBNull(16) ? null : reader.GetString(16), out var kind) ? kind : FollowUpKind.ActionRequested,
+            SourceConversationId: reader.IsDBNull(17) ? null : reader.GetString(17),
+            SourceRecipientDisplayNames: reader.IsDBNull(18) ? null : DeserializeRecipients(reader.GetString(18)));
     }
 
     private static ReviewCandidate ReadCandidate(SqliteDataReader reader)

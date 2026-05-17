@@ -27,7 +27,9 @@ public sealed record LocalTaskItem(
     string? SourceSenderDisplay = null,
     DateTimeOffset? SourceReceivedAt = null,
     MailboxRecipientRole SourceRecipientRole = MailboxRecipientRole.Direct,
-    FollowUpKind Kind = FollowUpKind.ActionRequested)
+    FollowUpKind Kind = FollowUpKind.ActionRequested,
+    string? SourceConversationId = null,
+    IReadOnlyList<string>? SourceRecipientDisplayNames = null)
 {
     public const string RedactedTitle = "메일 기반 항목(원문 삭제됨)";
     public const string RedactedReason = "메일 원문 기반 사유가 삭제되었습니다.";
@@ -55,7 +57,9 @@ public sealed record LocalTaskItem(
             SourceSenderDisplay: EvidencePolicy.Truncate(source.SenderDisplay),
             SourceReceivedAt: source.ReceivedAt,
             SourceRecipientRole: source.MailboxRecipientRole,
-            Kind: analysis.Kind);
+            Kind: analysis.Kind,
+            SourceConversationId: EvidencePolicy.Truncate(source.ConversationId),
+            SourceRecipientDisplayNames: NormalizeRecipients(source.RecipientDisplayNames));
     }
 
     public LocalTaskItem MarkDone(DateTimeOffset now) => this with
@@ -99,6 +103,24 @@ public sealed record LocalTaskItem(
         SourceSenderDisplay = null,
         SourceReceivedAt = null,
         SourceRecipientRole = MailboxRecipientRole.Other,
+        SourceConversationId = null,
+        SourceRecipientDisplayNames = null,
         UpdatedAt = now
     };
+
+    private static IReadOnlyList<string>? NormalizeRecipients(IReadOnlyList<string>? names)
+    {
+        if (names is null || names.Count == 0)
+        {
+            return null;
+        }
+
+        var normalized = names
+            .Select(name => string.Join(' ', (name ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(name => EvidencePolicy.Truncate(name) ?? name)
+            .ToArray();
+        return normalized.Length == 0 ? null : normalized;
+    }
 }

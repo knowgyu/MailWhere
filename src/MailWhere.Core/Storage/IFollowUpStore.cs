@@ -10,13 +10,17 @@ public interface IFollowUpStore
     Task<bool> HasOpenLlmFailureReviewCandidateForSourceAsync(string sourceIdHash, CancellationToken cancellationToken = default);
     Task<int> SuppressOpenLlmFailureReviewCandidatesForSourceAsync(string sourceIdHash, DateTimeOffset now, string resolution, CancellationToken cancellationToken = default);
     Task MarkSourceProcessedAsync(string sourceIdHash, CancellationToken cancellationToken = default);
+    Task RecordReplyObservationAsync(EmailSnapshot email, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LocalTaskItem>> ListOpenTasksAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<LocalTaskItem>> ListArchivedTasksAsync(int limit = 100, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ReplyProgressItem>> ListReplyProgressAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default);
     Task<ReviewCandidate?> GetReviewCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
     Task<LocalTaskItem?> ResolveReviewCandidateAsTaskAsync(Guid candidateId, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> SnoozeReviewCandidateAsync(Guid candidateId, DateTimeOffset until, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> ResolveReviewCandidateAsNotTaskAsync(Guid candidateId, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> ArchiveTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default);
+    Task<bool> RestoreArchivedTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> CompleteTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> SnoozeTaskAsync(Guid taskId, DateTimeOffset until, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> DismissTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default);

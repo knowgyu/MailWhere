@@ -20,7 +20,9 @@ internal static class Schema
             source_sender_display TEXT NULL,
             source_received_at TEXT NULL,
             source_recipient_role TEXT NOT NULL DEFAULT 'Direct',
-            kind TEXT NOT NULL DEFAULT 'ActionRequested'
+            kind TEXT NOT NULL DEFAULT 'ActionRequested',
+            source_conversation_id TEXT NULL,
+            source_recipient_display_names TEXT NULL
         );
 
         CREATE TABLE IF NOT EXISTS review_candidates (
@@ -48,6 +50,15 @@ internal static class Schema
             processed_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS reply_receipts (
+            conversation_id TEXT NOT NULL,
+            participant_key TEXT NOT NULL,
+            participant_display TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            source_id_hash TEXT NULL,
+            PRIMARY KEY (conversation_id, participant_key)
+        );
+
         CREATE TABLE IF NOT EXISTS app_state (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
@@ -58,6 +69,9 @@ internal static class Schema
     public const string IndexesSql = """
         CREATE INDEX IF NOT EXISTS idx_tasks_status_due ON tasks(status, due_at);
         CREATE INDEX IF NOT EXISTS idx_tasks_source_hash ON tasks(source_id_hash);
+        CREATE INDEX IF NOT EXISTS idx_tasks_archive_updated ON tasks(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_tasks_conversation ON tasks(source_conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_reply_receipts_conversation ON reply_receipts(conversation_id);
         CREATE INDEX IF NOT EXISTS idx_review_source_hash ON review_candidates(source_id_hash);
         CREATE INDEX IF NOT EXISTS idx_review_active ON review_candidates(suppressed, resolved_at, created_at);
         CREATE INDEX IF NOT EXISTS idx_review_active_snooze ON review_candidates(suppressed, resolved_at, snooze_until, created_at);
