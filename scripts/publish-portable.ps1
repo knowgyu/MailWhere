@@ -109,6 +109,15 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $publishDir "BUILD-MANIFEST.json") -Encoding UTF8
 
+$exePath = Join-Path $publishDir "MailWhere.exe"
+if (Test-Path $exePath) {
+    Write-Host "[portable] touch MailWhere.exe for recent-sort discoverability"
+    # Zip timestamps have coarse granularity, and copied docs/assets can share
+    # the same second. Nudge only the executable so recent-modified sorting
+    # reliably surfaces it without shipping any helper script.
+    (Get-Item $exePath).LastWriteTime = (Get-Date).AddSeconds(10)
+}
+
 Write-Host "[portable] create zip $zipPath"
 New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
 Compress-Archive -Path "$publishDir\*" -DestinationPath $zipPath -Force

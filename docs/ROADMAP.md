@@ -104,6 +104,15 @@ Included:
 - 확인 필요 항목은 현재 analyzer로 transient LLM-failure item을 다시 시도할 수 있다.
 - Core responsibilities are separated for settings choices, startup launch mode, and confirmation retry so later SDK/skill integrations can call them without scraping WPF controls.
 
+## Release 0.4.3 — logo and portable discoverability patch
+
+Goal: ship the supplied MailWhere logo in the portable artifact and make `MailWhere.exe` easier to find after extraction.
+
+Shipped:
+- New MailWhere logo is the app/documentation branding source for exe/window/tray/docs surfaces.
+- Portable publish scripts touch only the published `MailWhere.exe` immediately before zip creation so recent-modified sorting surfaces it near the top.
+- Packaging remains multi-file portable; no helper touch script is included in the release payload.
+
 ## Release 0.4.2 — visual follow-up and prompt payload polish
 
 Goal: fix the v0.4.1 Windows smoke-test rough edges before adding larger product features.

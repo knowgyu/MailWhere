@@ -21,6 +21,7 @@
 ## 제품/기획
 
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.
+- [`releases/v0.4.3.md`](releases/v0.4.3.md): 새 로고와 portable 실행 파일 표시 개선 릴리즈 노트.
 - [`releases/v0.4.2.md`](releases/v0.4.2.md): 화면/확인 필요/LLM payload polish 릴리즈 노트.
 - [`releases/v0.4.1.md`](releases/v0.4.1.md): 설정/보드 compact patch 릴리즈 노트.
 - [`releases/v0.4.0.md`](releases/v0.4.0.md): 통합 업무 보드 릴리즈 노트.

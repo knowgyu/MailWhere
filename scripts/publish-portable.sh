@@ -96,6 +96,23 @@ with open(manifest_path, "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 
+exe_path="$publish_dir/MailWhere.exe"
+if [[ -f "$exe_path" ]]; then
+  echo "[portable] touch MailWhere.exe for recent-sort discoverability"
+  python3 - "$exe_path" <<'PY'
+import os
+import sys
+import time
+
+exe_path = sys.argv[1]
+# Zip timestamps have coarse granularity, and copied docs/assets can share
+# the same second. Nudge only the executable so recent-modified sorting
+# reliably surfaces it without shipping any helper script.
+stamp = time.time() + 10
+os.utime(exe_path, (stamp, stamp))
+PY
+fi
+
 echo "[portable] create zip $zip_path"
 python3 - "$publish_dir" "$zip_path" <<'PY'
 import pathlib
