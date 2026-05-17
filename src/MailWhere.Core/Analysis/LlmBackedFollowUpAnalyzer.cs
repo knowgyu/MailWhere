@@ -117,26 +117,38 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private static string BuildPayload(EmailSnapshot email)
     {
         var context = MailBodyContextBuilder.Build(email);
+        var analysisNow = DateTimeOffset.Now;
         return JsonSerializer.Serialize(
             new
             {
                 language = "ko-KR",
-                now = DateTimeOffset.Now.ToString("O", CultureInfo.InvariantCulture),
-                receivedAt = email.ReceivedAt.ToString("O", CultureInfo.InvariantCulture),
-                senderDisplay = email.SenderDisplay,
-                subject = email.Subject,
-                subjectCore = context.SubjectCore,
-                mailboxOwnerDisplayName = email.MailboxOwnerDisplayName,
-                recipientDisplayNames = email.RecipientDisplayNames ?? Array.Empty<string>(),
-                mailboxRecipientRole = email.MailboxRecipientRole.ToString(),
-                conversationIdPresent = !string.IsNullOrWhiteSpace(email.ConversationId),
-                contextKind = context.Kind.ToString(),
-                currentSenderDelegatesForwardedContext = context.CurrentSenderDelegatesForwardedContext,
-                quotedHistoryTrimmed = context.QuotedHistoryTrimmed,
-                currentMessage = TrimForPayload(context.CurrentMessage, MaxCurrentMessageChars),
-                forwardedContext = TrimForPayload(context.ForwardedContext, MaxForwardedContextChars),
-                quotedHistoryPresent = !string.IsNullOrWhiteSpace(context.QuotedHistory),
-                quotedHistoryPreview = TrimForPayload(context.QuotedHistory, MaxQuotedPreviewChars)
+                analysisDate = analysisNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                timezone = TimeZoneInfo.Local.Id,
+                utcOffset = analysisNow.ToString("zzz", CultureInfo.InvariantCulture),
+                mail = new
+                {
+                    receivedAt = email.ReceivedAt.ToString("O", CultureInfo.InvariantCulture),
+                    senderDisplay = email.SenderDisplay,
+                    subject = email.Subject,
+                    subjectCore = context.SubjectCore,
+                    mailboxOwnerDisplayName = email.MailboxOwnerDisplayName,
+                    recipientDisplayNames = email.RecipientDisplayNames ?? Array.Empty<string>(),
+                    mailboxRecipientRole = email.MailboxRecipientRole.ToString(),
+                    conversationIdPresent = !string.IsNullOrWhiteSpace(email.ConversationId)
+                },
+                contextFlags = new
+                {
+                    contextKind = context.Kind.ToString(),
+                    currentSenderDelegatesForwardedContext = context.CurrentSenderDelegatesForwardedContext,
+                    quotedHistoryTrimmed = context.QuotedHistoryTrimmed,
+                    quotedHistoryPresent = !string.IsNullOrWhiteSpace(context.QuotedHistory)
+                },
+                content = new
+                {
+                    currentMessage = TrimForPayload(context.CurrentMessage, MaxCurrentMessageChars),
+                    forwardedContext = TrimForPayload(context.ForwardedContext, MaxForwardedContextChars),
+                    quotedHistoryPreview = TrimForPayload(context.QuotedHistory, MaxQuotedPreviewChars)
+                }
             },
             new JsonSerializerOptions
             {
@@ -146,26 +158,42 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
 
     private static string BuildBatchPayload(IReadOnlyList<EmailSnapshot> emails)
     {
-        var items = emails.Select((email, index) =>
+        var analysisNow = DateTimeOffset.Now;
+        var projected = emails.Select((email, index) =>
         {
             var context = MailBodyContextBuilder.Build(email);
+            var id = index.ToString(CultureInfo.InvariantCulture);
             return new
             {
-                id = index.ToString(CultureInfo.InvariantCulture),
-                receivedAt = email.ReceivedAt.ToString("O", CultureInfo.InvariantCulture),
-                senderDisplay = email.SenderDisplay,
-                subject = TrimForPayload(email.Subject, 180),
-                subjectCore = context.SubjectCore,
-                mailboxOwnerDisplayName = email.MailboxOwnerDisplayName,
-                recipientDisplayNames = email.RecipientDisplayNames ?? Array.Empty<string>(),
-                mailboxRecipientRole = email.MailboxRecipientRole.ToString(),
-                contextKind = context.Kind.ToString(),
-                currentSenderDelegatesForwardedContext = context.CurrentSenderDelegatesForwardedContext,
-                quotedHistoryTrimmed = context.QuotedHistoryTrimmed,
-                currentMessage = TrimForPayload(context.CurrentMessage, MaxCurrentMessageChars),
-                forwardedContext = TrimForPayload(context.ForwardedContext, MaxForwardedContextChars),
-                quotedHistoryPresent = !string.IsNullOrWhiteSpace(context.QuotedHistory),
-                quotedHistoryPreview = TrimForPayload(context.QuotedHistory, MaxQuotedPreviewChars)
+                Item = new
+                {
+                    id,
+                    mail = new
+                    {
+                        receivedAt = email.ReceivedAt.ToString("O", CultureInfo.InvariantCulture),
+                        senderDisplay = email.SenderDisplay,
+                        subject = TrimForPayload(email.Subject, 180),
+                        subjectCore = context.SubjectCore,
+                        mailboxOwnerDisplayName = email.MailboxOwnerDisplayName,
+                        recipientDisplayNames = email.RecipientDisplayNames ?? Array.Empty<string>(),
+                        mailboxRecipientRole = email.MailboxRecipientRole.ToString(),
+                        conversationIdPresent = !string.IsNullOrWhiteSpace(email.ConversationId)
+                    },
+                    contextFlags = new
+                    {
+                        contextKind = context.Kind.ToString(),
+                        currentSenderDelegatesForwardedContext = context.CurrentSenderDelegatesForwardedContext,
+                        quotedHistoryTrimmed = context.QuotedHistoryTrimmed,
+                        quotedHistoryPresent = !string.IsNullOrWhiteSpace(context.QuotedHistory)
+                    }
+                },
+                Content = new
+                {
+                    id,
+                    currentMessage = TrimForPayload(context.CurrentMessage, MaxCurrentMessageChars),
+                    forwardedContext = TrimForPayload(context.ForwardedContext, MaxForwardedContextChars),
+                    quotedHistoryPreview = TrimForPayload(context.QuotedHistory, MaxQuotedPreviewChars)
+                }
             };
         }).ToArray();
 
@@ -173,9 +201,12 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             new
             {
                 language = "ko-KR",
-                now = DateTimeOffset.Now.ToString("O", CultureInfo.InvariantCulture),
-                instruction = "각 items[]를 독립적으로 분석하고 입력과 같은 개수, 같은 id로 짧은 JSON 결과를 반환하세요. /no_think",
-                items
+                analysisDate = analysisNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                timezone = TimeZoneInfo.Local.Id,
+                utcOffset = analysisNow.ToString("zzz", CultureInfo.InvariantCulture),
+                instruction = "각 items[] metadata와 contents[] body를 id로 연결해 독립 분석하고 입력과 같은 개수, 같은 id로 짧은 JSON 결과를 반환하세요. /no_think",
+                items = projected.Select(item => item.Item).ToArray(),
+                contents = projected.Select(item => item.Content).ToArray()
             },
             new JsonSerializerOptions
             {
@@ -575,12 +606,12 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
 
     private const string SharedTriagePolicyPrompt = """
         판단 정책:
-        1. currentMessage가 이번 발신자의 새 요청입니다. 기본 근거는 currentMessage입니다.
-        2. forwardedContext는 현재 발신자가 아래/전달/포워드된 내용을 확인·대응·회신하라고 요구할 때만 근거로 쓰세요.
-        3. quotedHistoryPreview만 있는 과거 요청은 stale history이므로 자동 등록하지 마세요.
-        4. mailboxRecipientRole이 Cc이면 비일정성 요청은 보통 ignore입니다. 단 회의/참석/일정은 Cc여도 calendarEvent/meeting으로 남기세요.
-        5. mailboxRecipientRole이 Direct이고 action/deadline/reply가 있으면 review보다 autoCreateTask를 선호하세요.
-        6. 다른 사람에게 명시 배정된 일은 ignore입니다. 명시 대상이 mailboxOwner이면 내 업무입니다. 팀/담당자/전체처럼 불명확하지만 Direct 수신이면 autoCreateTask입니다.
+        1. 입력 JSON의 content.currentMessage(배치에서는 contents[].currentMessage)가 이번 발신자의 새 요청입니다. 기본 근거는 currentMessage입니다.
+        2. content.forwardedContext는 현재 발신자가 아래/전달/포워드된 내용을 확인·대응·회신하라고 요구할 때만 근거로 쓰세요.
+        3. content.quotedHistoryPreview만 있는 과거 요청은 stale history이므로 자동 등록하지 마세요.
+        4. mail.mailboxRecipientRole이 Cc이면 비일정성 요청은 보통 ignore입니다. 단 회의/참석/일정은 Cc여도 calendarEvent/meeting으로 남기세요.
+        5. mail.mailboxRecipientRole이 Direct이고 action/deadline/reply가 있으면 review보다 autoCreateTask를 선호하세요.
+        6. 다른 사람에게 명시 배정된 일은 ignore입니다. 명시 대상이 mail.mailboxOwnerDisplayName이면 내 업무입니다. 팀/담당자/전체처럼 불명확하지만 Direct 수신이면 autoCreateTask입니다.
         7. 명확한 action/deadline/reply/meeting이면 autoCreateTask, FYI/공지/감사/단순 확인은 ignore입니다. review는 LLM이 정말 판단 불가할 때만 씁니다.
         8. dueAt은 메일에 근거가 있을 때만 ISO-8601로 쓰고, 없으면 null입니다. 마감일을 상상하지 마세요.
         9. 보낸 사람이 mailboxOwner이면 사용자가 보낸 메일입니다. 사용자가 "제가 보내겠습니다/공유드리겠습니다"처럼 한 약속은 promisedByMe, 사용자가 상대에게 요청하고 기다리는 것은 waitingForReply입니다.
@@ -624,7 +655,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
 
     private static readonly string BatchSystemPrompt = """
         /no_think
-        한국어 업무 메일 triage 전용 로컬 비서입니다. items[]를 각각 독립 분석하고 짧은 JSON object 하나만 반환하세요.
+        한국어 업무 메일 triage 전용 로컬 비서입니다. items[] metadata와 contents[] body를 id로 연결해 각각 독립 분석하고 짧은 JSON object 하나만 반환하세요.
         출력은 {"items":[...]} 하나뿐입니다. 각 결과는 입력 id를 그대로 포함하세요. 제목보다 "사용자가 실제로 해야 할 일"을 30자 이내로 쓰세요.
 
         """ + SharedTriagePolicyPrompt + """

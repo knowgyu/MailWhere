@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using MailWhere.Core.Analysis;
 using MailWhere.Core.Capabilities;
@@ -74,6 +75,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM JSON creates calendar task", LlmJsonCreatesCalendarTask),
     ("LLM success does not pre-run fallback rules", LlmSuccessDoesNotPreRunFallbackRules),
     ("LLM payload includes thread and owner context", LlmPayloadIncludesThreadAndOwnerContext),
+    ("LLM payload keeps long content at the bottom", LlmPayloadKeepsLongContentAtTheBottom),
     ("LLM prompt contains triage policy and few shots", LlmPromptContainsTriagePolicyAndFewShots),
     ("LLM quoted history auto create downgrades to review", LlmQuotedHistoryAutoCreateDowngradesToReview),
     ("LLM explicit other assignee is ignored despite auto create", LlmExplicitOtherAssigneeIsIgnoredDespiteAutoCreate),
@@ -83,6 +85,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM timeout becomes retryable review", LlmTimeoutBecomesRetryableReview),
     ("LLM user cancellation propagates", LlmUserCancellationPropagates),
     ("Batch LLM maps results", BatchLlmMapsResults),
+    ("Batch LLM payload keeps content list last", BatchLlmPayloadKeepsContentListLast),
     ("Batch LLM accepts raw array output", BatchLlmAcceptsRawArrayOutput),
     ("Batch LLM tolerates missing final item", BatchLlmToleratesMissingFinalItem),
     ("Batch LLM partial failure uses rule fallback when enabled", BatchLlmPartialFailureUsesRuleFallbackWhenEnabled),
@@ -1138,6 +1141,54 @@ static async Task LlmPayloadIncludesThreadAndOwnerContext()
     Assert(llm.LastSystemPrompt?.Contains("quotedHistory", StringComparison.Ordinal) == true, "Expected prompt to constrain quoted history.");
 }
 
+static async Task LlmPayloadKeepsLongContentAtTheBottom()
+{
+    var llm = new FakeLlmClient("""
+        {
+          "kind": "none",
+          "disposition": "ignore",
+          "confidence": 0.8,
+          "suggestedTitle": "",
+          "reason": "확인만 필요",
+          "evidenceSnippet": "확인",
+          "dueAt": null,
+          "summary": "후속 조치 없음",
+          "actionOrigin": "none",
+          "currentSenderRequested": false,
+          "explicitAssignee": null,
+          "assignedToMailboxUser": true
+        }
+        """);
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm);
+
+    await analyzer.AnalyzeAsync(Mail(
+        "FW: 확인",
+        """
+        본문 상단 요청입니다.
+
+        -----Original Message-----
+        From: partner@example.com
+        Subject: 원문
+        인용된 과거 본문입니다.
+        """,
+        conversationId: "cache-shape",
+        mailboxOwner: "김영희"));
+
+    var payload = llm.LastUserPayload ?? string.Empty;
+    Assert(!payload.Contains("\"now\"", StringComparison.Ordinal), "Expected prompt payload to avoid high-churn now field.");
+    Assert(payload.Contains("\"analysisDate\"", StringComparison.Ordinal), "Expected date-level analysis anchor.");
+    Assert(payload.Contains("\"timezone\"", StringComparison.Ordinal), "Expected timezone anchor.");
+    Assert(payload.IndexOf("\"content\"", StringComparison.Ordinal) > payload.IndexOf("\"contextFlags\"", StringComparison.Ordinal), "Expected long content block after metadata.");
+    Assert(payload.IndexOf("\"currentMessage\"", StringComparison.Ordinal) > payload.IndexOf("\"content\"", StringComparison.Ordinal), "Expected current message inside final content block.");
+
+    using var doc = JsonDocument.Parse(payload);
+    var root = doc.RootElement;
+    Assert(root.TryGetProperty("mail", out var mail), "Expected mail metadata block.");
+    Assert(mail.GetProperty("mailboxOwnerDisplayName").GetString() == "김영희", "Expected owner metadata in mail block.");
+    Assert(root.TryGetProperty("content", out var content), "Expected final content block.");
+    Assert(content.GetProperty("currentMessage").GetString()?.Contains("본문 상단 요청", StringComparison.Ordinal) == true, "Expected current message in content block.");
+}
+
 static async Task LlmPromptContainsTriagePolicyAndFewShots()
 {
     var llm = new FakeLlmClient("""
@@ -1370,6 +1421,67 @@ static async Task BatchLlmMapsResults()
     Assert(prompt.Contains("quotedHistoryPreview만 있는 과거 요청", StringComparison.Ordinal), "Expected stale quoted history policy in batch prompt.");
     Assert(prompt.Contains("다른 사람에게 명시 배정", StringComparison.Ordinal), "Expected explicit other-assignee policy in batch prompt.");
     Assert(prompt.Contains("마감일을 상상하지 마세요", StringComparison.Ordinal), "Expected due-date hallucination guard in batch prompt.");
+}
+
+static async Task BatchLlmPayloadKeepsContentListLast()
+{
+    var llm = new FakeLlmClient("""
+        {
+          "items": [
+            {
+              "id": "0",
+              "kind": "deadline",
+              "disposition": "autoCreateTask",
+              "confidence": 0.91,
+              "suggestedTitle": "자료 회신",
+              "reason": "마감 요청",
+              "evidenceSnippet": "내일까지 회신",
+              "dueAt": null,
+              "summary": "자료 회신 필요",
+              "actionOrigin": "currentMessage",
+              "currentSenderRequested": true,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            },
+            {
+              "id": "1",
+              "kind": "none",
+              "disposition": "ignore",
+              "confidence": 0.8,
+              "suggestedTitle": "",
+              "reason": "공지",
+              "evidenceSnippet": "FYI",
+              "dueAt": null,
+              "summary": "후속 조치 없음",
+              "actionOrigin": "none",
+              "currentSenderRequested": false,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            }
+          ]
+        }
+        """);
+
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm);
+    await analyzer.AnalyzeBatchAsync(new[]
+    {
+        Mail("자료 요청", "첫 번째 메일 본문입니다.", "batch-shape-1"),
+        Mail("공지", "두 번째 메일 본문입니다.", "batch-shape-2")
+    });
+
+    var payload = llm.LastUserPayload ?? string.Empty;
+    Assert(!payload.Contains("\"now\"", StringComparison.Ordinal), "Expected batch payload to avoid high-churn now field.");
+    Assert(payload.IndexOf("\"contents\"", StringComparison.Ordinal) > payload.IndexOf("\"items\"", StringComparison.Ordinal), "Expected body contents after metadata items.");
+    Assert(payload.IndexOf("\"currentMessage\"", StringComparison.Ordinal) > payload.IndexOf("\"contents\"", StringComparison.Ordinal), "Expected current messages inside final contents block.");
+
+    using var doc = JsonDocument.Parse(payload);
+    var root = doc.RootElement;
+    var firstItem = root.GetProperty("items")[0];
+    Assert(firstItem.TryGetProperty("mail", out _), "Expected metadata item to keep mail block.");
+    Assert(!firstItem.TryGetProperty("currentMessage", out _), "Expected metadata item to omit long body fields.");
+    var firstContent = root.GetProperty("contents")[0];
+    Assert(firstContent.GetProperty("id").GetString() == "0", "Expected content id to match item id.");
+    Assert(firstContent.GetProperty("currentMessage").GetString()?.Contains("첫 번째", StringComparison.Ordinal) == true, "Expected first body in final contents.");
 }
 
 static async Task BatchLlmAcceptsRawArrayOutput()
