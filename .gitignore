@@ -34,3 +34,6 @@ artifacts/
 .codex/skills/.system/**
 !.codex/prompts/
 !.codex/prompts/**
+
+# Windows alternate data stream metadata copied through WSL
+*:Zone.Identifier
