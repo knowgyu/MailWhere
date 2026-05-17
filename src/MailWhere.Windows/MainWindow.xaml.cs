@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private bool _backgroundStarted;
     private bool _allowExit;
     private ReviewCandidatesWindow? _reviewCandidatesWindow;
+    private ArchiveWindow? _archiveWindow;
     private SettingsWindow? _settingsWindow;
     private BoardRouteFilter _mainFilter = BoardRouteFilter.Today;
     private AnalysisTelemetry _lastAnalysisTelemetry = AnalysisTelemetry.Empty;
@@ -316,6 +317,11 @@ public partial class MainWindow : Window
         await OpenReviewCandidatesWindowAsync();
     }
 
+    private async void OpenArchive_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenArchiveWindowAsync();
+    }
+
     private async void OpenSettings_Click(object sender, RoutedEventArgs e)
     {
         await OpenSettingsWindowAsync();
@@ -510,6 +516,7 @@ public partial class MainWindow : Window
         var store = await GetStoreAsync();
         var tasks = await store.ListOpenTasksAsync();
         var candidates = await store.ListReviewCandidatesAsync();
+        var replyProgress = (await store.ListReplyProgressAsync()).ToDictionary(progress => progress.TaskId);
         TasksList.Items.Clear();
         var now = DateTimeOffset.Now;
         var visible = DailyBoardRouteTaskSelector.SelectVisibleTasks(
@@ -525,7 +532,8 @@ public partial class MainWindow : Window
         TasksEmptyText.Visibility = visible.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         foreach (var task in visible)
         {
-            TasksList.Items.Add(TaskListItem.FromTask(task, now));
+            replyProgress.TryGetValue(task.Id, out var progress);
+            TasksList.Items.Add(TaskListItem.FromTask(task, now, progress));
         }
 
         OpenReviewCandidatesButton.Content = candidates.Count == 0
@@ -923,6 +931,47 @@ public partial class MainWindow : Window
             : $"확인 필요 {candidates.Count}개를 열었습니다.";
     }
 
+    private async Task OpenArchiveWindowAsync()
+    {
+        var store = await GetStoreAsync();
+        var archived = await store.ListArchivedTasksAsync(200);
+        if (_archiveWindow?.IsVisible == true)
+        {
+            _archiveWindow.Refresh(archived);
+            BringWindowToFront(_archiveWindow);
+            return;
+        }
+
+        _archiveWindow = new ArchiveWindow(
+            archived,
+            OpenTaskSourceAsync,
+            RestoreArchivedTaskAsync)
+        {
+            Owner = IsVisible ? this : null
+        };
+        _archiveWindow.Closed += (_, _) => _archiveWindow = null;
+        _archiveWindow.Show();
+        BringWindowToFront(_archiveWindow);
+        StatusText.Text = archived.Count == 0
+            ? "보관한 업무가 없습니다."
+            : $"보관함 {archived.Count}개를 열었습니다.";
+    }
+
+    private async Task<bool> RestoreArchivedTaskAsync(LocalTaskItem task)
+    {
+        var store = await GetStoreAsync();
+        var restored = await store.RestoreArchivedTaskAsync(task.Id, DateTimeOffset.UtcNow);
+        if (restored)
+        {
+            await RefreshTasksAsync();
+        }
+
+        StatusText.Text = restored
+            ? "업무 보드로 복원했습니다."
+            : "이미 처리된 항목입니다.";
+        return restored;
+    }
+
     private async Task OpenReviewCandidateMailAsync(ReviewCandidate candidate)
     {
         await OpenSourceMailAsync(candidate.SourceId);
@@ -1250,15 +1299,21 @@ public partial class MainWindow : Window
         public bool CanOpen => !string.IsNullOrWhiteSpace(Task?.SourceId);
         public Visibility DueButtonVisibility => Task is null ? Visibility.Collapsed : Visibility.Visible;
 
-        public static TaskListItem FromTask(LocalTaskItem task, DateTimeOffset now)
+        public static TaskListItem FromTask(LocalTaskItem task, DateTimeOffset now, ReplyProgressItem? replyProgress = null)
         {
             var due = FollowUpPresentation.HumanDueText(task.DueAt, now);
             var sender = FollowUpPresentation.HumanSenderText(task.SourceSenderDisplay);
+            var meta = $"{due} · {sender}";
+            if (replyProgress is not null)
+            {
+                meta = $"{meta} · {replyProgress.SummaryText}";
+            }
+
             return new TaskListItem(
                 task,
                 CompactLine(FollowUpPresentation.ActionTitle(task.Title), 120),
                 due,
-                $"{due} · {sender}");
+                meta);
         }
 
         public override string ToString() => Title;

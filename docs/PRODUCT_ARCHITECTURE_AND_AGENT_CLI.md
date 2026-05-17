@@ -32,7 +32,7 @@ MailWhere는 이미 PoC치고는 좋은 방향으로 나뉘어 있다. `MailWher
 - **Timer 기반 background work가 UI object에 묶여 있다.** `_reminderTimer`, `_dailyBoardTimer`, `_automaticScanTimer`가 모두 `DispatcherTimer`라 always-on automatic-check behavior가 커질수록 테스트/재시작/중복 실행 제어가 어려워진다.
 - **LLM/provider strategy가 코드 분기 중심이다.** `BuildAnalyzer`/settings mapping은 잘 시작했지만 provider가 늘면 `MainWindow`와 `RuntimeSettings` 변경 폭이 커진다.
 - **SQLite migration은 단순 add-column 방식이라 product schema/version story가 더 필요하다.** 현재는 좋지만 future tables(calendar shadow, audit, provider profile, feedback decisions)가 생기면 versioned migrations와 compatibility tests가 중요해진다.
-- **Agent CLI integration artifact는 아직 연구/문서 수준이다.** imported report(`docs/history/parent-omx-import/specs/autoresearch-codex-where-integration/report.md`)는 방향을 제시하지만 repo-native scripts/MCP/skill은 아직 없다.
+- **Agent CLI integration은 v0.4.4에서 Core export SDK/API가 생겼고, 실제 where-desk skill/CLI wrapper는 다음 단계다.** imported report(`docs/history/parent-omx-import/specs/autoresearch-codex-where-integration/report.md`)는 방향을 제시하며, 현재 안정 경계는 `MailWhereExportService`의 sanitized snapshot이다.
 
 ## 3. 외부 패턴 근거와 MailWhere 적용
 
@@ -191,7 +191,7 @@ Microsoft Outlook docs explain that `EntryID` is assigned by the MAPI store and 
 - **액션**: `열기`, `나중에`, `수정`, `보관`을 1차 제품 액션으로 둔다. 기한은 카드의 기한 버튼에서 바꾼다. 답장 초안, 자동 발송/삭제/이동/회신은 범위 밖이다.
 - **상태 모델**: `나중에`는 다시 표시되는 snooze이고, `보관`은 active 목록에서 제외되어 자동 재표시되지 않는 archive다. Legacy `done`/`dismissed`는 호환용 non-active 상태로만 남긴다.
 - **테스트 ergonomics**: fallback/rule scan 결과를 AppData에서 직접 지우지 않도록 앱의 문제 해결 버튼과 `scripts/reset-local-data.ps1`을 제공한다. 기본 reset은 settings를 유지하고 local task/review/processed-source DB만 삭제한다.
-- **Agent CLI/skill/hook**: 지금은 설계 경계만 남긴다. 구현은 sanitized export/read-only skill부터 시작하고 MCP/full work-agent는 future work다.
+- **Agent CLI/skill/hook**: v0.4.4는 sanitized export SDK/API까지 구현했다. 다음은 read-only skill/CLI wrapper이고, MCP/full work-agent는 future work다.
 
 ### P0 — 지금 바로: product architecture guardrails
 
@@ -293,13 +293,13 @@ Create a repo-local or user-local Codex/OMX skill:
 
 ```text
 .codex/skills/where-desk/SKILL.md
-scripts/export-mailwhere-context.py
+scripts/export-mailwhere-context.py  # wrapper around MailWhereExportService
 scripts/where-brief.py
 ```
 
 The skill should:
 
-- Read MailWhere SQLite through a sanitized exporter.
+- Read MailWhere state through `MailWhereExportService` or a wrapper that uses the same sanitized DTO contract.
 - Never export raw body, attachment content, full address lists, prompt logs, or API keys.
 - Optionally call OfficeWhere search API or a local document search helper.
 - Produce markdown + JSON briefing artifact.
@@ -319,7 +319,7 @@ Output shape:
 ## 오늘의 업무 증거 브리프
 
 ### 1. [D-1] 예산안 회신
-- MailWhere: task/review id, due, reason, evidence snippet
+- MailWhere: task/review id, title, due, sender, reply-progress summary
 - OfficeWhere query: "예산안" "Q2" "회신"
 - Related docs: file path/id/snippet/hash
 - Suggested next action: open/review/ask-human
@@ -328,12 +328,11 @@ Output shape:
 
 ### 5.2 `mailwhere export` helper
 
-Recommended implementation can be Python first because it is read-only and cross-tool friendly.
+Recommended implementation is a tiny CLI/script wrapper around `MailWhereExportService`; direct SQLite export should only be a fallback if it preserves the same DTO/privacy contract.
 
 ```bash
-python scripts/export-mailwhere-context.py \
-  --db "$LOCALAPPDATA/MailWhere/followups.sqlite" \
-  --include tasks,review \
+mailwhere export \
+  --include tasks,archive,review,reply-progress \
   --limit 50 \
   --json
 ```
@@ -442,7 +441,7 @@ This allows one install/update path for skills, agents, hooks, and MCP config.
 
 ### Backlog C — Agent CLI MVP
 
-1. `scripts/export-mailwhere-context.py` read-only SQLite export.
+1. Add a small `mailwhere export` CLI/script wrapper around `MailWhereExportService`; keep direct SQLite reads out of skills when possible.
 2. `scripts/where-brief.py` builds markdown briefing from exported context and optional OfficeWhere results.
 3. `.codex/skills/where-desk/SKILL.md` references those scripts.
 4. Synthetic safety tests ensure no raw body/address/attachment fields leak.

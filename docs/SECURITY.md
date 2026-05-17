@@ -5,7 +5,8 @@
 - Raw mail body is transient by default and is not part of the SQLite task schema.
 - Evidence snippets are capped at 240 characters and can be deleted.
 - Deleting source-derived data redacts task titles/reasons and review-candidate titles/reasons, not only evidence snippets.
-- New tasks/review candidates may store a local Outlook source id, sender display name, received time, and recipient-role label only to reopen and summarize the original message read-only; source-derived deletion/not-task suppression clears or de-identifies these fields.
+- New tasks/review candidates may store a local Outlook source id, sender display name, received time, recipient-role label, and for sent multi-recipient waiting tasks only conversation/recipient display metadata needed for reply progress; source-derived deletion/not-task suppression clears or de-identifies these fields.
 - Diagnostics must not include subjects, bodies, addresses, attachment names, or evidence text.
 - Diagnostics exports are allowlist-based, validate allowed values, and omit free-form probe messages.
+- `MailWhereExportService` is also allowlist-style: it exports board/archive/review/reply-progress metadata, not source ids/hashes, raw bodies, prompt payloads, evidence snippets, or full recipient lists.
 - Phase 0/1 must not mutate Outlook mailbox state.

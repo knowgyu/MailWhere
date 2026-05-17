@@ -21,6 +21,7 @@
 ## 제품/기획
 
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.
+- [`releases/v0.4.4.md`](releases/v0.4.4.md): 보관함, 다자 회신 현황, 안전 export SDK 릴리즈 노트.
 - [`releases/v0.4.3.md`](releases/v0.4.3.md): 새 로고와 portable 실행 파일 표시 개선 릴리즈 노트.
 - [`releases/v0.4.2.md`](releases/v0.4.2.md): 화면/확인 필요/LLM payload polish 릴리즈 노트.
 - [`releases/v0.4.1.md`](releases/v0.4.1.md): 설정/보드 compact patch 릴리즈 노트.
@@ -42,5 +43,5 @@
 - 기본 화면은 통합 업무 보드이며 필터는 `오늘`, `이번 주`, `전체`, `날짜 없음` 순서입니다.
 - 업무 행 1차 액션은 `열기`, `나중에`, `보관`입니다. 편집은 행 더블클릭으로 처리합니다.
 - 확인 필요 항목은 별도 창이고, 개발자 도구는 설정 창의 탭입니다.
-- `나중에`는 다시 표시되는 snooze이고, `보관`은 active 목록에서 제외되어 자동으로 다시 뜨지 않습니다.
+- `나중에`는 다시 표시되는 snooze이고, `보관`은 active 목록에서 제외되어 자동으로 다시 뜨지 않습니다. 보관한 항목은 보관함에서 복원할 수 있습니다.
 - Outlook 원본 메일은 read-only입니다. MailWhere의 상태 변경은 로컬 DB에만 적용됩니다.
