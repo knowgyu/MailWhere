@@ -230,8 +230,8 @@ Priority: high.
 - Rich triage queue: bulk selection, due-date edit, and richer keyboard hints on visible buttons.
 - Conservative 새 메일 자동 확인 timer after readiness checks so new confirmation items surface while the app stays in tray.
 - 확인 필요 tab: approve as task, dismiss as not-a-task, edit title/due date.
-- “왜 이게 떴는지” panel: summary/reason/evidence/confidence/fallback source.
 - 다자 요청 회신 현황: 내가 N명에게 요청한 메일을 `받아야 할 사람 N명 / 회신 수신 M명`처럼 보여주는 KakaoPay 정산하기식 진행 표시를 검토한다. 보낸 메일 수신자와 후속 회신 스레드를 read-only로 대조하되, distribution list/CC/BCC/별도 회신 스레드 ambiguity는 확인 필요로 남긴다.
+- 보관함/다시 보기: `보관`으로 active 목록에서 사라진 항목을 별도 화면에서 검색/복원할 수 있게 한다. 메인 업무 보드는 계속 가볍게 유지하고, 실수로 보관한 항목 회수와 과거 업무 확인만 담당한다.
 - Feedback loop: candidate-id not-a-task decisions suppress the current candidate; future duplicate suppression should stay non-destructive and avoid source-wide redaction.
 - Scan result grouping: task created / review / ignored / duplicate / warning.
 - Candidate-level LLM source markers: LLM result vs rule fallback vs LLM failure review.
@@ -265,6 +265,7 @@ Priority: medium.
 - Optional ICS export instead of direct calendar writes.
 - OfficeWhere search handoff for task-related documents.
 - Read-only task export for OfficeWhere indexing.
+- `where-desk` read-only skill MVP: MailWhere 업무/확인 필요/보관 요약을 안전한 export JSON/Markdown으로 만들고, LLM/Codex skill이 관련 문서/다음 액션 브리프를 붙일 수 있게 한다.
 
 Acceptance:
 
