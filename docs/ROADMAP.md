@@ -231,6 +231,7 @@ Priority: high.
 - Conservative 새 메일 자동 확인 timer after readiness checks so new confirmation items surface while the app stays in tray.
 - 확인 필요 tab: approve as task, dismiss as not-a-task, edit title/due date.
 - “왜 이게 떴는지” panel: summary/reason/evidence/confidence/fallback source.
+- 다자 요청 회신 현황: 내가 N명에게 요청한 메일을 `받아야 할 사람 N명 / 회신 수신 M명`처럼 보여주는 KakaoPay 정산하기식 진행 표시를 검토한다. 보낸 메일 수신자와 후속 회신 스레드를 read-only로 대조하되, distribution list/CC/BCC/별도 회신 스레드 ambiguity는 확인 필요로 남긴다.
 - Feedback loop: candidate-id not-a-task decisions suppress the current candidate; future duplicate suppression should stay non-destructive and avoid source-wide redaction.
 - Scan result grouping: task created / review / ignored / duplicate / warning.
 - Candidate-level LLM source markers: LLM result vs rule fallback vs LLM failure review.
