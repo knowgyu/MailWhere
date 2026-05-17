@@ -1029,6 +1029,7 @@ static Task TaskEditRequestNormalizesSimpleFields()
 static Task KoreanLabelsUseConciseProductCopy()
 {
     Assert(KoreanLabels.Kind(FollowUpKind.ActionRequested) == "할 일", "ActionRequested should not surface as an English label.");
+    Assert(KoreanLabels.Disposition(AnalysisDisposition.Review) == "확인 필요", "Review disposition should avoid candidate wording.");
     return Task.CompletedTask;
 }
 

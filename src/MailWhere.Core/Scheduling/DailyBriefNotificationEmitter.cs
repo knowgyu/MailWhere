@@ -9,7 +9,7 @@ public static class DailyBriefNotificationEmitter
     {
         var message = snapshot.TotalHighlights == 0
             ? "오늘 바로 볼 항목은 없습니다. 업무 보드에서 전체 흐름을 확인할 수 있습니다."
-            : $"오늘 볼 업무 {snapshot.TotalHighlights}개 · 검토 후보 {snapshot.HiddenCandidateCount}개";
+            : $"오늘 볼 업무 {snapshot.TotalHighlights}개 · 확인 필요 {snapshot.HiddenCandidateCount}개";
 
         return new UserNotification(
             UserNotificationKind.DailyBrief,

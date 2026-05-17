@@ -21,7 +21,7 @@ public static class KoreanLabels
     public static string Disposition(AnalysisDisposition disposition) => disposition switch
     {
         AnalysisDisposition.Ignore => "무시",
-        AnalysisDisposition.Review => "검토 후보",
+        AnalysisDisposition.Review => "확인 필요",
         AnalysisDisposition.AutoCreateTask => "자동 등록",
         _ => "알 수 없음"
     };

@@ -20,27 +20,12 @@
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
         </Style>
         <Style TargetType="ListBoxItem" BasedOn="{StaticResource MwCardListBoxItem}">
-            <Setter Property="Padding" Value="10,7"/>
-            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="0,0,0,5"/>
             <Setter Property="Background" Value="{StaticResource MwBrush.SurfaceMuted}"/>
             <Setter Property="BorderBrush" Value="{StaticResource MwBrush.Border}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Card" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="12" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Card" Property="Background" Value="{StaticResource MwBrush.PrimarySoft}"/>
-                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource MwBrush.Primary}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
         </Style>
     </Window.Resources>
 
@@ -51,39 +36,43 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="14,12" Margin="0,0,0,10" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
-            <DockPanel LastChildFill="True">
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="OpenReviewCandidatesButton" Click="OpenReviewCandidates_Click" Style="{StaticResource MwButton.Secondary}">검토 후보</Button>
-                    <Button x:Name="OpenSettingsButton" Click="OpenSettings_Click" Style="{StaticResource MwButton.Secondary}">설정</Button>
-                    <Button x:Name="AddManualHeaderButton" Click="AddManualTaskDialog_Click" Style="{StaticResource MwButton.Secondary}">+ 직접 추가</Button>
-                    <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Style="{StaticResource MwButton.Primary}" MinWidth="120">지금 메일 확인</Button>
-                    <Button x:Name="StopScanButton" Click="StopScan_Click" Visibility="Hidden" Style="{StaticResource MwButton.Danger}" MinWidth="96">확인 중지</Button>
-                </StackPanel>
-                <StackPanel>
-                    <TextBlock Text="MailWhere" FontSize="21" FontWeight="Bold" Foreground="{StaticResource MwBrush.TextStrong}"/>
-                    <TextBlock x:Name="StatusText" Text="트레이에서 대기 중입니다." Margin="0,3,0,0" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap"/>
-                    <ProgressBar x:Name="ScanProgressBar" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,6,12,2"/>
+        <Border Grid.Row="0" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="12,10" Margin="0,0,0,10" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="260"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="MailWhere" FontSize="20" FontWeight="Bold" Foreground="{StaticResource MwBrush.TextStrong}"/>
+                    <TextBlock x:Name="StatusText" Text="트레이에서 대기 중입니다." Margin="0,2,12,0" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" TextWrapping="Wrap"/>
+                    <ProgressBar x:Name="ScanProgressBar" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,5,12,2"/>
                     <TextBlock x:Name="ScanProgressText" Text="대기 중입니다." Visibility="Collapsed" Foreground="{StaticResource MwBrush.Primary}" FontWeight="SemiBold" FontSize="11"/>
                 </StackPanel>
-            </DockPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <Button x:Name="OpenReviewCandidatesButton" Click="OpenReviewCandidates_Click" Style="{StaticResource MwButton.Secondary}">확인 필요</Button>
+                    <Button x:Name="OpenSettingsButton" Click="OpenSettings_Click" Style="{StaticResource MwButton.Secondary}">설정</Button>
+                    <Button x:Name="AddManualHeaderButton" Click="AddManualTaskDialog_Click" Style="{StaticResource MwButton.Secondary}">+ 직접 추가</Button>
+                    <Button x:Name="StopScanButton" Click="StopScan_Click" Visibility="Collapsed" Style="{StaticResource MwButton.Danger}" MinWidth="96">확인 중지</Button>
+                    <Button x:Name="ScanRecentMonthButton" Click="ScanRecentMonth_Click" Style="{StaticResource MwButton.Primary}" MinWidth="120">지금 메일 확인</Button>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <Border Grid.Row="1" x:Name="FilterPanel" CornerRadius="14" Background="{StaticResource MwBrush.PrimarySoft}" Padding="3" Margin="0,0,0,10" BorderBrush="{StaticResource MwBrush.BorderStrong}" BorderThickness="1">
             <UniformGrid Rows="1" Columns="4">
                 <Button x:Name="TodayFilterButton" Style="{StaticResource BoardFilterButton}" Click="TodayMainFilter_Click">오늘</Button>
                 <Button x:Name="WeekFilterButton" Style="{StaticResource BoardFilterButton}" Click="WeekMainFilter_Click">이번 주</Button>
-                <Button x:Name="NoDueFilterButton" Style="{StaticResource BoardFilterButton}" Click="NoDueMainFilter_Click">날짜 없음</Button>
                 <Button x:Name="AllFilterButton" Style="{StaticResource BoardFilterButton}" Click="AllMainFilter_Click">전체</Button>
+                <Button x:Name="NoDueFilterButton" Style="{StaticResource BoardFilterButton}" Click="NoDueMainFilter_Click">날짜 없음</Button>
             </UniformGrid>
         </Border>
 
-        <Border Grid.Row="2" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="12" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
+        <Border Grid.Row="2" CornerRadius="18" Background="{StaticResource MwBrush.Surface}" Padding="10" BorderBrush="{StaticResource MwBrush.Border}" BorderThickness="1">
             <Grid>
                 <ListBox x:Name="TasksList" FontSize="14" MouseDoubleClick="TaskList_DoubleClick">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid MinHeight="38">
+                            <Grid MinHeight="34">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" MinWidth="300"/>
                                     <ColumnDefinition Width="Auto"/>

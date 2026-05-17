@@ -98,7 +98,7 @@
                             Style="{StaticResource ToastButton}"
                             Click="SecondaryButton_Click"
                             Background="{StaticResource MwBrush.PrimarySoft}"
-                            Foreground="#344054">검토 후보</Button>
+                            Foreground="#344054">확인 필요</Button>
                 </StackPanel>
             </Grid>
         </Border>

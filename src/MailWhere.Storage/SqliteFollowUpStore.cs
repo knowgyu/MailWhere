@@ -139,7 +139,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             """;
         command.Parameters.AddWithValue("$source", sourceIdHash);
         command.Parameters.AddWithValue("$title", LocalTaskItem.RedactedTitle);
-        command.Parameters.AddWithValue("$reason", "LLM 재분석으로 검토 후보를 정리했습니다.");
+        command.Parameters.AddWithValue("$reason", "LLM 재분석으로 확인 필요 항목을 정리했습니다.");
         command.Parameters.AddWithValue("$recipientRole", MailboxRecipientRole.Other.ToString());
         command.Parameters.AddWithValue("$resolvedAt", now.ToString("O"));
         command.Parameters.AddWithValue("$resolution", string.IsNullOrWhiteSpace(resolution) ? "Suppressed" : resolution);
@@ -251,7 +251,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             candidate.SourceIdHash,
             candidate.SourceId,
             Math.Clamp(candidate.Analysis.Confidence, 0, 1),
-            EvidencePolicy.Truncate(candidate.Analysis.Reason) ?? "검토 후보에서 등록",
+            EvidencePolicy.Truncate(candidate.Analysis.Reason) ?? "확인 필요에서 등록",
             EvidencePolicy.Truncate(candidate.Analysis.EvidenceSnippet),
             LocalTaskStatus.Open,
             null,

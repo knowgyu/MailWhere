@@ -159,9 +159,9 @@ public sealed class ToastNotificationHost : IUserNotificationSink, IDisposable
                 "메일 확인 완료",
                 notification.Title,
                 notification.Message,
-                "검토 후보는 별도 창에서 확인합니다",
+                "확인 필요 항목은 별도 창에서 확인합니다",
                 "업무 보드",
-                "검토 후보",
+                "확인 필요",
                 TimeSpan.FromSeconds(12)),
 
             UserNotificationKind.Error => new ToastNotificationSpec(

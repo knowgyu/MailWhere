@@ -53,7 +53,7 @@ public partial class ReviewCandidatesWindow : Window
         }
 
         RetryLlmFailuresButton.IsEnabled = _candidates.Any(candidate => candidate.Analysis.IsTransientLlmFailureReview);
-        StatusText.Text = rows.Length == 0 ? "표시할 검토 후보가 없습니다." : $"검토 후보 {rows.Length}개";
+        StatusText.Text = rows.Length == 0 ? "표시할 확인 필요 항목이 없습니다." : $"확인 필요 {rows.Length}개";
     }
 
     private async void Approve_Click(object sender, RoutedEventArgs e) => await RunAsync(sender, _approveAsync, "등록했습니다.");
@@ -66,7 +66,7 @@ public partial class ReviewCandidatesWindow : Window
         try
         {
             RetryLlmFailuresButton.IsEnabled = false;
-            StatusText.Text = "AI 실패 후보를 다시 분석하는 중입니다…";
+            StatusText.Text = "AI 분석을 다시 시도하는 중입니다…";
             var summary = await _retryLlmFailuresAsync();
             StatusText.Text = ToRetryStatus(summary);
         }
@@ -118,12 +118,12 @@ public partial class ReviewCandidatesWindow : Window
             return;
         }
 
-        if ((Keyboard.Modifiers & ModifierKeys.Alt) != ModifierKeys.Alt)
+        if (Keyboard.Modifiers != ModifierKeys.None)
         {
             return;
         }
 
-        if (e.Key == Key.A)
+        if (e.Key == Key.Y)
         {
             e.Handled = true;
             _ = ExecuteSelectedAsync(_approveAsync, "등록했습니다.");
@@ -170,10 +170,10 @@ public partial class ReviewCandidatesWindow : Window
     {
         if (summary.EligibleCount == 0)
         {
-            return "다시 분석할 AI 실패 후보가 없습니다.";
+            return "다시 시도할 AI 분석 항목이 없습니다.";
         }
 
-        return $"AI 실패 후보 {summary.EligibleCount}개 재분석 · 업무 {summary.TaskCreatedCount}개 · 새 검토 {summary.ReviewCandidateCreatedCount}개"
+        return $"AI 분석 {summary.EligibleCount}개 다시 시도 · 업무 {summary.TaskCreatedCount}개 · 확인 필요 {summary.ReviewCandidateCreatedCount}개"
                + (summary.MissingSourceCount > 0 ? $" · 원본 없음 {summary.MissingSourceCount}개" : string.Empty)
                + (summary.SourceLookupFailureCount > 0 ? $" · 원본 조회 실패 {summary.SourceLookupFailureCount}개" : string.Empty);
     }

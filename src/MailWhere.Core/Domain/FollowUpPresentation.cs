@@ -41,7 +41,7 @@ public static class FollowUpPresentation
     {
         FollowUpDisplayCategory.ActionForMe => "내가 할 일",
         FollowUpDisplayCategory.WaitingOnThem => "기다리는 중",
-        FollowUpDisplayCategory.ConfirmationCandidate => "검토 후보",
+        FollowUpDisplayCategory.ConfirmationCandidate => "확인 필요",
         _ => "기타"
     };
 

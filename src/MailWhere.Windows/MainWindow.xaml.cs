@@ -352,7 +352,7 @@ public partial class MainWindow : Window
         SetScanBusy(true, "메일 확인 준비 중입니다…");
         try
         {
-            StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일을 읽고 업무 후보를 분석하는 중입니다…";
+            StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일을 읽고 업무를 찾는 중입니다…";
             await Dispatcher.Yield(DispatcherPriority.Background);
 
             var store = await GetStoreAsync();
@@ -392,14 +392,14 @@ public partial class MainWindow : Window
             var newReviewCandidateCount = reviewCandidates.Count(candidate => !beforeCandidateIds.Contains(candidate.Id));
 
             var llmSummary = _lastAnalysisTelemetry.ToKoreanSummary();
-            StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 새 검토 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {llmSummary}"
+            StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 확인 필요 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {llmSummary}"
                 + (smokeGateRecorded ? " · 자동 확인 준비 완료" : string.Empty);
             if (showSummaryNotification)
             {
                 await _notificationSink.ShowAsync(new UserNotification(
                     UserNotificationKind.ScanSummary,
                     "메일 확인 완료",
-                    $"할 일 {summary.TaskCreatedCount}건, 새 검토 후보 {newReviewCandidateCount}건을 찾았습니다. 검토는 MailWhere 보드에서 확인하세요.",
+                    $"할 일 {summary.TaskCreatedCount}건, 확인 필요 {newReviewCandidateCount}건을 찾았습니다. 확인 필요 항목은 MailWhere에서 확인하세요.",
                     "scan-summary"));
             }
             if (_lastAnalysisTelemetry.LlmFailureCount > 0)
@@ -529,8 +529,8 @@ public partial class MainWindow : Window
         }
 
         OpenReviewCandidatesButton.Content = candidates.Count == 0
-            ? "검토 후보"
-            : $"검토 후보 {candidates.Count}";
+            ? "확인 필요"
+            : $"확인 필요 {candidates.Count}";
         UpdateMainFilterHighlight();
     }
 
@@ -717,12 +717,12 @@ public partial class MainWindow : Window
             await RefreshTasksAsync();
             await RefreshReviewCandidatesAsync();
             StatusText.Text = task is null
-                ? "이미 처리된 검토 후보입니다."
-                : $"검토 후보를 할 일로 등록했습니다: {task.Title}";
+                ? "이미 처리된 항목입니다."
+                : $"확인할 항목을 업무로 등록했습니다: {task.Title}";
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync("검토 후보 등록 실패", ex);
+            await ShowErrorAsync("확인 필요 등록 실패", ex);
         }
     }
 
@@ -735,12 +735,12 @@ public partial class MainWindow : Window
             await RefreshTasksAsync();
             await RefreshReviewCandidatesAsync();
             StatusText.Text = ignored
-                ? "검토 후보를 무시 처리했습니다."
-                : "이미 처리된 검토 후보입니다.";
+                ? "확인할 항목을 무시했습니다."
+                : "이미 처리된 항목입니다.";
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync("검토 후보 무시 실패", ex);
+            await ShowErrorAsync("확인 필요 무시 실패", ex);
         }
     }
 
@@ -754,12 +754,12 @@ public partial class MainWindow : Window
             var snoozed = await store.SnoozeReviewCandidateAsync(candidate.Id, until, now);
             await RefreshReviewCandidatesAsync();
             StatusText.Text = snoozed
-                ? "검토 후보는 내일까지 다시 표시하지 않습니다."
-                : "이미 처리된 검토 후보입니다.";
+                ? "확인할 항목은 내일까지 다시 표시하지 않습니다."
+                : "이미 처리된 항목입니다.";
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync("검토 후보 나중에 보기 실패", ex);
+            await ShowErrorAsync("확인 필요 나중에 보기 실패", ex);
         }
     }
 
@@ -919,8 +919,8 @@ public partial class MainWindow : Window
         _reviewCandidatesWindow.Show();
         BringWindowToFront(_reviewCandidatesWindow);
         StatusText.Text = candidates.Count == 0
-            ? "표시할 검토 후보가 없습니다."
-            : $"검토 후보 {candidates.Count}개를 열었습니다.";
+            ? "표시할 확인 필요 항목이 없습니다."
+            : $"확인 필요 {candidates.Count}개를 열었습니다.";
     }
 
     private async Task OpenReviewCandidateMailAsync(ReviewCandidate candidate)
@@ -932,12 +932,12 @@ public partial class MainWindow : Window
     {
         if (_scanInProgress)
         {
-            StatusText.Text = "메일 확인 중에는 AI 실패 후보를 다시 분석할 수 없습니다.";
+            StatusText.Text = "메일 확인 중에는 AI 분석을 다시 시도할 수 없습니다.";
             return new ReviewCandidateRetrySummary(0, 0, 0, 0, 0, 0, 0, 0);
         }
 
         _scanInProgress = true;
-        SetScanBusy(true, "AI 실패 후보를 다시 분석하는 중입니다…");
+        SetScanBusy(true, "AI 분석을 다시 시도하는 중입니다…");
         try
         {
             var store = await GetStoreAsync();
@@ -966,10 +966,10 @@ public partial class MainWindow : Window
     {
         if (summary.EligibleCount == 0)
         {
-            return "다시 분석할 AI 실패 후보가 없습니다.";
+            return "다시 시도할 AI 분석 항목이 없습니다.";
         }
 
-        return $"AI 실패 후보 {summary.EligibleCount}개 중 {summary.RetriedCount}개 재분석 · 업무 {summary.TaskCreatedCount}개 · 새 검토 {summary.ReviewCandidateCreatedCount}개 · 중복 {summary.DuplicateCount}개"
+        return $"AI 분석 {summary.EligibleCount}개 중 {summary.RetriedCount}개 다시 시도 · 업무 {summary.TaskCreatedCount}개 · 확인 필요 {summary.ReviewCandidateCreatedCount}개 · 중복 {summary.DuplicateCount}개"
                + (summary.MissingSourceCount > 0 ? $" · 원본 없음 {summary.MissingSourceCount}개" : string.Empty)
                + (summary.SourceLookupFailureCount > 0 ? $" · 원본 조회 실패 {summary.SourceLookupFailureCount}개" : string.Empty);
     }
@@ -1105,7 +1105,7 @@ public partial class MainWindow : Window
             DateTimeOffset.UtcNow);
         await store.SaveReviewCandidateAsync(candidate);
         await RefreshReviewCandidatesAsync();
-        StatusText.Text = "샘플 검토 후보 1개를 추가했습니다.";
+        StatusText.Text = "샘플 확인 필요 항목 1개를 추가했습니다.";
     }
 
     private bool MarkSmokeGatePassedAfterManualScan(MailScanSummary summary)
@@ -1164,7 +1164,7 @@ public partial class MainWindow : Window
         _fallbackPromptShownThisSession = true;
         var result = System.Windows.MessageBox.Show(
             this,
-            "LLM 연결 또는 분석이 실패했습니다.\n\n기본값은 실패한 메일을 검토 후보로 보관하고, LLM 연결이 복구되면 다시 분석하는 방식입니다.\n그래도 다음 메일 확인부터 규칙 기반 fallback을 허용할까요?\n\n나중에 설정 > AI 분석의 'AI 실패 시'에서 바꿀 수 있습니다.",
+            "LLM 연결 또는 분석이 실패했습니다.\n\n기본값은 실패한 메일을 확인 필요로 보관하고, LLM 연결이 복구되면 다시 분석하는 방식입니다.\n그래도 다음 메일 확인부터 규칙 기반 fallback을 허용할까요?\n\n나중에 설정 > AI 분석의 'AI 실패 시'에서 바꿀 수 있습니다.",
             "LLM 실패 처리",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -1181,7 +1181,7 @@ public partial class MainWindow : Window
     private void SetScanBusy(bool busy, string message)
     {
         ScanRecentMonthButton.IsEnabled = !busy;
-        StopScanButton.Visibility = busy ? Visibility.Visible : Visibility.Hidden;
+        StopScanButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         StopScanButton.IsEnabled = busy;
         ScanProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressText.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;

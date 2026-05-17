@@ -204,7 +204,7 @@ public partial class SettingsWindow : Window
     private async void OpenAll_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(() => _developerToolActions.OpenFilterAsync(BoardRouteFilter.All), "전체 화면을 열었습니다.");
     private async void Toast_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(_developerToolActions.ShowToastAsync, "알림 테스트를 보냈습니다.");
     private async void SampleTasks_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(_developerToolActions.AddSampleTasksAsync, "샘플 업무를 추가했습니다.");
-    private async void SampleReview_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(_developerToolActions.AddSampleReviewAsync, "샘플 검토 후보를 추가했습니다.");
+    private async void SampleReview_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(_developerToolActions.AddSampleReviewAsync, "샘플 확인 필요 항목을 추가했습니다.");
     private async void ResetTodayMarker_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(_developerToolActions.ResetTodayMarkerAsync, "오늘 표시 기록을 초기화했습니다.");
 
     private async Task RunDeveloperActionAsync(Func<Task> action, string successMessage)

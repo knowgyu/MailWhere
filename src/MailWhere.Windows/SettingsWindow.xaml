@@ -194,7 +194,7 @@
                                         <StackPanel Grid.Column="1">
                                             <TextBlock Text="AI 실패 시" FontWeight="SemiBold"/>
                                             <ComboBox x:Name="LlmFallbackPolicyBox">
-                                                <ComboBoxItem Tag="LlmOnly" Content="검토 후보에 보관"/>
+                                                <ComboBoxItem Tag="LlmOnly" Content="확인 필요에 보관"/>
                                                 <ComboBoxItem Tag="LlmThenRules" Content="규칙 기반 보조 허용"/>
                                             </ComboBox>
                                         </StackPanel>
@@ -214,22 +214,24 @@
                         <StackPanel Margin="12">
                             <Border Style="{StaticResource SectionCard}">
                                 <StackPanel>
-                                    <TextBlock Text="화면 테스트" FontSize="16" FontWeight="Bold" Margin="0,0,0,10"/>
+                                    <TextBlock Text="로컬 화면 테스트" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+                                    <TextBlock Style="{StaticResource HintText}" Text="메일을 읽지 않고 보드/알림 화면만 바로 확인합니다."/>
                                     <WrapPanel>
                                         <Button Click="OpenToday_Click" Style="{StaticResource MwButton.Primary}">오늘 열기</Button>
                                         <Button Click="OpenWeek_Click">이번 주 열기</Button>
-                                        <Button Click="OpenNoDue_Click">날짜 없음 열기</Button>
                                         <Button Click="OpenAll_Click">전체 열기</Button>
+                                        <Button Click="OpenNoDue_Click">날짜 없음 열기</Button>
                                     </WrapPanel>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource SectionCard}">
                                 <StackPanel>
-                                    <TextBlock Text="알림/데이터" FontSize="16" FontWeight="Bold" Margin="0,0,0,10"/>
+                                    <TextBlock Text="샘플 데이터와 알림" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+                                    <TextBlock Style="{StaticResource HintText}" Text="개발/테스트용으로만 로컬 데이터를 추가합니다."/>
                                     <WrapPanel>
                                         <Button Click="Toast_Click" Style="{StaticResource MwButton.Primary}">알림 보내기</Button>
                                         <Button Click="SampleTasks_Click">샘플 업무 추가</Button>
-                                        <Button Click="SampleReview_Click">샘플 검토 후보 추가</Button>
+                                        <Button Click="SampleReview_Click">샘플 확인 필요 추가</Button>
                                         <Button Click="ResetTodayMarker_Click">오늘 표시 기록 초기화</Button>
                                     </WrapPanel>
                                     <TextBlock x:Name="DeveloperStatusText" Style="{StaticResource HintText}" Text="테스트 버튼은 로컬 데이터와 알림 동작 확인용입니다." Margin="0,8,0,0"/>
