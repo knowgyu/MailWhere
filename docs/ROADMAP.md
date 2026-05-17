@@ -116,6 +116,7 @@ User-reported TODO:
 - Review candidate shortcuts should be single-key: `등록(Y)`, `나중에(S)`, `무시(I)` instead of `Alt+A/S/I`; they should work without first focusing a row-specific button.
 - Review candidate action order should put `원본 열기` before classification actions.
 - Restyle the review-candidate window to match the main MailWhere tone: shared button styles, softer cards, compact header spacing, and no raw WPF bordered-list feeling.
+- Rename awkward review-copy terms. Avoid user-facing `검토 후보`/`후보`; prefer a clearer label such as `확인 필요` or `확인할 항목`. Replace `AI 실패 후보 다시 분석` with calmer copy such as `AI 분석 다시 시도` or `AI로 다시 확인`.
 
 Additional follow-up candidates:
 
