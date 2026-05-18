@@ -97,6 +97,8 @@ public partial class SettingsWindow : Window
             LlmApiKeyEnvironmentVariable: apiKeyEnv,
             LlmTimeoutSeconds: ParseInt(SelectedTag(LlmTimeoutBox), defaults.LlmTimeoutSeconds),
             LlmFallbackPolicy: ParseFallbackPolicy(SelectedTag(LlmFallbackPolicyBox)),
+            LlmInitialConcurrency: _initialSettings.LlmInitialConcurrency,
+            LlmMaxConcurrency: _initialSettings.LlmMaxConcurrency,
             RecentScanDays: ParseInt(SelectedTag(RecentRangeBox), defaults.RecentScanDays),
             RecentScanMaxItems: _initialSettings.RecentScanMaxItems,
             ReminderLookAheadHours: ReminderNotificationChoices.ToLookAheadHours(reminderMode),

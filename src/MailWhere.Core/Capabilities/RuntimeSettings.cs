@@ -21,6 +21,8 @@ public sealed record RuntimeSettings(
     string? LlmApiKeyEnvironmentVariable,
     int LlmTimeoutSeconds,
     LlmFallbackPolicy LlmFallbackPolicy,
+    int LlmInitialConcurrency,
+    int LlmMaxConcurrency,
     int RecentScanDays,
     int RecentScanMaxItems,
     int ReminderLookAheadHours,
@@ -42,6 +44,8 @@ public sealed record RuntimeSettings(
         LlmApiKeyEnvironmentVariable: null,
         LlmTimeoutSeconds: 90,
         LlmFallbackPolicy: LlmFallbackPolicy.LlmOnly,
+        LlmInitialConcurrency: 2,
+        LlmMaxConcurrency: 4,
         RecentScanDays: 30,
         RecentScanMaxItems: 0,
         ReminderLookAheadHours: 24,
@@ -88,6 +92,8 @@ public sealed record PartialRuntimeSettings(
     string? LlmApiKeyEnvironmentVariable = null,
     int? LlmTimeoutSeconds = null,
     LlmFallbackPolicy? LlmFallbackPolicy = null,
+    int? LlmInitialConcurrency = null,
+    int? LlmMaxConcurrency = null,
     int? RecentScanDays = null,
     int? RecentScanMaxItems = null,
     int? ReminderLookAheadHours = null,
@@ -96,6 +102,7 @@ public sealed record PartialRuntimeSettings(
 
 public static class RuntimeSettingsSerializer
 {
+    private const int MaxLlmConcurrency = 4;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -127,6 +134,8 @@ public static class RuntimeSettingsSerializer
     public static RuntimeSettings Merge(PartialRuntimeSettings? partial)
     {
         var defaults = RuntimeSettings.ManagedSafeDefault;
+        var llmInitialConcurrency = Clamp(partial?.LlmInitialConcurrency, 1, MaxLlmConcurrency, defaults.LlmInitialConcurrency);
+        var llmMaxConcurrency = Clamp(partial?.LlmMaxConcurrency, 1, MaxLlmConcurrency, defaults.LlmMaxConcurrency);
         return new RuntimeSettings(
             ManagedMode: partial?.ManagedMode ?? defaults.ManagedMode,
             ExternalLlmEnabled: partial?.ExternalLlmEnabled ?? defaults.ExternalLlmEnabled,
@@ -142,6 +151,8 @@ public static class RuntimeSettingsSerializer
             LlmApiKeyEnvironmentVariable: string.IsNullOrWhiteSpace(partial?.LlmApiKeyEnvironmentVariable) ? defaults.LlmApiKeyEnvironmentVariable : partial!.LlmApiKeyEnvironmentVariable,
             LlmTimeoutSeconds: Clamp(partial?.LlmTimeoutSeconds, 5, 180, defaults.LlmTimeoutSeconds),
             LlmFallbackPolicy: partial?.LlmFallbackPolicy ?? defaults.LlmFallbackPolicy,
+            LlmInitialConcurrency: llmInitialConcurrency,
+            LlmMaxConcurrency: llmMaxConcurrency,
             RecentScanDays: Clamp(partial?.RecentScanDays, 1, 90, defaults.RecentScanDays),
             RecentScanMaxItems: Clamp(partial?.RecentScanMaxItems, 0, 100000, defaults.RecentScanMaxItems),
             ReminderLookAheadHours: Clamp(partial?.ReminderLookAheadHours, 0, 24 * 14, defaults.ReminderLookAheadHours),

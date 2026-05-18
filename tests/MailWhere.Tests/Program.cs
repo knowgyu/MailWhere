@@ -41,6 +41,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Ambiguous mail does not auto create", AmbiguousMailDoesNotAutoCreate),
     ("Pipeline suppresses duplicate source", PipelineSuppressesDuplicateSource),
     ("Pipeline suppresses semantic thread duplicate", PipelineSuppressesSemanticThreadDuplicate),
+    ("Pipeline suppresses semantic review candidate duplicate", PipelineSuppressesSemanticReviewCandidateDuplicate),
     ("Manual task can be created", ManualTaskCanBeCreated),
     ("Review candidate ignore persists", ReviewCandidateIgnorePersists),
     ("Notification throttle suppresses repeat alerts", NotificationThrottleSuppressesRepeatAlerts),
@@ -55,6 +56,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Runtime settings map OpenAI Responses endpoint", RuntimeSettingsMapOpenAiResponsesEndpoint),
     ("Runtime settings serialize canonical provider names", RuntimeSettingsSerializeCanonicalProviderNames),
     ("Runtime settings default unlimited recent scan", RuntimeSettingsDefaultUnlimitedRecentScan),
+    ("Runtime settings default LLM concurrency", RuntimeSettingsDefaultLlmConcurrency),
+    ("Runtime settings clamps LLM concurrency", RuntimeSettingsClampsLlmConcurrency),
     ("Runtime settings simple setting choices map", RuntimeSettingsSimpleSettingChoicesMap),
     ("Startup launch mode maps tray argument", StartupLaunchModeMapsTrayArgument),
     ("Runtime settings default daily board time", RuntimeSettingsDefaultDailyBoardTime),
@@ -86,10 +89,12 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM timeout becomes retryable review", LlmTimeoutBecomesRetryableReview),
     ("LLM user cancellation propagates", LlmUserCancellationPropagates),
     ("Batch LLM maps results", BatchLlmMapsResults),
+    ("Batch LLM passes adaptive request options and prompt limits", BatchLlmPassesAdaptiveRequestOptionsAndPromptLimits),
     ("Batch LLM payload keeps content list last", BatchLlmPayloadKeepsContentListLast),
     ("Batch LLM accepts raw array output", BatchLlmAcceptsRawArrayOutput),
     ("Batch LLM tolerates missing final item", BatchLlmToleratesMissingFinalItem),
     ("Batch LLM partial failure uses rule fallback when enabled", BatchLlmPartialFailureUsesRuleFallbackWhenEnabled),
+    ("Batch LLM invalid JSON surfaces failure", BatchLlmInvalidJsonSurfacesFailure),
     ("Batch LLM rejects one-based ids", BatchLlmRejectsOneBasedIds),
     ("Batch LLM rejects duplicate ids", BatchLlmRejectsDuplicateIds),
     ("LLM failure review candidate retries after recovery", LlmFailureReviewCandidateRetriesAfterRecovery),
@@ -98,23 +103,33 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM failure retry service reports source lookup failure", LlmFailureRetryServiceReportsSourceLookupFailure),
     ("Repeated LLM failure does not duplicate review candidate", RepeatedLlmFailureDoesNotDuplicateReviewCandidate),
     ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
+    ("Ollama client records diagnostics and temperature", OllamaClientRecordsDiagnosticsAndTemperature),
+    ("OpenAI compatible clients honor output token request options", OpenAiCompatibleClientsHonorOutputTokenRequestOptions),
     ("OpenAI Responses client extracts output text", OpenAiResponsesClientExtractsOutputText),
     ("LLM model catalog loads Ollama models", LlmModelCatalogLoadsOllamaModels),
     ("LLM model catalog loads OpenAI-compatible models", LlmModelCatalogLoadsOpenAiCompatibleModels),
     ("Recent mail scan honors request window", RecentMailScanHonorsRequestWindow),
     ("Recent mail scan supports unlimited count", RecentMailScanSupportsUnlimitedCount),
     ("Mail scan reports progress", MailScanReportsProgress),
+    ("Mail scan adapts batch size by content length", MailScanAdaptsBatchSizeByContentLength),
+    ("Mail scan runs prepared LLM batches concurrently", MailScanRunsPreparedLlmBatchesConcurrently),
+    ("Mail scan preserves duplicate sources across concurrent batches", MailScanPreservesDuplicateSourcesAcrossConcurrentBatches),
+    ("Mail scan cancellation stops concurrent scheduling", MailScanCancellationStopsConcurrentScheduling),
     ("Reminder planner emits lookahead notifications", ReminderPlannerEmitsLookaheadNotifications),
     ("Reminder planner suppresses future snooze and emits due snooze", ReminderPlannerSuppressesFutureSnoozeAndEmitsDueSnooze),
     ("SQLite store truncates source-derived fields", SqliteStoreTruncatesSourceDerivedFields),
+    ("SQLite guarded task save is atomic", SqliteGuardedTaskSaveIsAtomic),
+    ("SQLite guarded review candidate save is atomic", SqliteGuardedReviewCandidateSaveIsAtomic),
     ("SQLite review candidates can be listed", SqliteReviewCandidatesCanBeListed),
     ("SQLite review candidate can be resolved as task", SqliteReviewCandidateCanBeResolvedAsTask),
+    ("SQLite review final actions mark source processed", SqliteReviewFinalActionsMarkSourceProcessed),
     ("SQLite review candidate not-task redacts source metadata", SqliteReviewCandidateNotTaskRedactsSourceMetadata),
     ("SQLite suppress LLM failure redacts source metadata", SqliteSuppressLlmFailureRedactsSourceMetadata),
     ("SQLite double review approval is idempotent", SqliteDoubleReviewApprovalIsIdempotent),
     ("SQLite review candidate snooze hides until due", SqliteReviewCandidateSnoozeHidesUntilDue),
     ("SQLite task dismiss and due update persist", SqliteTaskDismissAndDueUpdatePersist),
     ("SQLite task archive hides from open list", SqliteTaskArchiveHidesFromOpenList),
+    ("SQLite task final actions mark source processed", SqliteTaskFinalActionsMarkSourceProcessed),
     ("SQLite archived tasks can be listed and restored", SqliteArchivedTasksCanBeListedAndRestored),
     ("Pipeline records multi-recipient reply progress", PipelineRecordsMultiRecipientReplyProgress),
     ("MailWhere export omits source ids and includes reply progress", MailWhereExportOmitsSourceIdsAndIncludesReplyProgress),
@@ -467,6 +482,32 @@ static async Task PipelineSuppressesSemanticThreadDuplicate()
     Assert(store.Processed.Contains(secondMail.SourceHash), "Expected duplicate mail source to be marked processed.");
 }
 
+static async Task PipelineSuppressesSemanticReviewCandidateDuplicate()
+{
+    var store = new FakeStore();
+    var analysis = new FollowUpAnalysis(
+        FollowUpKind.ActionRequested,
+        AnalysisDisposition.Review,
+        0.61,
+        "자료 검토",
+        "조치 가능성이 있어 검토가 필요합니다.",
+        "검토 부탁",
+        null);
+    var pipeline = new FollowUpPipeline(new SequenceAnalyzer(analysis, analysis), store);
+    var firstMail = Mail("RE: 자료 검토", "확인 부탁드립니다.", "review-thread-1", "conversation-review-1");
+    var secondMail = Mail("FW: 자료 검토", "확인 부탁드립니다.", "review-thread-2", "conversation-review-1");
+
+    var first = await pipeline.ProcessAsync(firstMail);
+    var second = await pipeline.ProcessAsync(secondMail);
+    var actionSignature = FollowUpActionSignature.Create(firstMail, analysis);
+
+    Assert(first.Kind == PipelineOutcomeKind.ReviewCandidateCreated, "Expected first semantic review candidate.");
+    Assert(second.Kind == PipelineOutcomeKind.Duplicate, "Expected duplicate semantic review candidate suppression.");
+    Assert(store.Candidates.Count == 1, "Expected one review candidate after semantic duplicate.");
+    Assert(store.Processed.Contains(secondMail.SourceHash), "Expected duplicate review mail source to be marked processed.");
+    Assert(actionSignature is not null && store.Processed.Contains(actionSignature), "Expected review action signature to be reserved.");
+}
+
 static async Task ManualTaskCanBeCreated()
 {
     var store = new FakeStore();
@@ -729,6 +770,37 @@ static Task RuntimeSettingsDefaultUnlimitedRecentScan()
     var explicitUnlimited = RuntimeSettingsSerializer.ParseOrDefault("""{"RecentScanMaxItems":0,"LlmFallbackPolicy":"LlmThenRules"}""");
     Assert(explicitUnlimited.RecentScanMaxItems == 0, "Expected explicit unlimited scan max.");
     Assert(explicitUnlimited.LlmFallbackPolicy == LlmFallbackPolicy.LlmThenRules, "Expected explicit fallback policy to be preserved.");
+    return Task.CompletedTask;
+}
+
+static Task RuntimeSettingsDefaultLlmConcurrency()
+{
+    var defaults = RuntimeSettingsSerializer.ParseOrDefault("{}");
+
+    Assert(defaults.LlmInitialConcurrency == 2, "Expected default LLM initial concurrency 2.");
+    Assert(defaults.LlmMaxConcurrency == 4, "Expected default LLM max concurrency 4.");
+
+    var json = RuntimeSettingsSerializer.Serialize(defaults);
+    Assert(json.Contains("\"LlmInitialConcurrency\": 2", StringComparison.Ordinal), "Expected initial concurrency in serialized settings.");
+    Assert(json.Contains("\"LlmMaxConcurrency\": 4", StringComparison.Ordinal), "Expected max concurrency in serialized settings.");
+    return Task.CompletedTask;
+}
+
+static Task RuntimeSettingsClampsLlmConcurrency()
+{
+    var low = RuntimeSettingsSerializer.ParseOrDefault("""{"LlmInitialConcurrency":0,"LlmMaxConcurrency":0}""");
+    Assert(low.LlmInitialConcurrency == 1, "Expected low initial concurrency clamp.");
+    Assert(low.LlmMaxConcurrency == 1, "Expected low max concurrency clamp.");
+
+    var high = RuntimeSettingsSerializer.ParseOrDefault("""{"LlmInitialConcurrency":99,"LlmMaxConcurrency":99}""");
+    Assert(high.LlmInitialConcurrency == 4, "Expected high initial concurrency clamp to the v0.5.0 ceiling.");
+    Assert(high.LlmMaxConcurrency == 4, "Expected high max concurrency clamp to the v0.5.0 ceiling.");
+    Assert(new MailScanRequest(0, true, DateTimeOffset.UtcNow, high.LlmInitialConcurrency, high.LlmMaxConcurrency).EffectiveLlmConcurrency == 4, "Expected effective concurrency to respect ceiling.");
+
+    var inverted = RuntimeSettingsSerializer.ParseOrDefault("""{"LlmInitialConcurrency":4,"LlmMaxConcurrency":2}""");
+    Assert(inverted.LlmInitialConcurrency == 4, "Expected explicit initial concurrency.");
+    Assert(inverted.LlmMaxConcurrency == 2, "Max concurrency should preserve the configured lower ceiling.");
+    Assert(new MailScanRequest(0, true, DateTimeOffset.UtcNow, inverted.LlmInitialConcurrency, inverted.LlmMaxConcurrency).EffectiveLlmConcurrency == 2, "Effective concurrency must never exceed configured max.");
     return Task.CompletedTask;
 }
 
@@ -1226,6 +1298,8 @@ static async Task LlmPromptContainsTriagePolicyAndFewShots()
     Assert(prompt.Contains("분류/상태 접두어를 쓰지 마세요", StringComparison.Ordinal), "Expected action-title prefix guard.");
     Assert(prompt.Contains("promisedByMe", StringComparison.Ordinal), "Expected my-promise kind in prompt schema.");
     Assert(prompt.Contains("waitingForReply", StringComparison.Ordinal), "Expected waiting-on-them kind in prompt schema.");
+    Assert(!prompt.Contains("summary", StringComparison.Ordinal), "Expected redundant summary output to be removed from prompt schema.");
+    Assert(!prompt.Contains("evidenceSnippet", StringComparison.Ordinal), "Expected evidence snippet to be folded into reason.");
 }
 
 static async Task LlmQuotedHistoryAutoCreateDowngradesToReview()
@@ -1429,6 +1503,44 @@ static async Task BatchLlmMapsResults()
     Assert(prompt.Contains("마감일을 상상하지 마세요", StringComparison.Ordinal), "Expected due-date hallucination guard in batch prompt.");
 }
 
+static async Task BatchLlmPassesAdaptiveRequestOptionsAndPromptLimits()
+{
+    var responseItems = Enumerable.Range(0, 12)
+        .Select(index => $$"""
+            {
+              "id": "{{index}}",
+              "kind": "none",
+              "disposition": "ignore",
+              "confidence": 0.8,
+              "suggestedTitle": "",
+              "reason": "공지",
+              "dueAt": null,
+              "actionOrigin": "none",
+              "currentSenderRequested": false,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            }
+            """);
+    var llm = new FakeLlmClient("""{"items":[""" + string.Join(",", responseItems) + "]}");
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm);
+
+    await analyzer.AnalyzeBatchAsync(Enumerable.Range(0, 12)
+        .Select(index => Mail($"공지 {index}", "참고만 해주세요.", $"batch-options-{index}"))
+        .ToArray());
+
+    Assert(llm.LastRequestOptions?.ContextTokens == 32768, "Expected per-request context tokens.");
+    Assert(llm.LastRequestOptions?.MaxOutputTokens == 2176, "Expected adaptive batch output token budget.");
+
+    var prompt = llm.LastSystemPrompt ?? string.Empty;
+    Assert(prompt.Contains("suggestedTitle", StringComparison.Ordinal), "Expected title schema.");
+    Assert(prompt.Contains("40자", StringComparison.Ordinal), "Expected explicit title length limit.");
+    Assert(prompt.Contains("reason", StringComparison.Ordinal), "Expected reason schema.");
+    Assert(prompt.Contains("60자", StringComparison.Ordinal), "Expected explicit reason length limit.");
+    Assert(prompt.Contains("markdown", StringComparison.OrdinalIgnoreCase), "Expected markdown prohibition.");
+    Assert(!prompt.Contains("summary", StringComparison.Ordinal), "Expected redundant summary output to stay removed.");
+    Assert(!prompt.Contains("evidenceSnippet", StringComparison.Ordinal), "Expected evidenceSnippet output to stay removed.");
+}
+
 static async Task BatchLlmPayloadKeepsContentListLast()
 {
     var llm = new FakeLlmClient("""
@@ -1612,6 +1724,28 @@ static async Task BatchLlmPartialFailureUsesRuleFallbackWhenEnabled()
     Assert(results[1].Disposition == AnalysisDisposition.AutoCreateTask, "Expected missing batch item to use rule fallback when enabled.");
     Assert(telemetry.LlmFailureCount == 1, "Expected missing batch item to count as LLM failure.");
     Assert(telemetry.LlmFallbackCount == 1, "Expected one fallback for the missing batch item.");
+}
+
+static async Task BatchLlmInvalidJsonSurfacesFailure()
+{
+    var llm = new FakeLlmClient("not-json");
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
+
+    var results = await analyzer.AnalyzeBatchAsync(new[]
+    {
+        Mail("확인 1", "확인 부탁드립니다.", "invalid-json-1"),
+        Mail("공지 2", "FYI입니다.", "invalid-json-2"),
+        Mail("회신 3", "내일까지 회신 부탁드립니다.", "invalid-json-3"),
+        Mail("공지 4", "참고만 해주세요.", "invalid-json-4")
+    });
+    var telemetry = analyzer.GetTelemetrySnapshot();
+
+    Assert(results.Count == 4, "Expected one failure result per input.");
+    Assert(results.All(item => item.IsTransientLlmFailureReview), "Invalid batch JSON must surface retryable LLM failure reviews.");
+    Assert(telemetry.LlmRequestCount == 1, "Expected no split retry masking the invalid JSON evidence.");
+    Assert(telemetry.LlmAttemptCount == 4, "Expected failed batch item attempts to be counted.");
+    Assert(telemetry.LlmFailureCount == 4, "Expected invalid JSON to count each batch item as LLM failure.");
+    Assert(telemetry.LastFailureCode == "invalid-json", "Expected invalid-json failure code to remain visible.");
 }
 
 static async Task BatchLlmRejectsOneBasedIds()
@@ -1882,6 +2016,102 @@ static async Task LlmEndpointProbeValidatesJsonObject()
     Assert(!invalid.Success && invalid.Code == "invalid-json", "Expected invalid JSON probe failure.");
 }
 
+static async Task OllamaClientRecordsDiagnosticsAndTemperature()
+{
+    var settings = new LlmEndpointSettings(
+        LlmProviderKind.OllamaNative,
+        Enabled: true,
+        Endpoint: "http://localhost:11434",
+        Model: "qwen3.6:latest",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+    var handler = new StubHttpMessageHandler("""
+        {
+          "model": "qwen3.6:latest",
+          "message": {
+            "role": "assistant",
+            "content": "{\"ok\":true}",
+            "thinking": ""
+          },
+          "done": true,
+          "total_duration": 12300000000,
+          "load_duration": 100000000,
+          "prompt_eval_count": 1800,
+          "prompt_eval_duration": 3000000000,
+          "eval_count": 220,
+          "eval_duration": 9000000000
+        }
+        """);
+    var client = new OllamaLlmClient(new HttpClient(handler), settings);
+
+    var completion = await client.CompleteJsonAsync(
+        "system",
+        "user",
+        requestOptions: new LlmRequestOptions(ContextTokens: 32768, MaxOutputTokens: 2048));
+
+    Assert(completion.Content == """{"ok":true}""", "Expected Ollama message content.");
+    Assert(completion.Diagnostics is not null, "Expected Ollama diagnostics.");
+    Assert(completion.Diagnostics!.TotalDuration?.TotalMilliseconds == 12300, "Expected total duration converted from nanoseconds.");
+    Assert(completion.Diagnostics.PromptEvalCount == 1800, "Expected prompt token count.");
+    Assert(completion.Diagnostics.EvalCount == 220, "Expected output token count.");
+    Assert(completion.Diagnostics.ThinkingCharCount == 0, "Expected empty thinking metadata when think=false.");
+    Assert(handler.LastRequestBody is not null, "Expected request body capture.");
+    using var request = JsonDocument.Parse(handler.LastRequestBody!);
+    Assert(request.RootElement.GetProperty("think").GetBoolean() == false, "Expected Ollama think=false.");
+    Assert(Math.Abs(request.RootElement.GetProperty("options").GetProperty("temperature").GetDouble() - 0.1) < 0.0001, "Expected temperature 0.1.");
+    Assert(request.RootElement.GetProperty("options").GetProperty("num_ctx").GetInt32() == 32768, "Expected per-request num_ctx.");
+    Assert(request.RootElement.GetProperty("options").GetProperty("num_predict").GetInt32() == 2048, "Expected adaptive num_predict.");
+}
+
+static async Task OpenAiCompatibleClientsHonorOutputTokenRequestOptions()
+{
+    var chatSettings = new LlmEndpointSettings(
+        LlmProviderKind.OpenAiChatCompletions,
+        Enabled: true,
+        Endpoint: "http://localhost:8000/v1",
+        Model: "qwen-local",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+    var chatHandler = new StubHttpMessageHandler("""
+        {
+          "choices": [
+            {
+              "message": {
+                "content": "{\"ok\":true}"
+              }
+            }
+          ]
+        }
+        """);
+    var chatClient = new OpenAiChatCompletionsLlmClient(new HttpClient(chatHandler), chatSettings);
+
+    await chatClient.CompleteJsonAsync(
+        "system",
+        "user",
+        requestOptions: new LlmRequestOptions(ContextTokens: 32768, MaxOutputTokens: 1536));
+
+    using var chatRequest = JsonDocument.Parse(chatHandler.LastRequestBody ?? "{}");
+    Assert(chatRequest.RootElement.GetProperty("max_tokens").GetInt32() == 1536, "Expected Chat Completions max_tokens from request options.");
+    Assert(!chatRequest.RootElement.TryGetProperty("num_ctx", out _), "OpenAI-compatible body must not include Ollama context option.");
+
+    var responsesSettings = chatSettings with { Provider = LlmProviderKind.OpenAiResponses };
+    var responsesHandler = new StubHttpMessageHandler("""
+        {
+          "output_text": "{\"ok\":true}"
+        }
+        """);
+    var responsesClient = new OpenAiResponsesLlmClient(new HttpClient(responsesHandler), responsesSettings);
+
+    await responsesClient.CompleteJsonAsync(
+        "system",
+        "user",
+        requestOptions: new LlmRequestOptions(ContextTokens: 32768, MaxOutputTokens: 1792));
+
+    using var responsesRequest = JsonDocument.Parse(responsesHandler.LastRequestBody ?? "{}");
+    Assert(responsesRequest.RootElement.GetProperty("max_output_tokens").GetInt32() == 1792, "Expected Responses max_output_tokens from request options.");
+    Assert(!responsesRequest.RootElement.TryGetProperty("num_ctx", out _), "Responses body must not include Ollama context option.");
+}
+
 static async Task OpenAiResponsesClientExtractsOutputText()
 {
     var settings = new LlmEndpointSettings(
@@ -1909,7 +2139,7 @@ static async Task OpenAiResponsesClientExtractsOutputText()
 
     var result = await client.CompleteJsonAsync("system", "user");
 
-    Assert(result == """{"ok":true}""", "Expected Responses output text to be extracted.");
+    Assert(result.Content == """{"ok":true}""", "Expected Responses output text to be extracted.");
     Assert(handler.LastRequestUri?.AbsolutePath == "/v1/responses", "Expected Responses endpoint path.");
 }
 
@@ -2018,6 +2248,123 @@ static async Task MailScanReportsProgress()
     Assert(progressEvents.Any(item => item.Phase == "completed"), "Expected completed progress.");
 }
 
+static async Task MailScanAdaptsBatchSizeByContentLength()
+{
+    var shortMessages = Enumerable.Range(0, 18)
+        .Select(index => Mail($"짧은 요청 {index}", "확인 부탁드립니다.", $"adaptive-short-{index}"))
+        .ToArray();
+    var shortAnalyzer = new RecordingBatchAnalyzer(12);
+    var shortScanner = new MailActionScanner(
+        new SequenceEmailSource(shortMessages),
+        new FollowUpPipeline(shortAnalyzer, new FakeStore()));
+
+    await shortScanner.ScanAsync(new MailScanRequest(0, IncludeBody: true, DateTimeOffset.Now.AddDays(-30)));
+
+    Assert(shortAnalyzer.BatchSizes.SequenceEqual(new[] { 12, 6 }), "Short messages should use expanded batches up to analyzer preference.");
+
+    var longBody = new string('가', 5000);
+    var mixedMessages = new[]
+    {
+        Mail("긴 요청 1", longBody, "adaptive-long-1"),
+        Mail("긴 요청 2", longBody, "adaptive-long-2"),
+        Mail("긴 요청 3", longBody, "adaptive-long-3"),
+        Mail("짧은 요청", "확인 부탁드립니다.", "adaptive-long-4")
+    };
+    var longAnalyzer = new RecordingBatchAnalyzer(12);
+    var longScanner = new MailActionScanner(
+        new SequenceEmailSource(mixedMessages),
+        new FollowUpPipeline(longAnalyzer, new FakeStore()));
+
+    await longScanner.ScanAsync(new MailScanRequest(0, IncludeBody: true, DateTimeOffset.Now.AddDays(-30)));
+
+    Assert(longAnalyzer.BatchSizes.SequenceEqual(new[] { 2, 2 }), "Long messages should reduce batch size without truncating input.");
+}
+
+static async Task MailScanRunsPreparedLlmBatchesConcurrently()
+{
+    var messages = Enumerable.Range(0, 36)
+        .Select(index => Mail($"동시 요청 {index}", "확인 부탁드립니다.", $"concurrent-{index}"))
+        .ToArray();
+    var analyzer = new ConcurrentRecordingBatchAnalyzer(preferredBatchSize: 6);
+    var store = new FakeStore { MutationDelay = TimeSpan.FromMilliseconds(5) };
+    var scanner = new MailActionScanner(
+        new SequenceEmailSource(messages),
+        new FollowUpPipeline(analyzer, store));
+
+    var summary = await scanner.ScanAsync(new MailScanRequest(
+        MaxItems: 0,
+        IncludeBody: true,
+        Since: DateTimeOffset.Now.AddDays(-30),
+        LlmInitialConcurrency: 2,
+        LlmMaxConcurrency: 4));
+
+    Assert(summary.ReadCount == 36, "Expected all messages read.");
+    Assert(summary.IgnoredCount == 36, "Expected all concurrent analyzer results counted.");
+    Assert(analyzer.MaxActiveBatchCalls == 2, "Expected fixed v0.5.0 effective concurrency of two.");
+    Assert(store.MaxActiveMutations <= 1, "Persistence must stay serialized.");
+}
+
+static async Task MailScanPreservesDuplicateSourcesAcrossConcurrentBatches()
+{
+    var messages = new[]
+    {
+        Mail("중복 원본", "확인 부탁드립니다.", "duplicate-source"),
+        Mail("다른 원본 1", "확인 부탁드립니다.", "unique-source-1"),
+        Mail("중복 원본 재등장", "확인 부탁드립니다.", "duplicate-source"),
+        Mail("다른 원본 2", "확인 부탁드립니다.", "unique-source-2")
+    };
+    var analyzer = new RecordingBatchAnalyzer(preferredBatchSize: 2);
+    var store = new FakeStore();
+    var scanner = new MailActionScanner(
+        new SequenceEmailSource(messages),
+        new FollowUpPipeline(analyzer, store));
+
+    var summary = await scanner.ScanAsync(new MailScanRequest(
+        MaxItems: 0,
+        IncludeBody: true,
+        Since: DateTimeOffset.Now.AddDays(-30),
+        LlmInitialConcurrency: 2,
+        LlmMaxConcurrency: 4));
+
+    Assert(summary.ReadCount == 4, "Expected all messages read.");
+    Assert(summary.DuplicateCount == 1, "Expected repeated source to become duplicate.");
+    Assert(summary.IgnoredCount == 3, "Expected only unique sources to be analyzed and persisted as ignored.");
+    Assert(store.Processed.Count == 3, "Expected only unique source hashes marked processed.");
+}
+
+static async Task MailScanCancellationStopsConcurrentScheduling()
+{
+    var messages = Enumerable.Range(0, 36)
+        .Select(index => Mail($"취소 요청 {index}", "확인 부탁드립니다.", $"cancel-concurrent-{index}"))
+        .ToArray();
+    var analyzer = new CancellableBatchAnalyzer(preferredBatchSize: 6);
+    var scanner = new MailActionScanner(
+        new SequenceEmailSource(messages),
+        new FollowUpPipeline(analyzer, new FakeStore()));
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+    var scan = scanner.ScanAsync(
+        new MailScanRequest(
+            MaxItems: 0,
+            IncludeBody: true,
+            Since: DateTimeOffset.Now.AddDays(-30),
+            LlmInitialConcurrency: 2,
+            LlmMaxConcurrency: 4),
+        cts.Token);
+    await analyzer.WaitForStartedAsync(expectedStarted: 2, cts.Token);
+    await cts.CancelAsync();
+
+    try
+    {
+        await scan;
+        Assert(false, "Expected cancellation to propagate.");
+    }
+    catch (OperationCanceledException)
+    {
+        Assert(analyzer.StartedBatchCalls == 2, "Pending batches should not start after cancellation.");
+    }
+}
+
 static Task ReminderPlannerEmitsLookaheadNotifications()
 {
     var now = new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9));
@@ -2112,6 +2459,91 @@ static async Task SqliteStoreTruncatesSourceDerivedFields()
     }
 }
 
+static async Task SqliteGuardedTaskSaveIsAtomic()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var sourceA = StableHash.Create("guarded-source-a");
+        var sourceB = StableHash.Create("guarded-source-b");
+        var actionSignature = StableHash.Create("guarded-action");
+        var taskA = new LocalTaskItem(
+            Guid.NewGuid(),
+            "원본 A 업무",
+            null,
+            sourceA,
+            "guarded-source-a",
+            0.91,
+            "원자 저장",
+            null,
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now);
+        var duplicateSourceTask = taskA with { Id = Guid.NewGuid(), Title = "원본 A 중복" };
+        var duplicateActionTask = taskA with { Id = Guid.NewGuid(), Title = "동일 업무 중복", SourceIdHash = sourceB, SourceId = "guarded-source-b" };
+
+        var first = await store.TrySaveTaskWithProcessedSourcesAsync(taskA, actionSignature);
+        var duplicateSource = await store.TrySaveTaskWithProcessedSourcesAsync(duplicateSourceTask, actionSignature: null);
+        var duplicateAction = await store.TrySaveTaskWithProcessedSourcesAsync(duplicateActionTask, actionSignature);
+        var openTasks = await store.ListOpenTasksAsync();
+
+        Assert(first, "Expected first guarded save to create a task.");
+        Assert(!duplicateSource, "Expected duplicate source guarded save to be rejected.");
+        Assert(!duplicateAction, "Expected duplicate action-signature guarded save to be rejected.");
+        Assert(openTasks.Count == 1, "Expected guarded duplicate rejection to keep one task.");
+        Assert(await store.HasProcessedSourceAsync(sourceA), "Expected first source reserved.");
+        Assert(await store.HasProcessedSourceAsync(sourceB), "Expected duplicate-action source still marked processed.");
+        Assert(await store.HasProcessedSourceAsync(actionSignature), "Expected action signature reserved.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteGuardedReviewCandidateSaveIsAtomic()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var mailA = Mail("검토 요청", "금요일까지 자료 확인 부탁드립니다.", "guarded-review-source-a", "guarded-review-conversation");
+        var mailB = Mail("RE: 검토 요청", "금요일까지 자료 확인 부탁드립니다.", "guarded-review-source-b", "guarded-review-conversation");
+        var analysis = new FollowUpAnalysis(
+            FollowUpKind.ActionRequested,
+            AnalysisDisposition.Review,
+            0.64,
+            "자료 확인",
+            "자동 등록 전 검토가 필요합니다.",
+            "확인 부탁",
+            null);
+        var actionSignature = FollowUpActionSignature.Create(mailA, analysis)
+            ?? throw new InvalidOperationException("Expected actionable review to have an action signature.");
+        var candidateA = ReviewCandidate.FromAnalysis(mailA, analysis, now);
+        var duplicateSourceCandidate = ReviewCandidate.FromAnalysis(mailA, analysis with { Reason = "동일 원본" }, now.AddMinutes(1));
+        var duplicateActionCandidate = ReviewCandidate.FromAnalysis(mailB, analysis, now.AddMinutes(2));
+
+        var first = await store.TrySaveReviewCandidateWithProcessedSourcesAsync(candidateA, actionSignature);
+        var duplicateSource = await store.TrySaveReviewCandidateWithProcessedSourcesAsync(duplicateSourceCandidate, actionSignature: null);
+        var duplicateAction = await store.TrySaveReviewCandidateWithProcessedSourcesAsync(duplicateActionCandidate, actionSignature);
+        var candidates = await store.ListReviewCandidatesAsync();
+
+        Assert(first, "Expected first guarded review candidate save to create a candidate.");
+        Assert(!duplicateSource, "Expected duplicate review source guarded save to be rejected.");
+        Assert(!duplicateAction, "Expected duplicate review action-signature guarded save to be rejected.");
+        Assert(candidates.Count == 1, "Expected guarded duplicate rejection to keep one review candidate.");
+        Assert(await store.HasProcessedSourceAsync(mailA.SourceHash), "Expected first review source reserved.");
+        Assert(await store.HasProcessedSourceAsync(mailB.SourceHash), "Expected duplicate-action review source still marked processed.");
+        Assert(await store.HasProcessedSourceAsync(actionSignature), "Expected review action signature reserved.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
 static async Task SqliteReviewCandidatesCanBeListed()
 {
     var (store, _, cleanup) = await CreateTempStoreAsync();
@@ -2170,6 +2602,41 @@ static async Task SqliteReviewCandidateCanBeResolvedAsTask()
 
         var candidateRow = await QuerySingleRowAsync(dbPath, "SELECT source_id FROM review_candidates WHERE id = $id", ("$id", candidate.Id.ToString()));
         Assert(candidateRow[0] is null, "Expected resolved candidate source id to be cleared after task creation.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteReviewFinalActionsMarkSourceProcessed()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var approveMail = Mail("승인 요청", "내일까지 승인 부탁드립니다.", "review-final-approve");
+        var ignoreMail = Mail("참고 요청", "가능하면 확인해주세요.", "review-final-ignore");
+        var analysis = new FollowUpAnalysis(
+            FollowUpKind.ActionRequested,
+            AnalysisDisposition.Review,
+            0.72,
+            "승인 요청 처리",
+            "검토 후보",
+            "승인 부탁",
+            null);
+        var approveCandidate = ReviewCandidate.FromAnalysis(approveMail, analysis, DateTimeOffset.UtcNow);
+        var ignoreCandidate = ReviewCandidate.FromAnalysis(ignoreMail, analysis, DateTimeOffset.UtcNow);
+
+        await store.SaveReviewCandidateAsync(approveCandidate);
+        await store.SaveReviewCandidateAsync(ignoreCandidate);
+
+        var task = await store.ResolveReviewCandidateAsTaskAsync(approveCandidate.Id, DateTimeOffset.UtcNow);
+        var ignored = await store.ResolveReviewCandidateAsNotTaskAsync(ignoreCandidate.Id, DateTimeOffset.UtcNow);
+
+        Assert(task is not null, "Expected approve to create a task.");
+        Assert(ignored, "Expected ignore to resolve candidate.");
+        Assert(await store.HasProcessedSourceAsync(approveMail.SourceHash), "Approved review source should be marked processed.");
+        Assert(await store.HasProcessedSourceAsync(ignoreMail.SourceHash), "Ignored review source should be marked processed.");
     }
     finally
     {
@@ -2377,6 +2844,62 @@ static async Task SqliteTaskArchiveHidesFromOpenList()
     {
         cleanup();
     }
+}
+
+static async Task SqliteTaskFinalActionsMarkSourceProcessed()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var archive = BuildTask("archive-final-source", "보관 처리", now);
+        var complete = BuildTask("complete-final-source", "완료 처리", now) with { Id = Guid.NewGuid() };
+        var dismiss = BuildTask("dismiss-final-source", "삭제 처리", now) with { Id = Guid.NewGuid() };
+        var manual = new LocalTaskItem(
+            Guid.NewGuid(),
+            "수동 업무 보관",
+            null,
+            null,
+            null,
+            1,
+            "수동 입력",
+            null,
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now);
+        await store.SaveTaskAsync(archive);
+        await store.SaveTaskAsync(complete);
+        await store.SaveTaskAsync(dismiss);
+        await store.SaveTaskAsync(manual);
+
+        Assert(await store.ArchiveTaskAsync(archive.Id, now.AddMinutes(1)), "Expected archive to succeed.");
+        Assert(await store.CompleteTaskAsync(complete.Id, now.AddMinutes(1)), "Expected complete to succeed.");
+        Assert(await store.DismissTaskAsync(dismiss.Id, now.AddMinutes(1)), "Expected dismiss to succeed.");
+        Assert(await store.ArchiveTaskAsync(manual.Id, now.AddMinutes(1)), "Expected manual task archive without source hash to succeed.");
+
+        Assert(await store.HasProcessedSourceAsync(archive.SourceIdHash!), "Archived source should be marked processed.");
+        Assert(await store.HasProcessedSourceAsync(complete.SourceIdHash!), "Completed source should be marked processed.");
+        Assert(await store.HasProcessedSourceAsync(dismiss.SourceIdHash!), "Dismissed source should be marked processed.");
+    }
+    finally
+    {
+        cleanup();
+    }
+
+    static LocalTaskItem BuildTask(string sourceId, string title, DateTimeOffset now) => new(
+        Guid.NewGuid(),
+        title,
+        null,
+        StableHash.Create(sourceId),
+        sourceId,
+        0.9,
+        "테스트",
+        null,
+        LocalTaskStatus.Open,
+        null,
+        now,
+        now);
 }
 
 static async Task SqliteArchivedTasksCanBeListedAndRestored()
@@ -2901,25 +3424,114 @@ static void Assert(bool condition, string message)
 
 sealed class FakeStore : IFollowUpStore, IAppStateStore
 {
+    private int _activeMutations;
+    private int _maxActiveMutations;
+
     public List<LocalTaskItem> Tasks { get; } = [];
     public List<ReviewCandidate> Candidates { get; } = [];
     public List<ReplyReceipt> ReplyReceipts { get; } = [];
     public HashSet<string> Processed { get; } = [];
     public Dictionary<string, string> AppState { get; } = new(StringComparer.Ordinal);
+    public TimeSpan MutationDelay { get; init; }
+    public int MaxActiveMutations => Volatile.Read(ref _maxActiveMutations);
 
     public Task<bool> HasProcessedSourceAsync(string sourceIdHash, CancellationToken cancellationToken = default) =>
         Task.FromResult(Processed.Contains(sourceIdHash));
 
-    public Task SaveTaskAsync(LocalTaskItem task, CancellationToken cancellationToken = default)
+    public async Task SaveTaskAsync(LocalTaskItem task, CancellationToken cancellationToken = default)
     {
-        Tasks.Add(task);
-        return Task.CompletedTask;
+        await TrackMutationAsync(() => Tasks.Add(task), cancellationToken);
     }
 
-    public Task SaveReviewCandidateAsync(ReviewCandidate candidate, CancellationToken cancellationToken = default)
+    public async Task SaveReviewCandidateAsync(ReviewCandidate candidate, CancellationToken cancellationToken = default)
     {
-        Candidates.Add(candidate);
-        return Task.CompletedTask;
+        await TrackMutationAsync(() => Candidates.Add(candidate), cancellationToken);
+    }
+
+    public async Task<bool> TrySaveTaskWithProcessedSourcesAsync(LocalTaskItem task, string? actionSignature, CancellationToken cancellationToken = default)
+    {
+        var saved = false;
+        await TrackMutationAsync(() =>
+        {
+            if (string.IsNullOrWhiteSpace(task.SourceIdHash) || Processed.Contains(task.SourceIdHash))
+            {
+                saved = false;
+                return;
+            }
+
+            Processed.Add(task.SourceIdHash);
+            if (!string.IsNullOrWhiteSpace(actionSignature))
+            {
+                if (Processed.Contains(actionSignature))
+                {
+                    saved = false;
+                    return;
+                }
+
+                Processed.Add(actionSignature);
+            }
+
+            Tasks.Add(task);
+            saved = true;
+        }, cancellationToken);
+        return saved;
+    }
+
+    public async Task<bool> TrySaveReviewCandidateWithProcessedSourcesAsync(ReviewCandidate candidate, string? actionSignature, CancellationToken cancellationToken = default)
+    {
+        var saved = false;
+        await TrackMutationAsync(() =>
+        {
+            if (Processed.Contains(candidate.SourceIdHash))
+            {
+                saved = false;
+                return;
+            }
+
+            Processed.Add(candidate.SourceIdHash);
+            if (!string.IsNullOrWhiteSpace(actionSignature))
+            {
+                if (Processed.Contains(actionSignature))
+                {
+                    saved = false;
+                    return;
+                }
+
+                Processed.Add(actionSignature);
+            }
+
+            Candidates.Add(candidate);
+            saved = true;
+        }, cancellationToken);
+        return saved;
+    }
+
+    public async Task<bool> TryMarkProcessedSourcesAsync(string sourceIdHash, string? actionSignature, CancellationToken cancellationToken = default)
+    {
+        var marked = false;
+        await TrackMutationAsync(() =>
+        {
+            if (Processed.Contains(sourceIdHash))
+            {
+                marked = false;
+                return;
+            }
+
+            Processed.Add(sourceIdHash);
+            if (!string.IsNullOrWhiteSpace(actionSignature))
+            {
+                if (Processed.Contains(actionSignature))
+                {
+                    marked = false;
+                    return;
+                }
+
+                Processed.Add(actionSignature);
+            }
+
+            marked = true;
+        }, cancellationToken);
+        return marked;
     }
 
     public Task<bool> HasOpenLlmFailureReviewCandidateForSourceAsync(string sourceIdHash, CancellationToken cancellationToken = default) =>
@@ -2959,10 +3571,9 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         return Task.FromResult(rows);
     }
 
-    public Task MarkSourceProcessedAsync(string sourceIdHash, CancellationToken cancellationToken = default)
+    public async Task MarkSourceProcessedAsync(string sourceIdHash, CancellationToken cancellationToken = default)
     {
-        Processed.Add(sourceIdHash);
-        return Task.CompletedTask;
+        await TrackMutationAsync(() => Processed.Add(sourceIdHash), cancellationToken);
     }
 
     public Task RecordReplyObservationAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
@@ -3038,6 +3649,7 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
             Kind: candidate.Analysis.Kind);
         Tasks.Add(task);
         Candidates[index] = candidate with { Suppressed = true, SourceId = null };
+        Processed.Add(candidate.SourceIdHash);
         return Task.FromResult<LocalTaskItem?>(task);
     }
 
@@ -3076,6 +3688,7 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
                 EvidenceSnippet = null
             }
         };
+        Processed.Add(candidate.SourceIdHash);
         return Task.FromResult(true);
     }
 
@@ -3088,6 +3701,10 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         }
 
         Tasks[index] = Tasks[index] with { Status = LocalTaskStatus.Archived, SnoozeUntil = null, UpdatedAt = now };
+        if (!string.IsNullOrWhiteSpace(Tasks[index].SourceIdHash))
+        {
+            Processed.Add(Tasks[index].SourceIdHash!);
+        }
         return Task.FromResult(true);
     }
 
@@ -3112,6 +3729,10 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         }
 
         Tasks[index] = Tasks[index] with { Status = LocalTaskStatus.Dismissed, UpdatedAt = now };
+        if (!string.IsNullOrWhiteSpace(Tasks[index].SourceIdHash))
+        {
+            Processed.Add(Tasks[index].SourceIdHash!);
+        }
         return Task.FromResult(true);
     }
 
@@ -3124,6 +3745,10 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         }
 
         Tasks[index] = Tasks[index] with { Status = LocalTaskStatus.Done, SnoozeUntil = null, UpdatedAt = now };
+        if (!string.IsNullOrWhiteSpace(Tasks[index].SourceIdHash))
+        {
+            Processed.Add(Tasks[index].SourceIdHash!);
+        }
         return Task.FromResult(true);
     }
 
@@ -3226,6 +3851,34 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
         AppState[key] = value;
         return Task.CompletedTask;
     }
+
+    private async Task TrackMutationAsync(Action mutate, CancellationToken cancellationToken)
+    {
+        var active = Interlocked.Increment(ref _activeMutations);
+        while (true)
+        {
+            var currentMax = Volatile.Read(ref _maxActiveMutations);
+            if (active <= currentMax
+                || Interlocked.CompareExchange(ref _maxActiveMutations, active, currentMax) == currentMax)
+            {
+                break;
+            }
+        }
+
+        try
+        {
+            if (MutationDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(MutationDelay, cancellationToken);
+            }
+
+            mutate();
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeMutations);
+        }
+    }
 }
 
 sealed class RecordingNotificationSink : IUserNotificationSink
@@ -3248,21 +3901,36 @@ sealed class RecordingNotificationSink : IUserNotificationSink
 
 sealed class FakeLlmClient : ILlmClient
 {
-    private readonly string _response;
+    private readonly Queue<LlmCompletion> _responses;
 
-    public FakeLlmClient(string response)
+    public FakeLlmClient(string response) : this(new LlmCompletion(response))
     {
-        _response = response;
+    }
+
+    public FakeLlmClient(params LlmCompletion[] responses)
+    {
+        _responses = new Queue<LlmCompletion>(responses.Length == 0
+            ? new[] { new LlmCompletion(string.Empty) }
+            : responses);
     }
 
     public string? LastSystemPrompt { get; private set; }
     public string? LastUserPayload { get; private set; }
+    public LlmRequestOptions? LastRequestOptions { get; private set; }
+    public List<LlmRequestOptions?> RequestOptionsLog { get; } = [];
 
-    public Task<string> CompleteJsonAsync(string systemPrompt, string userPayload, CancellationToken cancellationToken = default)
+    public Task<LlmCompletion> CompleteJsonAsync(
+        string systemPrompt,
+        string userPayload,
+        CancellationToken cancellationToken = default,
+        LlmRequestOptions? requestOptions = null)
     {
         LastSystemPrompt = systemPrompt;
         LastUserPayload = userPayload;
-        return Task.FromResult(_response);
+        LastRequestOptions = requestOptions;
+        RequestOptionsLog.Add(requestOptions);
+        var response = _responses.Count > 1 ? _responses.Dequeue() : _responses.Peek();
+        return Task.FromResult(response);
     }
 }
 
@@ -3275,8 +3943,12 @@ sealed class ThrowingLlmClient : ILlmClient
         _exception = exception;
     }
 
-    public Task<string> CompleteJsonAsync(string systemPrompt, string userPayload, CancellationToken cancellationToken = default) =>
-        Task.FromException<string>(_exception);
+    public Task<LlmCompletion> CompleteJsonAsync(
+        string systemPrompt,
+        string userPayload,
+        CancellationToken cancellationToken = default,
+        LlmRequestOptions? requestOptions = null) =>
+        Task.FromException<LlmCompletion>(_exception);
 }
 
 sealed class ThrowingAnalyzer : IFollowUpAnalyzer
@@ -3310,6 +3982,120 @@ sealed class SequenceAnalyzer : IFollowUpAnalyzer
     }
 }
 
+sealed class RecordingBatchAnalyzer : IFollowUpBatchAnalyzer
+{
+    public RecordingBatchAnalyzer(int preferredBatchSize)
+    {
+        PreferredBatchSize = preferredBatchSize;
+    }
+
+    public int PreferredBatchSize { get; }
+    public List<int> BatchSizes { get; } = [];
+
+    public Task<FollowUpAnalysis> AnalyzeAsync(EmailSnapshot email, CancellationToken cancellationToken = default) =>
+        Task.FromResult(FollowUpAnalysis.Ignore("single"));
+
+    public Task<IReadOnlyList<FollowUpAnalysis>> AnalyzeBatchAsync(IReadOnlyList<EmailSnapshot> emails, CancellationToken cancellationToken = default)
+    {
+        BatchSizes.Add(emails.Count);
+        return Task.FromResult<IReadOnlyList<FollowUpAnalysis>>(emails
+            .Select(_ => FollowUpAnalysis.Ignore("batch"))
+            .ToArray());
+    }
+}
+
+sealed class ConcurrentRecordingBatchAnalyzer : IFollowUpBatchAnalyzer
+{
+    private readonly TaskCompletionSource _twoActive = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _activeBatchCalls;
+    private int _maxActiveBatchCalls;
+
+    public ConcurrentRecordingBatchAnalyzer(int preferredBatchSize)
+    {
+        PreferredBatchSize = preferredBatchSize;
+    }
+
+    public int PreferredBatchSize { get; }
+    public int MaxActiveBatchCalls => Volatile.Read(ref _maxActiveBatchCalls);
+
+    public Task<FollowUpAnalysis> AnalyzeAsync(EmailSnapshot email, CancellationToken cancellationToken = default) =>
+        Task.FromResult(FollowUpAnalysis.Ignore("single"));
+
+    public async Task<IReadOnlyList<FollowUpAnalysis>> AnalyzeBatchAsync(IReadOnlyList<EmailSnapshot> emails, CancellationToken cancellationToken = default)
+    {
+        var active = Interlocked.Increment(ref _activeBatchCalls);
+        TrackMaxActive(active);
+        if (active >= 2)
+        {
+            _twoActive.TrySetResult();
+        }
+
+        try
+        {
+            await Task.WhenAny(_twoActive.Task, Task.Delay(TimeSpan.FromSeconds(2), cancellationToken));
+            await Task.Delay(TimeSpan.FromMilliseconds(20), cancellationToken);
+            return emails.Select(_ => FollowUpAnalysis.Ignore("batch")).ToArray();
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activeBatchCalls);
+        }
+    }
+
+    private void TrackMaxActive(int active)
+    {
+        while (true)
+        {
+            var currentMax = Volatile.Read(ref _maxActiveBatchCalls);
+            if (active <= currentMax
+                || Interlocked.CompareExchange(ref _maxActiveBatchCalls, active, currentMax) == currentMax)
+            {
+                return;
+            }
+        }
+    }
+}
+
+sealed class CancellableBatchAnalyzer : IFollowUpBatchAnalyzer
+{
+    private readonly TaskCompletionSource _startedEnough = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly int _preferredBatchSize;
+    private int _startedBatchCalls;
+
+    public CancellableBatchAnalyzer(int preferredBatchSize)
+    {
+        _preferredBatchSize = preferredBatchSize;
+    }
+
+    public int PreferredBatchSize => _preferredBatchSize;
+    public int StartedBatchCalls => Volatile.Read(ref _startedBatchCalls);
+
+    public Task<FollowUpAnalysis> AnalyzeAsync(EmailSnapshot email, CancellationToken cancellationToken = default) =>
+        Task.FromResult(FollowUpAnalysis.Ignore("single"));
+
+    public async Task<IReadOnlyList<FollowUpAnalysis>> AnalyzeBatchAsync(IReadOnlyList<EmailSnapshot> emails, CancellationToken cancellationToken = default)
+    {
+        var started = Interlocked.Increment(ref _startedBatchCalls);
+        if (started >= 2)
+        {
+            _startedEnough.TrySetResult();
+        }
+
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return emails.Select(_ => FollowUpAnalysis.Ignore("batch")).ToArray();
+    }
+
+    public async Task WaitForStartedAsync(int expectedStarted, CancellationToken cancellationToken)
+    {
+        if (StartedBatchCalls >= expectedStarted)
+        {
+            return;
+        }
+
+        await _startedEnough.Task.WaitAsync(cancellationToken);
+    }
+}
+
 sealed class StubHttpMessageHandler : HttpMessageHandler
 {
     private readonly string _response;
@@ -3320,14 +4106,18 @@ sealed class StubHttpMessageHandler : HttpMessageHandler
     }
 
     public Uri? LastRequestUri { get; private set; }
+    public string? LastRequestBody { get; private set; }
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         LastRequestUri = request.RequestUri;
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        LastRequestBody = request.Content is null
+            ? null
+            : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(_response, Encoding.UTF8, "application/json")
-        });
+        };
     }
 }
 

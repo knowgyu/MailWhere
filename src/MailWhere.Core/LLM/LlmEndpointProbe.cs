@@ -43,13 +43,13 @@ public static class LlmEndpointProbe
         try
         {
             var llmClient = client ?? LlmClientFactory.Create(settings);
-            var raw = await llmClient.CompleteJsonAsync(
+            var completion = await llmClient.CompleteJsonAsync(
                 "You are a JSON connectivity probe. Return one JSON object only.",
                 ProbePrompt,
                 cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
 
-            using var json = JsonDocument.Parse(raw);
+            using var json = JsonDocument.Parse(completion.Content);
             return json.RootElement.ValueKind == JsonValueKind.Object
                 ? new LlmEndpointProbeResult(true, "ok", stopwatch.Elapsed, provider, model)
                 : new LlmEndpointProbeResult(false, "non-object-json", stopwatch.Elapsed, provider, model);

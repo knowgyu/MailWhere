@@ -22,7 +22,11 @@ public abstract class HttpJsonLlmClient : ILlmClient
         HttpClient.Timeout = settings.Timeout;
     }
 
-    public abstract Task<string> CompleteJsonAsync(string systemPrompt, string userPayload, CancellationToken cancellationToken = default);
+    public abstract Task<LlmCompletion> CompleteJsonAsync(
+        string systemPrompt,
+        string userPayload,
+        CancellationToken cancellationToken = default,
+        LlmRequestOptions? requestOptions = null);
 
     internal static Uri BuildUri(string endpoint, string suffix)
     {
@@ -55,7 +59,11 @@ public sealed class OllamaLlmClient : HttpJsonLlmClient
     {
     }
 
-    public override async Task<string> CompleteJsonAsync(string systemPrompt, string userPayload, CancellationToken cancellationToken = default)
+    public override async Task<LlmCompletion> CompleteJsonAsync(
+        string systemPrompt,
+        string userPayload,
+        CancellationToken cancellationToken = default,
+        LlmRequestOptions? requestOptions = null)
     {
         if (!Settings.CanCall)
         {
@@ -71,8 +79,9 @@ public sealed class OllamaLlmClient : HttpJsonLlmClient
             keep_alive = "30m",
             options = new
             {
-                temperature = 0.0,
-                num_predict = 1280,
+                temperature = 0.1,
+                num_ctx = requestOptions?.ContextTokens ?? 32768,
+                num_predict = requestOptions?.MaxOutputTokens ?? 1280,
                 top_p = 0.9
             },
             messages = new[]
@@ -84,7 +93,57 @@ public sealed class OllamaLlmClient : HttpJsonLlmClient
 
         using var response = await HttpClient.PostAsJsonAsync(BuildUri(Settings.Endpoint, "/api/chat"), body, JsonOptions, cancellationToken).ConfigureAwait(false);
         using var json = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
-        return json.RootElement.GetProperty("message").GetProperty("content").GetString() ?? string.Empty;
+        var content = json.RootElement.GetProperty("message").GetProperty("content").GetString() ?? string.Empty;
+        return new LlmCompletion(content, ExtractOllamaDiagnostics(json.RootElement, Settings.Model));
+    }
+
+    private static LlmCallDiagnostics ExtractOllamaDiagnostics(JsonElement root, string model)
+    {
+        var thinkingCharCount = TryGetThinkingCharCount(root);
+        return new LlmCallDiagnostics(
+            "Ollama",
+            model,
+            TotalDuration: TryGetNanosecondDuration(root, "total_duration"),
+            LoadDuration: TryGetNanosecondDuration(root, "load_duration"),
+            PromptEvalCount: TryGetInt(root, "prompt_eval_count"),
+            PromptEvalDuration: TryGetNanosecondDuration(root, "prompt_eval_duration"),
+            EvalCount: TryGetInt(root, "eval_count"),
+            EvalDuration: TryGetNanosecondDuration(root, "eval_duration"),
+            ThinkingCharCount: thinkingCharCount);
+    }
+
+    private static int? TryGetThinkingCharCount(JsonElement root)
+    {
+        if (!root.TryGetProperty("message", out var message)
+            || !message.TryGetProperty("thinking", out var thinking)
+            || thinking.ValueKind != JsonValueKind.String)
+        {
+            return 0;
+        }
+
+        return thinking.GetString()?.Length ?? 0;
+    }
+
+    private static int? TryGetInt(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.TryGetInt32(out var value) ? value : null;
+    }
+
+    private static TimeSpan? TryGetNanosecondDuration(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property)
+            || !property.TryGetInt64(out var nanoseconds)
+            || nanoseconds < 0)
+        {
+            return null;
+        }
+
+        return TimeSpan.FromTicks(nanoseconds / 100);
     }
 }
 
@@ -98,7 +157,11 @@ public sealed class OpenAiChatCompletionsLlmClient : HttpJsonLlmClient
         }
     }
 
-    public override async Task<string> CompleteJsonAsync(string systemPrompt, string userPayload, CancellationToken cancellationToken = default)
+    public override async Task<LlmCompletion> CompleteJsonAsync(
+        string systemPrompt,
+        string userPayload,
+        CancellationToken cancellationToken = default,
+        LlmRequestOptions? requestOptions = null)
     {
         if (!Settings.CanCall)
         {
@@ -108,8 +171,8 @@ public sealed class OpenAiChatCompletionsLlmClient : HttpJsonLlmClient
         var body = new
         {
             model = Settings.Model,
-            temperature = 0.0,
-            max_tokens = 1280,
+            temperature = 0.1,
+            max_tokens = requestOptions?.MaxOutputTokens ?? 1280,
             response_format = new { type = "json_object" },
             messages = new[]
             {
@@ -120,7 +183,8 @@ public sealed class OpenAiChatCompletionsLlmClient : HttpJsonLlmClient
 
         using var response = await HttpClient.PostAsJsonAsync(BuildUri(Settings.Endpoint, "/v1/chat/completions"), body, JsonOptions, cancellationToken).ConfigureAwait(false);
         using var json = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
-        return json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? string.Empty;
+        return new LlmCompletion(
+            json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? string.Empty);
     }
 }
 
@@ -134,7 +198,11 @@ public sealed class OpenAiResponsesLlmClient : HttpJsonLlmClient
         }
     }
 
-    public override async Task<string> CompleteJsonAsync(string systemPrompt, string userPayload, CancellationToken cancellationToken = default)
+    public override async Task<LlmCompletion> CompleteJsonAsync(
+        string systemPrompt,
+        string userPayload,
+        CancellationToken cancellationToken = default,
+        LlmRequestOptions? requestOptions = null)
     {
         if (!Settings.CanCall)
         {
@@ -145,8 +213,8 @@ public sealed class OpenAiResponsesLlmClient : HttpJsonLlmClient
         {
             model = Settings.Model,
             store = false,
-            temperature = 0.0,
-            max_output_tokens = 1280,
+            temperature = 0.1,
+            max_output_tokens = requestOptions?.MaxOutputTokens ?? 1280,
             text = new
             {
                 format = new
@@ -163,7 +231,7 @@ public sealed class OpenAiResponsesLlmClient : HttpJsonLlmClient
 
         using var response = await HttpClient.PostAsJsonAsync(BuildUri(Settings.Endpoint, "/v1/responses"), body, JsonOptions, cancellationToken).ConfigureAwait(false);
         using var json = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
-        return ExtractOutputText(json.RootElement);
+        return new LlmCompletion(ExtractOutputText(json.RootElement));
     }
 
     private static string ExtractOutputText(JsonElement root)

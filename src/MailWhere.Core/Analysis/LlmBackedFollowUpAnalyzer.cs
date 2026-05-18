@@ -13,7 +13,10 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private const int MaxCurrentMessageChars = 1300;
     private const int MaxForwardedContextChars = 900;
     private const int MaxQuotedPreviewChars = 240;
-    private const int DefaultBatchSize = 8;
+    private const int DefaultBatchSize = 12;
+    private const int DefaultContextTokens = 32768;
+    private const int MinOutputTokens = 512;
+    private const int MaxOutputTokens = 4096;
     private readonly ILlmClient _llmClient;
     private readonly IFollowUpAnalyzer _fallback;
     private readonly LlmFallbackPolicy _fallbackPolicy;
@@ -22,8 +25,10 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private int _llmSuccessCount;
     private int _llmFallbackCount;
     private int _llmFailureCount;
+    private int _llmRequestCount;
     private TimeSpan _totalLlmDuration = TimeSpan.Zero;
     private string? _lastFailureCode;
+    private LlmCallDiagnostics? _lastDiagnostics;
 
     public LlmBackedFollowUpAnalyzer(
         ILlmClient llmClient,
@@ -42,15 +47,19 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var raw = await _llmClient.CompleteJsonAsync(SystemPrompt, BuildPayload(email), cancellationToken).ConfigureAwait(false);
+            var completion = await _llmClient.CompleteJsonAsync(
+                SystemPrompt,
+                BuildPayload(email),
+                cancellationToken,
+                BuildRequestOptions(itemCount: 1)).ConfigureAwait(false);
             stopwatch.Stop();
-            if (TryParse(raw, email, out var parsed))
+            if (TryParse(completion.Content, email, out var parsed))
             {
-                RecordSuccess(stopwatch.Elapsed);
+                RecordSuccess(stopwatch.Elapsed, completion.Diagnostics);
                 return parsed;
             }
 
-            RecordFailure("invalid-json", stopwatch.Elapsed);
+            RecordFailure("invalid-json", stopwatch.Elapsed, completion.Diagnostics);
             return await HandleLlmFailureAsync(email, "invalid-json", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -77,25 +86,29 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var raw = await _llmClient.CompleteJsonAsync(BatchSystemPrompt, BuildBatchPayload(emails), cancellationToken).ConfigureAwait(false);
+            var completion = await _llmClient.CompleteJsonAsync(
+                BatchSystemPrompt,
+                BuildBatchPayload(emails),
+                cancellationToken,
+                BuildRequestOptions(emails.Count)).ConfigureAwait(false);
             stopwatch.Stop();
-            if (TryParseBatch(raw, emails, out var parsed))
+            if (TryParseBatch(completion.Content, emails, out var parsed))
             {
                 var missingItemCount = parsed.Count(item => item.IsTransientLlmFailureReview);
-                RecordBatchCompletion(stopwatch.Elapsed, parsed.Count - missingItemCount, missingItemCount, "partial-batch");
+                RecordBatchCompletion(stopwatch.Elapsed, completion.Diagnostics, parsed.Count - missingItemCount, missingItemCount, "partial-batch");
                 return missingItemCount > 0
                     ? await ApplyPartialBatchFallbackAsync(emails, parsed, cancellationToken).ConfigureAwait(false)
                     : parsed;
             }
 
-            RecordFailure("invalid-json", stopwatch.Elapsed, emails.Count);
+            RecordFailure("invalid-json", stopwatch.Elapsed, completion.Diagnostics, itemCount: emails.Count);
             return await HandleBatchLlmFailureAsync(emails, "invalid-json", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             stopwatch.Stop();
             var failureCode = SanitizeFailureCode(ex);
-            RecordFailure(failureCode, stopwatch.Elapsed, emails.Count);
+            RecordFailure(failureCode, stopwatch.Elapsed, itemCount: emails.Count);
             return await HandleBatchLlmFailureAsync(emails, failureCode, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -110,8 +123,16 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
                 _llmFallbackCount,
                 _llmFailureCount,
                 _totalLlmDuration,
-                _lastFailureCode);
+                _lastFailureCode,
+                _llmRequestCount,
+                _lastDiagnostics);
         }
+    }
+
+    private static LlmRequestOptions BuildRequestOptions(int itemCount)
+    {
+        var maxOutputTokens = Math.Clamp(256 + Math.Max(1, itemCount) * 160, MinOutputTokens, MaxOutputTokens);
+        return new LlmRequestOptions(DefaultContextTokens, maxOutputTokens);
     }
 
     private static string BuildPayload(EmailSnapshot email)
@@ -550,35 +571,41 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private static DateTimeOffset? TryParseDate(string? value) =>
         DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed) ? parsed : null;
 
-    private void RecordSuccess(TimeSpan elapsed, int itemCount = 1)
+    private void RecordSuccess(TimeSpan elapsed, LlmCallDiagnostics? diagnostics = null, int itemCount = 1)
     {
         lock (_telemetryLock)
         {
+            _llmRequestCount++;
             _llmAttemptCount += itemCount;
             _llmSuccessCount += itemCount;
             _totalLlmDuration += elapsed;
+            _lastDiagnostics = diagnostics ?? _lastDiagnostics;
         }
     }
 
-    private void RecordFailure(string failureCode, TimeSpan elapsed, int itemCount = 1)
+    private void RecordFailure(string failureCode, TimeSpan elapsed, LlmCallDiagnostics? diagnostics = null, int itemCount = 1)
     {
         lock (_telemetryLock)
         {
+            _llmRequestCount++;
             _llmAttemptCount += itemCount;
             _llmFailureCount += itemCount;
             _totalLlmDuration += elapsed;
             _lastFailureCode = failureCode;
+            _lastDiagnostics = diagnostics ?? _lastDiagnostics;
         }
     }
 
-    private void RecordBatchCompletion(TimeSpan elapsed, int successCount, int failureCount, string partialFailureCode)
+    private void RecordBatchCompletion(TimeSpan elapsed, LlmCallDiagnostics? diagnostics, int successCount, int failureCount, string partialFailureCode)
     {
         lock (_telemetryLock)
         {
+            _llmRequestCount++;
             _llmAttemptCount += successCount + failureCount;
             _llmSuccessCount += successCount;
             _llmFailureCount += failureCount;
             _totalLlmDuration += elapsed;
+            _lastDiagnostics = diagnostics ?? _lastDiagnostics;
             if (failureCount > 0)
             {
                 _lastFailureCode = partialFailureCode;
@@ -616,7 +643,8 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         8. dueAt은 메일에 근거가 있을 때만 ISO-8601로 쓰고, 없으면 null입니다. 마감일을 상상하지 마세요.
         9. 보낸 사람이 mailboxOwner이면 사용자가 보낸 메일입니다. 사용자가 "제가 보내겠습니다/공유드리겠습니다"처럼 한 약속은 promisedByMe, 사용자가 상대에게 요청하고 기다리는 것은 waitingForReply입니다.
         10. suggestedTitle에는 "메일 확인", "오늘 회신", "D-day", "할 일", "대기" 같은 분류/상태 접두어를 쓰지 마세요.
-        11. reason/evidenceSnippet/summary는 UI 보조용이므로 각각 50자 이내로 짧게 쓰세요.
+        11. suggestedTitle은 40자 이내, reason은 메일 근거를 포함해 60자 이내로 짧게 쓰세요.
+        12. markdown, bullet, 긴 원문 인용, 여러 문장 설명을 쓰지 마세요.
 
         Few-shot:
         - "영희님 내일까지 비용 자료 검토 후 회신 부탁드립니다" + mailboxOwner "김영희" => autoCreateTask, deadline/replyRequired.
@@ -632,7 +660,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private static readonly string SystemPrompt = """
         /no_think
         한국어 업무 메일 triage 전용 로컬 비서입니다. 추론 설명 없이 짧은 JSON object 하나만 반환하세요.
-        목표: 메일 제목을 요약하지 말고 "사용자가 실제로 해야 할 일"만 30자 이내 suggestedTitle로 만드세요.
+        목표: 메일 제목을 요약하지 말고 "사용자가 실제로 해야 할 일"만 40자 이내 suggestedTitle로 만드세요.
 
         """ + SharedTriagePolicyPrompt + """
 
@@ -641,11 +669,9 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
           "kind": "none|replyRequired|actionRequested|deadline|promisedByMe|waitingForReply|reviewNeeded|meeting|calendarEvent",
           "disposition": "ignore|review|autoCreateTask",
           "confidence": 0.0,
-          "suggestedTitle": "한국어 한 줄 제목",
-          "reason": "짧은 판단 이유",
-          "evidenceSnippet": "메일에서 필요한 짧은 근거",
+          "suggestedTitle": "한국어 한 줄 제목 40자 이내 또는 null",
+          "reason": "판단 이유와 메일 근거 60자 이내",
           "dueAt": "ISO-8601 또는 null",
-          "summary": "요약 한 줄",
           "actionOrigin": "currentMessage|forwardedContext|quotedHistory|none",
           "currentSenderRequested": true,
           "explicitAssignee": "명시 대상자 또는 null",
@@ -656,7 +682,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private static readonly string BatchSystemPrompt = """
         /no_think
         한국어 업무 메일 triage 전용 로컬 비서입니다. items[] metadata와 contents[] body를 id로 연결해 각각 독립 분석하고 짧은 JSON object 하나만 반환하세요.
-        출력은 {"items":[...]} 하나뿐입니다. 각 결과는 입력 id를 그대로 포함하세요. 제목보다 "사용자가 실제로 해야 할 일"을 30자 이내로 쓰세요.
+        출력은 {"items":[...]} 하나뿐입니다. 각 결과는 입력 id를 그대로 포함하세요. 제목보다 "사용자가 실제로 해야 할 일"을 40자 이내로 쓰세요.
 
         """ + SharedTriagePolicyPrompt + """
 
@@ -666,11 +692,9 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
           "kind": "none|replyRequired|actionRequested|deadline|promisedByMe|waitingForReply|reviewNeeded|meeting|calendarEvent",
           "disposition": "ignore|review|autoCreateTask",
           "confidence": 0.0,
-          "suggestedTitle": "해야 할 일 30자 이내",
-          "reason": "판단 이유 50자 이내",
-          "evidenceSnippet": "근거 50자 이내",
+          "suggestedTitle": "해야 할 일 40자 이내 또는 null",
+          "reason": "판단 이유와 근거 60자 이내",
           "dueAt": "ISO-8601 또는 null",
-          "summary": "요약 50자 이내",
           "actionOrigin": "currentMessage|forwardedContext|quotedHistory|none",
           "currentSenderRequested": true,
           "explicitAssignee": "명시 대상자 또는 null",

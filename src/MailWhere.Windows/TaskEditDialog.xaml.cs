@@ -16,8 +16,11 @@ public partial class TaskEditDialog : Window
         DueDatePicker.SelectedDate = task.DueAt?.DateTime.Date ?? DateTime.Today;
         NoDueCheck.IsChecked = task.DueAt is null;
         UpdateDueAvailability();
-        TitleText.SelectAll();
-        TitleText.Focus();
+        Loaded += (_, _) =>
+        {
+            TitleText.Focus();
+            TitleText.SelectAll();
+        };
     }
 
     public TaskEditRequest? EditRequest { get; private set; }
@@ -47,6 +50,20 @@ public partial class TaskEditDialog : Window
 
     private void UpdateDueAvailability() =>
         DueDatePicker.IsEnabled = NoDueCheck.IsChecked != true;
+
+    private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter)
+        {
+            e.Handled = true;
+            Save_Click(sender, e);
+        }
+        else if (e.Key == System.Windows.Input.Key.Escape)
+        {
+            e.Handled = true;
+            DialogResult = false;
+        }
+    }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {

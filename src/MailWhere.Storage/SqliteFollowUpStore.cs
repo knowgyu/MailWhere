@@ -75,28 +75,72 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
     {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT OR REPLACE INTO review_candidates
-            (id, source_id_hash, source_id, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, snooze_until, source_sender_display, source_received_at, source_recipient_role, suppressed)
-            VALUES ($id, $source, $sourceId, $kind, $confidence, $title, $reason, $evidence, $dueAt, $created, $snoozeUntil, $sender, $receivedAt, $recipientRole, $suppressed)
-            """;
-        command.Parameters.AddWithValue("$id", candidate.Id.ToString());
-        command.Parameters.AddWithValue("$source", candidate.SourceIdHash);
-        command.Parameters.AddWithValue("$sourceId", (object?)candidate.SourceId ?? DBNull.Value);
-        command.Parameters.AddWithValue("$kind", candidate.Analysis.Kind.ToString());
-        command.Parameters.AddWithValue("$confidence", candidate.Analysis.Confidence);
-        command.Parameters.AddWithValue("$title", EvidencePolicy.Truncate(candidate.Analysis.SuggestedTitle) ?? string.Empty);
-        command.Parameters.AddWithValue("$reason", EvidencePolicy.Truncate(candidate.Analysis.Reason) ?? "Review candidate");
-        command.Parameters.AddWithValue("$evidence", (object?)EvidencePolicy.Truncate(candidate.Analysis.EvidenceSnippet) ?? DBNull.Value);
-        command.Parameters.AddWithValue("$dueAt", (object?)candidate.Analysis.DueAt?.ToString("O") ?? DBNull.Value);
-        command.Parameters.AddWithValue("$created", candidate.CreatedAt.ToString("O"));
-        command.Parameters.AddWithValue("$snoozeUntil", (object?)candidate.SnoozeUntil?.ToUniversalTime().ToString("O") ?? DBNull.Value);
-        command.Parameters.AddWithValue("$sender", (object?)EvidencePolicy.Truncate(candidate.SourceSenderDisplay) ?? DBNull.Value);
-        command.Parameters.AddWithValue("$receivedAt", (object?)candidate.SourceReceivedAt?.ToString("O") ?? DBNull.Value);
-        command.Parameters.AddWithValue("$recipientRole", candidate.SourceRecipientRole.ToString());
-        command.Parameters.AddWithValue("$suppressed", candidate.Suppressed ? 1 : 0);
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await SaveReviewCandidateAsync(connection, null, candidate, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> TrySaveTaskWithProcessedSourcesAsync(LocalTaskItem task, string? actionSignature, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        using var transaction = connection.BeginTransaction();
+
+        if (!await TryMarkSourceProcessedAsync(connection, transaction, task.SourceIdHash, cancellationToken).ConfigureAwait(false))
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        if (!await TryMarkActionSignatureOrCommitDuplicateAsync(connection, transaction, actionSignature, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        await SaveTaskAsync(connection, transaction, task, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    public async Task<bool> TrySaveReviewCandidateWithProcessedSourcesAsync(ReviewCandidate candidate, string? actionSignature, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        using var transaction = connection.BeginTransaction();
+
+        if (!await TryMarkSourceProcessedAsync(connection, transaction, candidate.SourceIdHash, cancellationToken).ConfigureAwait(false))
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        if (!await TryMarkActionSignatureOrCommitDuplicateAsync(connection, transaction, actionSignature, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        await SaveReviewCandidateAsync(connection, transaction, candidate, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    public async Task<bool> TryMarkProcessedSourcesAsync(string sourceIdHash, string? actionSignature, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        using var transaction = connection.BeginTransaction();
+
+        if (!await TryMarkSourceProcessedAsync(connection, transaction, sourceIdHash, cancellationToken).ConfigureAwait(false))
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        if (!await TryMarkActionSignatureOrCommitDuplicateAsync(connection, transaction, actionSignature, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     public async Task<bool> HasOpenLlmFailureReviewCandidateForSourceAsync(string sourceIdHash, CancellationToken cancellationToken = default)
@@ -153,11 +197,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
     {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var command = connection.CreateCommand();
-        command.CommandText = "INSERT OR IGNORE INTO processed_sources (source_id_hash, processed_at) VALUES ($source, $processedAt)";
-        command.Parameters.AddWithValue("$source", sourceIdHash);
-        command.Parameters.AddWithValue("$processedAt", DateTimeOffset.UtcNow.ToString("O"));
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await MarkSourceProcessedAsync(connection, null, sourceIdHash, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task RecordReplyObservationAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
@@ -355,6 +395,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             Kind: candidate.Analysis.Kind);
 
         await SaveTaskAsync(connection, transaction, task, cancellationToken).ConfigureAwait(false);
+        await MarkSourceProcessedAsync(connection, transaction, candidate.SourceIdHash, cancellationToken).ConfigureAwait(false);
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return task;
@@ -383,6 +424,13 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         using var transaction = connection.BeginTransaction();
+
+        var candidate = await ReadActiveReviewCandidateAsync(connection, transaction, candidateId, cancellationToken).ConfigureAwait(false);
+        if (candidate is null)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
 
         var update = connection.CreateCommand();
         update.Transaction = transaction;
@@ -413,27 +461,14 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             return false;
         }
 
+        await MarkSourceProcessedAsync(connection, transaction, candidate.SourceIdHash, cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return true;
     }
 
     public async Task<bool> ArchiveTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE tasks
-            SET status = $status,
-                snooze_until = NULL,
-                updated_at = $updatedAt
-            WHERE id = $id
-              AND status IN ('Open','Snoozed')
-            """;
-        command.Parameters.AddWithValue("$id", taskId.ToString());
-        command.Parameters.AddWithValue("$status", LocalTaskStatus.Archived.ToString());
-        command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
-        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+        return await FinalizeTaskAsync(taskId, LocalTaskStatus.Archived, now, clearSnooze: true, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> RestoreArchivedTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
@@ -457,39 +492,61 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 
     public async Task<bool> DismissTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE tasks
-            SET status = $status,
-                updated_at = $updatedAt
-            WHERE id = $id
-              AND status IN ('Open','Snoozed')
-            """;
-        command.Parameters.AddWithValue("$id", taskId.ToString());
-        command.Parameters.AddWithValue("$status", LocalTaskStatus.Dismissed.ToString());
-        command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
-        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+        return await FinalizeTaskAsync(taskId, LocalTaskStatus.Dismissed, now, clearSnooze: false, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> CompleteTaskAsync(Guid taskId, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
+        return await FinalizeTaskAsync(taskId, LocalTaskStatus.Done, now, clearSnooze: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> FinalizeTaskAsync(Guid taskId, LocalTaskStatus status, DateTimeOffset now, bool clearSnooze, CancellationToken cancellationToken)
+    {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        using var transaction = connection.BeginTransaction();
+
+        var lookup = connection.CreateCommand();
+        lookup.Transaction = transaction;
+        lookup.CommandText = "SELECT source_id_hash FROM tasks WHERE id = $id AND status IN ('Open','Snoozed') LIMIT 1";
+        lookup.Parameters.AddWithValue("$id", taskId.ToString());
+        string? sourceHash;
+        await using (var reader = await lookup.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            sourceHash = reader.IsDBNull(0) ? null : reader.GetString(0);
+        }
+
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE tasks
             SET status = $status,
-                snooze_until = NULL,
+                snooze_until = CASE WHEN $clearSnooze = 1 THEN NULL ELSE snooze_until END,
                 updated_at = $updatedAt
             WHERE id = $id
               AND status IN ('Open','Snoozed')
             """;
         command.Parameters.AddWithValue("$id", taskId.ToString());
-        command.Parameters.AddWithValue("$status", LocalTaskStatus.Done.ToString());
+        command.Parameters.AddWithValue("$status", status.ToString());
+        command.Parameters.AddWithValue("$clearSnooze", clearSnooze ? 1 : 0);
         command.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
-        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+        var updated = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+        if (!updated)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        await MarkSourceProcessedAsync(connection, transaction, sourceHash, cancellationToken).ConfigureAwait(false);
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     public async Task<bool> SnoozeTaskAsync(Guid taskId, DateTimeOffset until, DateTimeOffset now, CancellationToken cancellationToken = default)
@@ -697,6 +754,91 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         command.Parameters.AddWithValue("$conversation", (object?)EvidencePolicy.Truncate(task.SourceConversationId) ?? DBNull.Value);
         command.Parameters.AddWithValue("$recipients", (object?)SerializeRecipients(task.SourceRecipientDisplayNames) ?? DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task SaveReviewCandidateAsync(SqliteConnection connection, SqliteTransaction? transaction, ReviewCandidate candidate, CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR REPLACE INTO review_candidates
+            (id, source_id_hash, source_id, kind, confidence, suggested_title, reason, evidence_snippet, due_at, created_at, snooze_until, source_sender_display, source_received_at, source_recipient_role, suppressed)
+            VALUES ($id, $source, $sourceId, $kind, $confidence, $title, $reason, $evidence, $dueAt, $created, $snoozeUntil, $sender, $receivedAt, $recipientRole, $suppressed)
+            """;
+        command.Parameters.AddWithValue("$id", candidate.Id.ToString());
+        command.Parameters.AddWithValue("$source", candidate.SourceIdHash);
+        command.Parameters.AddWithValue("$sourceId", (object?)candidate.SourceId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$kind", candidate.Analysis.Kind.ToString());
+        command.Parameters.AddWithValue("$confidence", candidate.Analysis.Confidence);
+        command.Parameters.AddWithValue("$title", EvidencePolicy.Truncate(candidate.Analysis.SuggestedTitle) ?? string.Empty);
+        command.Parameters.AddWithValue("$reason", EvidencePolicy.Truncate(candidate.Analysis.Reason) ?? "Review candidate");
+        command.Parameters.AddWithValue("$evidence", (object?)EvidencePolicy.Truncate(candidate.Analysis.EvidenceSnippet) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$dueAt", (object?)candidate.Analysis.DueAt?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$created", candidate.CreatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$snoozeUntil", (object?)candidate.SnoozeUntil?.ToUniversalTime().ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$sender", (object?)EvidencePolicy.Truncate(candidate.SourceSenderDisplay) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$receivedAt", (object?)candidate.SourceReceivedAt?.ToString("O") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$recipientRole", candidate.SourceRecipientRole.ToString());
+        command.Parameters.AddWithValue("$suppressed", candidate.Suppressed ? 1 : 0);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task MarkSourceProcessedAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string? sourceIdHash,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceIdHash))
+        {
+            return;
+        }
+
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "INSERT OR IGNORE INTO processed_sources (source_id_hash, processed_at) VALUES ($source, $processedAt)";
+        command.Parameters.AddWithValue("$source", sourceIdHash);
+        command.Parameters.AddWithValue("$processedAt", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> TryMarkSourceProcessedAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string? sourceIdHash,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceIdHash))
+        {
+            return false;
+        }
+
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "INSERT OR IGNORE INTO processed_sources (source_id_hash, processed_at) VALUES ($source, $processedAt)";
+        command.Parameters.AddWithValue("$source", sourceIdHash);
+        command.Parameters.AddWithValue("$processedAt", DateTimeOffset.UtcNow.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
+    private static async Task<bool> TryMarkActionSignatureOrCommitDuplicateAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string? actionSignature,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(actionSignature))
+        {
+            return true;
+        }
+
+        if (await TryMarkSourceProcessedAsync(connection, transaction, actionSignature, cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return false;
     }
 
     private static async Task<ReviewCandidate?> ReadActiveReviewCandidateAsync(SqliteConnection connection, SqliteTransaction? transaction, Guid candidateId, CancellationToken cancellationToken)

@@ -8,7 +8,7 @@ public static partial class FollowUpActionSignature
 {
     public static string? Create(EmailSnapshot email, FollowUpAnalysis analysis)
     {
-        if (analysis.Disposition != AnalysisDisposition.AutoCreateTask)
+        if (!ShouldCreate(analysis))
         {
             return null;
         }
@@ -25,6 +25,16 @@ public static partial class FollowUpActionSignature
         }
 
         return StableHash.Create($"action|{threadKey}|{analysis.Kind}|{dueKey}|{titleKey}");
+    }
+
+    private static bool ShouldCreate(FollowUpAnalysis analysis)
+    {
+        if (analysis.Disposition is not (AnalysisDisposition.AutoCreateTask or AnalysisDisposition.Review))
+        {
+            return false;
+        }
+
+        return analysis.Kind != FollowUpKind.None && !analysis.IsTransientLlmFailureReview;
     }
 
     private static string NormalizeKey(string? value)

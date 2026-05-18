@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using MailWhere.Core.Analysis;
 using MailWhere.Core.Capabilities;
@@ -215,8 +216,11 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (TasksList.SelectedItem is TaskListItem { Task: { } task })
+            if (e.OriginalSource is DependencyObject source
+                && FindVisualAncestor<System.Windows.Controls.Primitives.ButtonBase>(source) is null
+                && FindVisualAncestor<ListBoxItem>(source)?.DataContext is TaskListItem { Task: { } task })
             {
+                e.Handled = true;
                 await EditTaskAsync(task);
             }
         }
@@ -372,7 +376,9 @@ public partial class MainWindow : Window
             var request = new MailScanRequest(
                 _settings.RecentScanMaxItems,
                 IncludeBody: true,
-                now.AddDays(-_settings.RecentScanDays));
+                now.AddDays(-_settings.RecentScanDays),
+                _settings.LlmInitialConcurrency,
+                _settings.LlmMaxConcurrency);
             var progress = new Progress<MailScanProgress>(UpdateScanProgress);
 
             var summary = await scanner.ScanAsync(request, progress, scanCancellationToken);
@@ -1280,6 +1286,28 @@ public partial class MainWindow : Window
 
     private static TaskListItem? GetTaskListItem(object sender) =>
         sender is FrameworkElement { Tag: TaskListItem item } ? item : null;
+
+    private static T? FindVisualAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T match)
+            {
+                return match;
+            }
+
+            try
+            {
+                current = VisualTreeHelper.GetParent(current);
+            }
+            catch (InvalidOperationException)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
 
     private sealed class TaskListItem
     {

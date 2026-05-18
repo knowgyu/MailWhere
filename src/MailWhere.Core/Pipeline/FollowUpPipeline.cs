@@ -14,6 +14,12 @@ public enum PipelineOutcomeKind
 
 public sealed record PipelineOutcome(PipelineOutcomeKind Kind, FollowUpAnalysis? Analysis = null, Guid? ItemId = null);
 
+public sealed record PreparedPipelineBatch(
+    IReadOnlyList<EmailSnapshot> Emails,
+    IReadOnlyList<PipelineOutcome?> Outcomes,
+    IReadOnlyList<int> PendingIndexes,
+    IReadOnlyList<EmailSnapshot> PendingEmails);
+
 public sealed class FollowUpPipeline
 {
     private readonly IFollowUpAnalyzer _analyzer;
@@ -28,20 +34,15 @@ public sealed class FollowUpPipeline
     }
 
     public int PreferredBatchSize => _analyzer is IFollowUpBatchAnalyzer batchAnalyzer
-        ? Math.Clamp(batchAnalyzer.PreferredBatchSize, 1, 8)
+        ? Math.Clamp(batchAnalyzer.PreferredBatchSize, 1, 16)
         : 1;
 
     public async Task<PipelineOutcome> ProcessAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
     {
-        await _store.RecordReplyObservationAsync(email, cancellationToken).ConfigureAwait(false);
-
-        if (await _store.HasProcessedSourceAsync(email.SourceHash, cancellationToken).ConfigureAwait(false))
-        {
-            return new PipelineOutcome(PipelineOutcomeKind.Duplicate);
-        }
-
-        var analysis = await _analyzer.AnalyzeAsync(email, cancellationToken).ConfigureAwait(false);
-        return await PersistAnalysisAsync(email, analysis, cancellationToken).ConfigureAwait(false);
+        var batch = await PrepareBatchAsync(new[] { email }, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var analyses = await AnalyzePreparedBatchAsync(batch, cancellationToken).ConfigureAwait(false);
+        var outcomes = await PersistPreparedBatchAsync(batch, analyses, cancellationToken).ConfigureAwait(false);
+        return outcomes[0];
     }
 
     public async Task<IReadOnlyList<PipelineOutcome>> ProcessBatchAsync(IReadOnlyList<EmailSnapshot> emails, CancellationToken cancellationToken = default)
@@ -51,6 +52,17 @@ public sealed class FollowUpPipeline
             return Array.Empty<PipelineOutcome>();
         }
 
+        var reservedSourceHashes = new HashSet<string>(StringComparer.Ordinal);
+        var prepared = await PrepareBatchAsync(emails, reservedSourceHashes, cancellationToken).ConfigureAwait(false);
+        var analyses = await AnalyzePreparedBatchAsync(prepared, cancellationToken).ConfigureAwait(false);
+        return await PersistPreparedBatchAsync(prepared, analyses, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<PreparedPipelineBatch> PrepareBatchAsync(
+        IReadOnlyList<EmailSnapshot> emails,
+        ISet<string>? reservedSourceHashes = null,
+        CancellationToken cancellationToken = default)
+    {
         var outcomes = new PipelineOutcome[emails.Count];
         var pendingIndexes = new List<int>(emails.Count);
         var pendingEmails = new List<EmailSnapshot>(emails.Count);
@@ -64,46 +76,84 @@ public sealed class FollowUpPipeline
                 continue;
             }
 
+            if (reservedSourceHashes is not null && !reservedSourceHashes.Add(emails[i].SourceHash))
+            {
+                outcomes[i] = new PipelineOutcome(PipelineOutcomeKind.Duplicate);
+                continue;
+            }
+
             pendingIndexes.Add(i);
             pendingEmails.Add(emails[i]);
         }
 
-        if (pendingEmails.Count == 0)
+        return new PreparedPipelineBatch(
+            emails.ToArray(),
+            outcomes,
+            pendingIndexes.ToArray(),
+            pendingEmails.ToArray());
+    }
+
+    public async Task<IReadOnlyList<FollowUpAnalysis>> AnalyzePreparedBatchAsync(
+        PreparedPipelineBatch prepared,
+        CancellationToken cancellationToken = default)
+    {
+        if (prepared.PendingEmails.Count == 0)
         {
-            return outcomes;
+            return Array.Empty<FollowUpAnalysis>();
         }
 
-        IReadOnlyList<FollowUpAnalysis> analyses;
-        if (_analyzer is IFollowUpBatchAnalyzer batchAnalyzer && pendingEmails.Count > 1)
+        if (_analyzer is IFollowUpBatchAnalyzer batchAnalyzer && prepared.PendingEmails.Count > 1)
         {
-            analyses = await batchAnalyzer.AnalyzeBatchAsync(pendingEmails, cancellationToken).ConfigureAwait(false);
-            if (analyses.Count != pendingEmails.Count)
+            var analyses = await batchAnalyzer.AnalyzeBatchAsync(prepared.PendingEmails, cancellationToken).ConfigureAwait(false);
+            if (analyses.Count != prepared.PendingEmails.Count)
             {
                 throw new InvalidOperationException("Batch analyzer returned a mismatched result count.");
             }
+
+            return analyses;
         }
-        else
+
+        var sequential = new List<FollowUpAnalysis>(prepared.PendingEmails.Count);
+        foreach (var email in prepared.PendingEmails)
         {
-            var sequential = new List<FollowUpAnalysis>(pendingEmails.Count);
-            foreach (var email in pendingEmails)
-            {
-                sequential.Add(await _analyzer.AnalyzeAsync(email, cancellationToken).ConfigureAwait(false));
-            }
-
-            analyses = sequential;
+            sequential.Add(await _analyzer.AnalyzeAsync(email, cancellationToken).ConfigureAwait(false));
         }
 
-        for (var i = 0; i < pendingEmails.Count; i++)
+        return sequential;
+    }
+
+    public async Task<IReadOnlyList<PipelineOutcome>> PersistPreparedBatchAsync(
+        PreparedPipelineBatch prepared,
+        IReadOnlyList<FollowUpAnalysis> analyses,
+        CancellationToken cancellationToken = default)
+    {
+        if (analyses.Count != prepared.PendingEmails.Count)
         {
-            outcomes[pendingIndexes[i]] = await PersistAnalysisAsync(pendingEmails[i], analyses[i], cancellationToken).ConfigureAwait(false);
+            throw new InvalidOperationException("Prepared analysis count does not match pending emails.");
         }
 
-        return outcomes;
+        var outcomes = prepared.Outcomes.ToArray();
+        for (var i = 0; i < prepared.PendingEmails.Count; i++)
+        {
+            outcomes[prepared.PendingIndexes[i]] = await PersistAnalysisAsync(prepared.PendingEmails[i], analyses[i], cancellationToken).ConfigureAwait(false);
+        }
+
+        if (outcomes.Any(outcome => outcome is null))
+        {
+            throw new InvalidOperationException("Prepared pipeline batch was not fully resolved.");
+        }
+
+        return outcomes.Select(outcome => outcome!).ToArray();
     }
 
     private async Task<PipelineOutcome> PersistAnalysisAsync(EmailSnapshot email, FollowUpAnalysis analysis, CancellationToken cancellationToken)
     {
         var now = _timeProvider.GetUtcNow();
+
+        if (await _store.HasProcessedSourceAsync(email.SourceHash, cancellationToken).ConfigureAwait(false))
+        {
+            return new PipelineOutcome(PipelineOutcomeKind.Duplicate, analysis);
+        }
 
         if (analysis.IsTransientLlmFailureReview)
         {
@@ -130,28 +180,28 @@ public sealed class FollowUpPipeline
         {
             case AnalysisDisposition.AutoCreateTask:
                 var task = LocalTaskItem.FromAnalysis(email, analysis, now);
-                await _store.SaveTaskAsync(task, cancellationToken).ConfigureAwait(false);
-                await _store.MarkSourceProcessedAsync(email.SourceHash, cancellationToken).ConfigureAwait(false);
-                if (actionSignature is not null)
+                if (!await _store.TrySaveTaskWithProcessedSourcesAsync(task, actionSignature, cancellationToken).ConfigureAwait(false))
                 {
-                    await _store.MarkSourceProcessedAsync(actionSignature, cancellationToken).ConfigureAwait(false);
+                    return new PipelineOutcome(PipelineOutcomeKind.Duplicate, analysis);
                 }
 
                 return new PipelineOutcome(PipelineOutcomeKind.TaskCreated, analysis, task.Id);
 
             case AnalysisDisposition.Review:
                 var candidate = ReviewCandidate.FromAnalysis(email, analysis, now);
-                await _store.SaveReviewCandidateAsync(candidate, cancellationToken).ConfigureAwait(false);
-                await _store.MarkSourceProcessedAsync(email.SourceHash, cancellationToken).ConfigureAwait(false);
-                if (actionSignature is not null)
+                if (!await _store.TrySaveReviewCandidateWithProcessedSourcesAsync(candidate, actionSignature, cancellationToken).ConfigureAwait(false))
                 {
-                    await _store.MarkSourceProcessedAsync(actionSignature, cancellationToken).ConfigureAwait(false);
+                    return new PipelineOutcome(PipelineOutcomeKind.Duplicate, analysis);
                 }
 
                 return new PipelineOutcome(PipelineOutcomeKind.ReviewCandidateCreated, analysis, candidate.Id);
 
             default:
-                await _store.MarkSourceProcessedAsync(email.SourceHash, cancellationToken).ConfigureAwait(false);
+                if (!await _store.TryMarkProcessedSourcesAsync(email.SourceHash, actionSignature, cancellationToken).ConfigureAwait(false))
+                {
+                    return new PipelineOutcome(PipelineOutcomeKind.Duplicate, analysis);
+                }
+
                 return new PipelineOutcome(PipelineOutcomeKind.Ignored, analysis);
         }
     }
