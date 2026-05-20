@@ -48,6 +48,8 @@ public sealed class TrayHost : IDisposable, IUserNotificationSink
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("열기", null, (_, _) => ShowWindow());
         menu.Items.Add("오늘 업무 보기", null, async (_, _) => await ShowTodayBoardAsync());
+        menu.Items.Add("보관 제안 확인", null, async (_, _) => await _window.OpenClosureSuggestionsFromTrayAsync());
+        menu.Items.Add("주간 리뷰", null, async (_, _) => await _window.OpenWeeklyReviewFromTrayAsync());
         menu.Items.Add("알림 테스트", null, async (_, _) => await ShowAsync(new UserNotification(UserNotificationKind.Reminder, "내일 마감 · 비용 자료 회신", "09:00까지 검토 후 회신이 필요합니다.", "tray-notification-test")));
         menu.Items.Add("종료", null, (_, _) =>
         {

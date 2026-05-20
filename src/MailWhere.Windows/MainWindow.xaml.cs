@@ -327,17 +327,13 @@ public partial class MainWindow : Window
 
     private async void OpenReviewCandidates_Click(object sender, RoutedEventArgs e)
     {
+        if (_boardSnapshot?.Candidates.Count == 0 && _boardSnapshot.ClosureSuggestions.Count > 0)
+        {
+            await OpenClosureSuggestionsAsync();
+            return;
+        }
+
         await OpenReviewCandidatesWindowAsync();
-    }
-
-    private async void OpenClosureSuggestions_Click(object sender, RoutedEventArgs e)
-    {
-        await OpenClosureSuggestionsAsync();
-    }
-
-    private async void OpenWeeklyReview_Click(object sender, RoutedEventArgs e)
-    {
-        await OpenWeeklyReviewAsync();
     }
 
     private async void OpenArchive_Click(object sender, RoutedEventArgs e)
@@ -612,23 +608,19 @@ public partial class MainWindow : Window
             TasksList.Items.Add(TaskListItem.FromTask(task, now, progress));
         }
 
-        UpdateReviewCandidatesButton(snapshot.Candidates.Count);
-        UpdateClosureSuggestionsButton(snapshot.ClosureSuggestions.Count);
+        UpdateReviewCandidatesButton(snapshot.Candidates.Count, snapshot.ClosureSuggestions.Count);
         UpdateMainFilterHighlight();
     }
 
-    private void UpdateReviewCandidatesButton(int count)
+    private void UpdateReviewCandidatesButton(int reviewCandidateCount, int closureSuggestionCount)
     {
-        OpenReviewCandidatesButton.Content = count == 0
+        var total = reviewCandidateCount + closureSuggestionCount;
+        OpenReviewCandidatesButton.Content = total == 0
             ? "확인 필요"
-            : $"확인 필요 {count}";
-    }
-
-    private void UpdateClosureSuggestionsButton(int count)
-    {
-        OpenClosureSuggestionsButton.Content = count == 0
-            ? "보관 제안"
-            : $"보관 제안 {count}";
+            : $"확인 필요 {total}";
+        OpenReviewCandidatesButton.ToolTip = closureSuggestionCount == 0
+            ? null
+            : $"보관 제안 {closureSuggestionCount}개 포함";
     }
 
     private static DateTimeOffset SortKey(LocalTaskItem task) =>
@@ -656,11 +648,15 @@ public partial class MainWindow : Window
     {
         var store = await GetStoreAsync();
         var candidates = await store.ListReviewCandidatesAsync();
-        UpdateReviewCandidatesButton(candidates.Count);
         _reviewCandidatesWindow?.Refresh(candidates, CanRetryLlmFailures);
         if (_boardSnapshot is not null)
         {
             _boardSnapshot = _boardSnapshot with { Candidates = candidates };
+            UpdateReviewCandidatesButton(_boardSnapshot.Candidates.Count, _boardSnapshot.ClosureSuggestions.Count);
+        }
+        else
+        {
+            UpdateReviewCandidatesButton(candidates.Count, 0);
         }
         return candidates;
     }
@@ -669,10 +665,14 @@ public partial class MainWindow : Window
     {
         var store = await GetStoreAsync();
         var suggestions = await store.ListWaitingClosureSuggestionsAsync();
-        UpdateClosureSuggestionsButton(suggestions.Count);
         if (_boardSnapshot is not null)
         {
             _boardSnapshot = _boardSnapshot with { ClosureSuggestions = suggestions };
+            UpdateReviewCandidatesButton(_boardSnapshot.Candidates.Count, _boardSnapshot.ClosureSuggestions.Count);
+        }
+        else
+        {
+            UpdateReviewCandidatesButton(0, suggestions.Count);
         }
 
         return suggestions;
@@ -972,6 +972,12 @@ public partial class MainWindow : Window
             : "이미 처리된 보관 제안입니다.";
     }
 
+    public async Task OpenClosureSuggestionsFromTrayAsync()
+    {
+        ShowShell(refresh: false);
+        await OpenClosureSuggestionsAsync();
+    }
+
     private async Task OpenWeeklyReviewAsync()
     {
         var store = await GetStoreAsync();
@@ -982,6 +988,12 @@ public partial class MainWindow : Window
         var summary = new WeeklyReviewPlanner().Build(openTasks, archivedTasks, candidates, suggestions, DateTimeOffset.Now);
         System.Windows.MessageBox.Show(summary.ToKoreanSummary(), "MailWhere 주간 리뷰", MessageBoxButton.OK, MessageBoxImage.Information);
         StatusText.Text = "주간 리뷰를 열었습니다.";
+    }
+
+    public async Task OpenWeeklyReviewFromTrayAsync()
+    {
+        ShowShell(refresh: false);
+        await OpenWeeklyReviewAsync();
     }
 
     private async Task<bool> SnoozeTaskAsync(LocalTaskItem task, DateTimeOffset until)

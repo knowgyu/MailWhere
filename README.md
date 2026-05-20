@@ -91,7 +91,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.7.0-win-x64-portable.zip
+artifacts/MailWhere-v0.7.1-win-x64-portable.zip
 ```
 
 ## LLM endpoint
