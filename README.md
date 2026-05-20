@@ -24,7 +24,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - 규칙 기반 업무 후보 탐지와 선택형 LLM 분석
 - Ollama native `/api/chat`, OpenAI-compatible `/v1/chat/completions`, `/v1/responses` endpoint 지원
 - endpoint 모델 목록 불러오기와 LLM 연결 테스트
-- LLM 시도/성공/fallback/실패 요약과 확인 필요 창의 **AI 분석 다시 시도**
+- LLM 시도/성공/fallback/실패 요약과 확인 필요 창의 **실패한 AI 분석 다시 시도**
 - 답장/전달 메일, To/CC 수신 여부, 담당자 표현을 보수적으로 판단
 - 같은 스레드의 동일 업무 후보 중복 생성 억제
 - 낮은 확신/LLM 실패 후보는 기본 업무 보드에 섞지 않고 별도 검토 후보 창에서 처리

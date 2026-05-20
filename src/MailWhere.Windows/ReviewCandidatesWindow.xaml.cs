@@ -13,6 +13,8 @@ public partial class ReviewCandidatesWindow : Window
     private readonly Func<ReviewCandidate, Task> _snoozeAsync;
     private readonly Func<ReviewCandidate, Task> _ignoreAsync;
     private readonly Func<Task<ReviewCandidateRetrySummary>> _retryLlmFailuresAsync;
+    private readonly HashSet<Guid> _busyCandidateIds = new();
+    private bool _canRetryLlmFailures;
 
     public ReviewCandidatesWindow(
         IReadOnlyList<ReviewCandidate> candidates,
@@ -20,7 +22,8 @@ public partial class ReviewCandidatesWindow : Window
         Func<ReviewCandidate, Task> openMailAsync,
         Func<ReviewCandidate, Task> snoozeAsync,
         Func<ReviewCandidate, Task> ignoreAsync,
-        Func<Task<ReviewCandidateRetrySummary>> retryLlmFailuresAsync)
+        Func<Task<ReviewCandidateRetrySummary>> retryLlmFailuresAsync,
+        bool canRetryLlmFailures)
     {
         InitializeComponent();
         _candidates = candidates;
@@ -29,12 +32,18 @@ public partial class ReviewCandidatesWindow : Window
         _snoozeAsync = snoozeAsync;
         _ignoreAsync = ignoreAsync;
         _retryLlmFailuresAsync = retryLlmFailuresAsync;
+        _canRetryLlmFailures = canRetryLlmFailures;
         Render();
     }
 
-    public void Refresh(IReadOnlyList<ReviewCandidate> candidates)
+    public void Refresh(IReadOnlyList<ReviewCandidate> candidates, bool? canRetryLlmFailures = null)
     {
         _candidates = candidates;
+        if (canRetryLlmFailures is not null)
+        {
+            _canRetryLlmFailures = canRetryLlmFailures.Value;
+        }
+
         Render();
     }
 
@@ -42,7 +51,7 @@ public partial class ReviewCandidatesWindow : Window
     {
         var now = DateTimeOffset.Now;
         var rows = _candidates
-            .Select(candidate => ReviewCandidateRow.FromCandidate(candidate, now))
+            .Select(candidate => ReviewCandidateRow.FromCandidate(candidate, now, _busyCandidateIds.Contains(candidate.Id)))
             .ToArray();
         CandidatesList.ItemsSource = rows;
         CandidatesList.Visibility = rows.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -52,8 +61,15 @@ public partial class ReviewCandidatesWindow : Window
             CandidatesList.SelectedIndex = 0;
         }
 
-        RetryLlmFailuresButton.IsEnabled = _candidates.Any(candidate => candidate.Analysis.IsTransientLlmFailureReview);
-        StatusText.Text = rows.Length == 0 ? "표시할 확인 필요 항목이 없습니다." : $"확인 필요 {rows.Length}개";
+        var hasRetryableFailure = _candidates.Any(candidate => candidate.Analysis.IsTransientLlmFailureReview);
+        RetryLlmFailuresButton.IsEnabled = hasRetryableFailure && _canRetryLlmFailures;
+        StatusText.Text = rows.Length == 0
+            ? "표시할 확인 필요 항목이 없습니다."
+            : hasRetryableFailure && _canRetryLlmFailures
+                ? $"확인 필요 {rows.Length}개 · 실패한 AI 분석을 다시 시도할 수 있습니다"
+                : hasRetryableFailure
+                    ? $"확인 필요 {rows.Length}개 · AI 설정이 꺼져 다시 시도할 수 없습니다"
+                    : $"확인 필요 {rows.Length}개 · AI 실패 항목이 없어 다시 시도는 비활성화됩니다";
     }
 
     private async void Approve_Click(object sender, RoutedEventArgs e) => await RunAsync(sender, _approveAsync, "등록했습니다.");
@@ -76,7 +92,7 @@ public partial class ReviewCandidatesWindow : Window
         }
         finally
         {
-            RetryLlmFailuresButton.IsEnabled = _candidates.Any(candidate => candidate.Analysis.IsTransientLlmFailureReview);
+            RetryLlmFailuresButton.IsEnabled = _canRetryLlmFailures && _candidates.Any(candidate => candidate.Analysis.IsTransientLlmFailureReview);
         }
     }
 
@@ -98,14 +114,28 @@ public partial class ReviewCandidatesWindow : Window
 
     private async Task ExecuteAsync(ReviewCandidate candidate, Func<ReviewCandidate, Task> action, string successMessage)
     {
+        if (!_busyCandidateIds.Add(candidate.Id))
+        {
+            StatusText.Text = "이미 처리 중인 항목입니다.";
+            return;
+        }
+
+        Render();
+        string? finalStatus = null;
         try
         {
             await action(candidate);
-            StatusText.Text = successMessage;
+            finalStatus = successMessage;
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"처리하지 못했습니다: {ex.GetType().Name}";
+            finalStatus = $"처리하지 못했습니다: {ex.GetType().Name}";
+        }
+        finally
+        {
+            _busyCandidateIds.Remove(candidate.Id);
+            Render();
+            StatusText.Text = finalStatus ?? StatusText.Text;
         }
     }
 
@@ -178,12 +208,13 @@ public partial class ReviewCandidatesWindow : Window
                + (summary.SourceLookupFailureCount > 0 ? $" · 원본 조회 실패 {summary.SourceLookupFailureCount}개" : string.Empty);
     }
 
-    private sealed record ReviewCandidateRow(ReviewCandidate Candidate, string Title, string Meta, bool CanOpen)
+    private sealed record ReviewCandidateRow(ReviewCandidate Candidate, string Title, string Meta, bool CanOpen, bool CanAct)
     {
-        public static ReviewCandidateRow FromCandidate(ReviewCandidate candidate, DateTimeOffset now) => new(
+        public static ReviewCandidateRow FromCandidate(ReviewCandidate candidate, DateTimeOffset now, bool isBusy) => new(
             candidate,
             FollowUpPresentation.ActionTitle(candidate.Analysis.SuggestedTitle),
-            $"{FollowUpPresentation.HumanDueText(candidate.Analysis.DueAt, now)} · {FollowUpPresentation.HumanSenderText(candidate.SourceSenderDisplay, "알 수 없음")}",
-            !string.IsNullOrWhiteSpace(candidate.SourceId));
+            $"{FollowUpPresentation.HumanDueText(candidate.Analysis.DueAt, now)} · {FollowUpPresentation.HumanSenderText(candidate.SourceSenderDisplay, "알 수 없음")}" + (isBusy ? " · 처리 중" : string.Empty),
+            !isBusy && !string.IsNullOrWhiteSpace(candidate.SourceId),
+            !isBusy);
     }
 }

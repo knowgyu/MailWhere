@@ -66,7 +66,7 @@ MailWhere의 핵심은 “메일 앱을 한 번 더 열어보게 만드는 도�
 4. **확인 필요 단축키 단순화**: `Alt+A/S/I` 대신 창 단위 `등록(Y)`, `나중에(S)`, `무시(I)`, `Esc` 닫기를 쓴다.
 5. **확인 필요 버튼 순서**: 행 액션은 `원본 열기`를 가장 앞에 둔다.
 6. **확인 필요 창 톤 통일**: main board와 같은 rounded card/list/button tone을 공유한다.
-7. **용어 정리**: 사용자-facing 명칭은 `확인 필요`, 재시도 버튼은 `AI 분석 다시 시도`로 정리했다.
+7. **용어 정리**: 사용자-facing 명칭은 `확인 필요`, 재시도 버튼은 `실패한 AI 분석 다시 시도`로 정리했다.
 8. **프롬프트 payload 정리**: static system prompt는 유지하고, user payload는 `analysisDate`/`timezone` metadata 뒤 final `content`/`contents`에 본문을 두는 구조로 바꿨다.
 
 내가 추가로 보는 개선 후보:

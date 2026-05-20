@@ -108,6 +108,9 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("OpenAI Responses client extracts output text", OpenAiResponsesClientExtractsOutputText),
     ("LLM model catalog loads Ollama models", LlmModelCatalogLoadsOllamaModels),
     ("LLM model catalog loads OpenAI-compatible models", LlmModelCatalogLoadsOpenAiCompatibleModels),
+    ("Automatic scan window uses full range without cursor", AutomaticScanWindowUsesFullRangeWithoutCursor),
+    ("Automatic scan window uses cursor with overlap", AutomaticScanWindowUsesCursorWithOverlap),
+    ("Automatic scan window caps stale and invalid cursor", AutomaticScanWindowCapsStaleAndInvalidCursor),
     ("Recent mail scan honors request window", RecentMailScanHonorsRequestWindow),
     ("Recent mail scan supports unlimited count", RecentMailScanSupportsUnlimitedCount),
     ("Mail scan reports progress", MailScanReportsProgress),
@@ -2190,6 +2193,43 @@ static async Task LlmModelCatalogLoadsOpenAiCompatibleModels()
 
     Assert(models.SequenceEqual(new[] { "gpt-oss", "qwen-local" }), "Expected sorted OpenAI-compatible model IDs.");
     Assert(handler.LastRequestUri?.AbsolutePath == "/v1/models", "Expected OpenAI-compatible models endpoint.");
+}
+
+
+static Task AutomaticScanWindowUsesFullRangeWithoutCursor()
+{
+    var now = new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.FromHours(9));
+    var plan = AutomaticScanWindowPlanner.Plan(now, recentScanDays: 7, lastSuccessfulScanValue: null);
+
+    Assert(plan.Since == now.AddDays(-7), "Expected first automatic scan to use configured catch-up range.");
+    Assert(!plan.UsedLastSuccessfulScan, "Expected missing cursor to be reported as full-window scan.");
+    return Task.CompletedTask;
+}
+
+static Task AutomaticScanWindowUsesCursorWithOverlap()
+{
+    var now = new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.FromHours(9));
+    var last = now.AddMinutes(-15);
+    var plan = AutomaticScanWindowPlanner.Plan(now, recentScanDays: 7, lastSuccessfulScanValue: last.ToString("O"), overlap: TimeSpan.FromMinutes(10));
+
+    Assert(plan.Since == last.AddMinutes(-10), "Expected automatic scan to overlap from the last successful cursor.");
+    Assert(plan.UsedLastSuccessfulScan, "Expected recent cursor to be used.");
+    return Task.CompletedTask;
+}
+
+static Task AutomaticScanWindowCapsStaleAndInvalidCursor()
+{
+    var now = new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.FromHours(9));
+    var stale = AutomaticScanWindowPlanner.Plan(now, recentScanDays: 7, lastSuccessfulScanValue: now.AddDays(-30).ToString("O"));
+    var invalid = AutomaticScanWindowPlanner.Plan(now, recentScanDays: 7, lastSuccessfulScanValue: "not-a-date");
+    var future = AutomaticScanWindowPlanner.Plan(now, recentScanDays: 7, lastSuccessfulScanValue: now.AddHours(1).ToString("O"), overlap: TimeSpan.FromMinutes(10));
+
+    Assert(stale.Since == now.AddDays(-7), "Expected stale cursor to be capped by configured catch-up range.");
+    Assert(!stale.UsedLastSuccessfulScan, "Expected capped stale cursor to be reported as full-window scan.");
+    Assert(invalid.Since == now.AddDays(-7), "Expected invalid cursor to fall back to configured catch-up range.");
+    Assert(future.Since == now.AddMinutes(-10), "Expected future cursor to avoid a future-only scan.");
+    Assert(!future.UsedLastSuccessfulScan, "Expected future cursor to be treated as unsafe.");
+    return Task.CompletedTask;
 }
 
 static async Task RecentMailScanHonorsRequestWindow()

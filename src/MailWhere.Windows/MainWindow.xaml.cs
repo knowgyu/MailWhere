@@ -40,8 +40,11 @@ public partial class MainWindow : Window
     private ReviewCandidatesWindow? _reviewCandidatesWindow;
     private ArchiveWindow? _archiveWindow;
     private SettingsWindow? _settingsWindow;
+    private BoardSnapshot? _boardSnapshot;
     private BoardRouteFilter _mainFilter = BoardRouteFilter.Today;
     private AnalysisTelemetry _lastAnalysisTelemetry = AnalysisTelemetry.Empty;
+    private bool _dailyBoardCheckInProgress;
+    private bool _reminderCheckInProgress;
 
     public MainWindow()
     {
@@ -164,7 +167,7 @@ public partial class MainWindow : Window
     {
         _mainFilter = options.Filter == BoardRouteFilter.Month ? BoardRouteFilter.Week : options.Filter;
         await RefreshTasksAsync();
-        ShowShell();
+        ShowShell(refresh: false);
         BringWindowToFront(this);
         StatusText.Text = options.ShowBriefSummary
             ? "오늘 업무를 열었습니다."
@@ -179,7 +182,13 @@ public partial class MainWindow : Window
     private async Task SetMainFilterAsync(BoardRouteFilter filter)
     {
         _mainFilter = filter;
-        await RefreshTasksAsync();
+        if (_boardSnapshot is null)
+        {
+            await RefreshTasksAsync();
+            return;
+        }
+
+        RenderTasks(_boardSnapshot);
     }
 
     private async void OpenTaskButton_Click(object sender, RoutedEventArgs e)
@@ -334,7 +343,6 @@ public partial class MainWindow : Window
     private async Task OnLoadedAsync()
     {
         await RefreshTasksAsync();
-        await RefreshReviewCandidatesAsync();
         await NotifyDueRemindersAsync();
         StartReminderTimer();
 
@@ -373,15 +381,24 @@ public partial class MainWindow : Window
             var pipeline = new FollowUpPipeline(analyzer, store);
             var scanner = new MailActionScanner(new OutlookComMailSource(), pipeline);
             var now = DateTimeOffset.Now;
+            var scanStartedAt = now;
+            var automaticScan = !showSummaryNotification;
+            var windowPlan = automaticScan
+                ? await PlanAutomaticScanWindowAsync(store, now, scanCancellationToken)
+                : new AutomaticScanWindowPlan(now.AddDays(-_settings.RecentScanDays), UsedLastSuccessfulScan: false);
             var request = new MailScanRequest(
                 _settings.RecentScanMaxItems,
                 IncludeBody: true,
-                now.AddDays(-_settings.RecentScanDays),
+                windowPlan.Since,
                 _settings.LlmInitialConcurrency,
                 _settings.LlmMaxConcurrency);
             var progress = new Progress<MailScanProgress>(UpdateScanProgress);
 
             var summary = await scanner.ScanAsync(request, progress, scanCancellationToken);
+            if (automaticScan && !summary.Warnings.Any(warning => warning.Severity == CapabilitySeverity.Blocked))
+            {
+                await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulScanStateKey, scanStartedAt.ToString("O"), scanCancellationToken);
+            }
             _lastAnalysisTelemetry = analyzer is IAnalysisTelemetrySource telemetrySource
                 ? telemetrySource.GetTelemetrySnapshot()
                 : AnalysisTelemetry.Empty;
@@ -396,7 +413,8 @@ public partial class MainWindow : Window
             }
 
             await RefreshTasksAsync();
-            var reviewCandidates = await RefreshReviewCandidatesAsync();
+            var reviewCandidates = _boardSnapshot?.Candidates ?? Array.Empty<ReviewCandidate>();
+            _reviewCandidatesWindow?.Refresh(reviewCandidates, CanRetryLlmFailures);
             if (!showSummaryNotification)
             {
                 await NotifyDueRemindersAsync();
@@ -404,7 +422,10 @@ public partial class MainWindow : Window
             var newReviewCandidateCount = reviewCandidates.Count(candidate => !beforeCandidateIds.Contains(candidate.Id));
 
             var llmSummary = _lastAnalysisTelemetry.ToKoreanSummary();
-            StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일 {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 확인 필요 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {llmSummary}"
+            var scanWindowText = automaticScan && windowPlan.UsedLastSuccessfulScan
+                ? "최근 변경 메일"
+                : $"최근 {_settings.RecentScanDays}일 메일";
+            StatusText.Text = $"{scanWindowText} {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 확인 필요 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {llmSummary}"
                 + (smokeGateRecorded ? " · 자동 확인 준비 완료" : string.Empty);
             if (showSummaryNotification)
             {
@@ -436,6 +457,13 @@ public partial class MainWindow : Window
         }
     }
 
+
+    private async Task<AutomaticScanWindowPlan> PlanAutomaticScanWindowAsync(SqliteFollowUpStore store, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var lastSuccessfulScan = await store.GetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulScanStateKey, cancellationToken);
+        return AutomaticScanWindowPlanner.Plan(now, _settings.RecentScanDays, lastSuccessfulScan);
+    }
+
     private void StartReminderTimer()
     {
         if (_reminderTimer is not null)
@@ -449,6 +477,12 @@ public partial class MainWindow : Window
         };
         _reminderTimer.Tick += async (_, _) =>
         {
+            if (_reminderCheckInProgress)
+            {
+                return;
+            }
+
+            _reminderCheckInProgress = true;
             try
             {
                 await NotifyDueRemindersAsync();
@@ -456,6 +490,10 @@ public partial class MainWindow : Window
             catch (Exception ex)
             {
                 StatusText.Text = $"리마인더 점검 실패: {ex.GetType().Name}";
+            }
+            finally
+            {
+                _reminderCheckInProgress = false;
             }
         };
         _reminderTimer.Start();
@@ -474,6 +512,12 @@ public partial class MainWindow : Window
         };
         _dailyBoardTimer.Tick += async (_, _) =>
         {
+            if (_dailyBoardCheckInProgress)
+            {
+                return;
+            }
+
+            _dailyBoardCheckInProgress = true;
             try
             {
                 await MaybeShowDailyBoardAsync();
@@ -481,6 +525,10 @@ public partial class MainWindow : Window
             catch (Exception ex)
             {
                 StatusText.Text = $"오늘의 업무 보드 점검 실패: {ex.GetType().Name}";
+            }
+            finally
+            {
+                _dailyBoardCheckInProgress = false;
             }
         };
         _dailyBoardTimer.Start();
@@ -519,15 +567,26 @@ public partial class MainWindow : Window
 
     private async Task RefreshTasksAsync()
     {
+        _boardSnapshot = await LoadBoardSnapshotAsync();
+        RenderTasks(_boardSnapshot);
+    }
+
+    private async Task<BoardSnapshot> LoadBoardSnapshotAsync()
+    {
         var store = await GetStoreAsync();
         var tasks = await store.ListOpenTasksAsync();
         var candidates = await store.ListReviewCandidatesAsync();
         var replyProgress = (await store.ListReplyProgressAsync()).ToDictionary(progress => progress.TaskId);
+        return new BoardSnapshot(tasks, candidates, replyProgress);
+    }
+
+    private void RenderTasks(BoardSnapshot snapshot)
+    {
         TasksList.Items.Clear();
         var now = DateTimeOffset.Now;
         var visible = DailyBoardRouteTaskSelector.SelectVisibleTasks(
-                tasks,
-                candidates,
+                snapshot.Tasks,
+                snapshot.Candidates,
                 now,
                 _mainFilter,
                 showBriefSummary: false)
@@ -538,14 +597,19 @@ public partial class MainWindow : Window
         TasksEmptyText.Visibility = visible.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         foreach (var task in visible)
         {
-            replyProgress.TryGetValue(task.Id, out var progress);
+            snapshot.ReplyProgress.TryGetValue(task.Id, out var progress);
             TasksList.Items.Add(TaskListItem.FromTask(task, now, progress));
         }
 
-        OpenReviewCandidatesButton.Content = candidates.Count == 0
-            ? "확인 필요"
-            : $"확인 필요 {candidates.Count}";
+        UpdateReviewCandidatesButton(snapshot.Candidates.Count);
         UpdateMainFilterHighlight();
+    }
+
+    private void UpdateReviewCandidatesButton(int count)
+    {
+        OpenReviewCandidatesButton.Content = count == 0
+            ? "확인 필요"
+            : $"확인 필요 {count}";
     }
 
     private static DateTimeOffset SortKey(LocalTaskItem task) =>
@@ -573,7 +637,12 @@ public partial class MainWindow : Window
     {
         var store = await GetStoreAsync();
         var candidates = await store.ListReviewCandidatesAsync();
-        _reviewCandidatesWindow?.Refresh(candidates);
+        UpdateReviewCandidatesButton(candidates.Count);
+        _reviewCandidatesWindow?.Refresh(candidates, CanRetryLlmFailures);
+        if (_boardSnapshot is not null)
+        {
+            _boardSnapshot = _boardSnapshot with { Candidates = candidates };
+        }
         return candidates;
     }
 
@@ -697,7 +766,7 @@ public partial class MainWindow : Window
         _ = dailyBoardTime;
         _mainFilter = options.Filter == BoardRouteFilter.Month ? BoardRouteFilter.Week : options.Filter;
         await RefreshTasksAsync();
-        ShowShell();
+        ShowShell(refresh: false);
         if (options.BringToFront)
         {
             BringWindowToFront(this);
@@ -729,7 +798,10 @@ public partial class MainWindow : Window
             var store = await GetStoreAsync();
             var task = await store.ResolveReviewCandidateAsTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
             await RefreshTasksAsync();
-            await RefreshReviewCandidatesAsync();
+            if (_boardSnapshot is not null)
+            {
+                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, CanRetryLlmFailures);
+            }
             StatusText.Text = task is null
                 ? "이미 처리된 항목입니다."
                 : $"확인할 항목을 업무로 등록했습니다: {task.Title}";
@@ -746,8 +818,11 @@ public partial class MainWindow : Window
         {
             var store = await GetStoreAsync();
             var ignored = await store.ResolveReviewCandidateAsNotTaskAsync(candidate.Id, DateTimeOffset.UtcNow);
-            await RefreshTasksAsync();
             await RefreshReviewCandidatesAsync();
+            if (_boardSnapshot is not null)
+            {
+                RenderTasks(_boardSnapshot);
+            }
             StatusText.Text = ignored
                 ? "확인할 항목을 무시했습니다."
                 : "이미 처리된 항목입니다.";
@@ -767,6 +842,10 @@ public partial class MainWindow : Window
             var until = now.AddDays(1);
             var snoozed = await store.SnoozeReviewCandidateAsync(candidate.Id, until, now);
             await RefreshReviewCandidatesAsync();
+            if (_boardSnapshot is not null)
+            {
+                RenderTasks(_boardSnapshot);
+            }
             StatusText.Text = snoozed
                 ? "확인할 항목은 내일까지 다시 표시하지 않습니다."
                 : "이미 처리된 항목입니다.";
@@ -914,7 +993,7 @@ public partial class MainWindow : Window
         var candidates = await RefreshReviewCandidatesAsync();
         if (_reviewCandidatesWindow?.IsVisible == true)
         {
-            _reviewCandidatesWindow.Refresh(candidates);
+            _reviewCandidatesWindow.Refresh(candidates, CanRetryLlmFailures);
             BringWindowToFront(_reviewCandidatesWindow);
             return;
         }
@@ -925,7 +1004,8 @@ public partial class MainWindow : Window
             OpenReviewCandidateMailAsync,
             SnoozeReviewCandidateAsync,
             IgnoreReviewCandidateAsync,
-            RetryLlmFailureReviewCandidatesAsync)
+            RetryLlmFailureReviewCandidatesAsync,
+            CanRetryLlmFailures)
         {
             Owner = IsVisible ? this : null
         };
@@ -985,6 +1065,12 @@ public partial class MainWindow : Window
 
     private async Task<ReviewCandidateRetrySummary> RetryLlmFailureReviewCandidatesAsync()
     {
+        if (!CanRetryLlmFailures)
+        {
+            StatusText.Text = "AI 분석 설정이 꺼져 있어 실패 항목을 다시 시도할 수 없습니다.";
+            return new ReviewCandidateRetrySummary(0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
         if (_scanInProgress)
         {
             StatusText.Text = "메일 확인 중에는 AI 분석을 다시 시도할 수 없습니다.";
@@ -1006,7 +1092,10 @@ public partial class MainWindow : Window
 
             var summary = await retry.RetryTransientLlmFailuresAsync();
             await RefreshTasksAsync();
-            await RefreshReviewCandidatesAsync();
+            if (_boardSnapshot is not null)
+            {
+                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, CanRetryLlmFailures);
+            }
             StatusText.Text = ToRetryStatus(summary);
             return summary;
         }
@@ -1073,8 +1162,15 @@ public partial class MainWindow : Window
     private async Task OpenFilterFromDeveloperAsync(BoardRouteFilter filter)
     {
         _mainFilter = filter;
-        await RefreshTasksAsync();
-        ShowShell();
+        if (_boardSnapshot is null)
+        {
+            await RefreshTasksAsync();
+        }
+        else
+        {
+            RenderTasks(_boardSnapshot);
+        }
+        ShowShell(refresh: false);
     }
 
     private async Task ShowDeveloperToastAsync()
@@ -1179,6 +1275,8 @@ public partial class MainWindow : Window
         WindowsRuntimeSettingsStore.Save(_settings);
         return true;
     }
+
+    private bool CanRetryLlmFailures => _settings.ExternalLlmEnabled && _settings.LlmProvider != LlmProviderKind.Disabled;
 
     private IFollowUpAnalyzer BuildAnalyzer(RuntimeSettings settings)
     {
@@ -1308,6 +1406,11 @@ public partial class MainWindow : Window
 
         return null;
     }
+
+    private sealed record BoardSnapshot(
+        IReadOnlyList<LocalTaskItem> Tasks,
+        IReadOnlyList<ReviewCandidate> Candidates,
+        IReadOnlyDictionary<Guid, ReplyProgressItem> ReplyProgress);
 
     private sealed class TaskListItem
     {
