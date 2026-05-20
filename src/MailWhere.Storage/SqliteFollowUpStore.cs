@@ -310,6 +310,117 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<WaitingClosureSuggestion>> ListWaitingClosureSuggestionsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT suggestion.id, suggestion.task_id, suggestion.task_title, suggestion.trigger_source_hash,
+                   suggestion.trigger_kind, suggestion.decision_source, suggestion.confidence, suggestion.reason,
+                   suggestion.triggered_at, suggestion.created_at
+            FROM waiting_closure_suggestions suggestion
+            JOIN tasks task ON task.id = suggestion.task_id
+            WHERE suggestion.resolved_at IS NULL
+              AND task.status IN ('Open','Snoozed')
+            ORDER BY suggestion.created_at DESC
+            LIMIT 50
+            """;
+        var suggestions = new List<WaitingClosureSuggestion>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            suggestions.Add(ReadWaitingClosureSuggestion(reader));
+        }
+
+        return suggestions;
+    }
+
+    public async Task<bool> SaveWaitingClosureSuggestionAsync(WaitingClosureSuggestion suggestion, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO waiting_closure_suggestions
+            (id, task_id, task_title, trigger_source_hash, trigger_kind, decision_source, confidence, reason, triggered_at, created_at)
+            VALUES ($id, $taskId, $taskTitle, $triggerSource, $triggerKind, $decisionSource, $confidence, $reason, $triggeredAt, $createdAt)
+            """;
+        command.Parameters.AddWithValue("$id", suggestion.Id.ToString());
+        command.Parameters.AddWithValue("$taskId", suggestion.TaskId.ToString());
+        command.Parameters.AddWithValue("$taskTitle", EvidencePolicy.Truncate(suggestion.TaskTitle) ?? string.Empty);
+        command.Parameters.AddWithValue("$triggerSource", suggestion.TriggerSourceHash);
+        command.Parameters.AddWithValue("$triggerKind", suggestion.TriggerKind.ToString());
+        command.Parameters.AddWithValue("$decisionSource", suggestion.DecisionSource.ToString());
+        command.Parameters.AddWithValue("$confidence", suggestion.Confidence);
+        command.Parameters.AddWithValue("$reason", EvidencePolicy.Truncate(suggestion.Reason) ?? "회신 감지");
+        command.Parameters.AddWithValue("$triggeredAt", suggestion.TriggeredAt.ToString("O"));
+        command.Parameters.AddWithValue("$createdAt", suggestion.CreatedAt.ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
+    public async Task<bool> ResolveWaitingClosureSuggestionAsync(Guid suggestionId, WaitingClosureResolution resolution, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        using var transaction = connection.BeginTransaction();
+
+        var lookup = connection.CreateCommand();
+        lookup.Transaction = transaction;
+        lookup.CommandText = "SELECT task_id FROM waiting_closure_suggestions WHERE id = $id AND resolved_at IS NULL LIMIT 1";
+        lookup.Parameters.AddWithValue("$id", suggestionId.ToString());
+        var taskIdValue = await lookup.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        if (taskIdValue is null || taskIdValue == DBNull.Value)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        if (resolution == WaitingClosureResolution.Archived)
+        {
+            var archive = connection.CreateCommand();
+            archive.Transaction = transaction;
+            archive.CommandText = """
+                UPDATE tasks
+                SET status = $status,
+                    snooze_until = NULL,
+                    updated_at = $updatedAt
+                WHERE id = $taskId
+                  AND status IN ('Open','Snoozed')
+                """;
+            archive.Parameters.AddWithValue("$taskId", Convert.ToString(taskIdValue));
+            archive.Parameters.AddWithValue("$status", LocalTaskStatus.Archived.ToString());
+            archive.Parameters.AddWithValue("$updatedAt", now.ToString("O"));
+            if (await archive.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+        }
+
+        var resolve = connection.CreateCommand();
+        resolve.Transaction = transaction;
+        resolve.CommandText = """
+            UPDATE waiting_closure_suggestions
+            SET resolved_at = $resolvedAt,
+                resolution = $resolution
+            WHERE id = $id
+              AND resolved_at IS NULL
+            """;
+        resolve.Parameters.AddWithValue("$id", suggestionId.ToString());
+        resolve.Parameters.AddWithValue("$resolvedAt", now.ToString("O"));
+        resolve.Parameters.AddWithValue("$resolution", resolution.ToString());
+        var resolved = await resolve.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+        if (!resolved)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
     public async Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = new SqliteConnection(_connectionString);
@@ -980,4 +1091,16 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
             MaybeDate(reader.GetValue(13)),
             Enum.TryParse<MailboxRecipientRole>(reader.IsDBNull(14) ? null : reader.GetString(14), out var role) ? role : MailboxRecipientRole.Direct);
     }
+
+    private static WaitingClosureSuggestion ReadWaitingClosureSuggestion(SqliteDataReader reader) => new(
+        Guid.Parse(reader.GetString(0)),
+        Guid.Parse(reader.GetString(1)),
+        reader.GetString(2),
+        reader.GetString(3),
+        Enum.TryParse<WaitingClosureTriggerKind>(reader.GetString(4), out var triggerKind) ? triggerKind : WaitingClosureTriggerKind.RecipientReply,
+        Enum.TryParse<WaitingClosureDecisionSource>(reader.GetString(5), out var source) ? source : WaitingClosureDecisionSource.Rule,
+        reader.GetDouble(6),
+        reader.GetString(7),
+        DateTimeOffset.Parse(reader.GetString(8)),
+        DateTimeOffset.Parse(reader.GetString(9)));
 }

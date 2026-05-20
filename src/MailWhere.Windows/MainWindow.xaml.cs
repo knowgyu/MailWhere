@@ -330,6 +330,16 @@ public partial class MainWindow : Window
         await OpenReviewCandidatesWindowAsync();
     }
 
+    private async void OpenClosureSuggestions_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenClosureSuggestionsAsync();
+    }
+
+    private async void OpenWeeklyReview_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenWeeklyReviewAsync();
+    }
+
     private async void OpenArchive_Click(object sender, RoutedEventArgs e)
     {
         await OpenArchiveWindowAsync();
@@ -378,7 +388,7 @@ public partial class MainWindow : Window
                 .Select(candidate => candidate.Id)
                 .ToHashSet();
             var analyzer = BuildAnalyzer(_settings);
-            var pipeline = new FollowUpPipeline(analyzer, store);
+            var pipeline = new FollowUpPipeline(analyzer, store, waitingClosureJudge: BuildWaitingClosureJudge(_settings));
             var scanner = new MailActionScanner(new OutlookComMailSource(), pipeline);
             var now = DateTimeOffset.Now;
             var scanStartedAt = now;
@@ -577,7 +587,8 @@ public partial class MainWindow : Window
         var tasks = await store.ListOpenTasksAsync();
         var candidates = await store.ListReviewCandidatesAsync();
         var replyProgress = (await store.ListReplyProgressAsync()).ToDictionary(progress => progress.TaskId);
-        return new BoardSnapshot(tasks, candidates, replyProgress);
+        var closureSuggestions = await store.ListWaitingClosureSuggestionsAsync();
+        return new BoardSnapshot(tasks, candidates, replyProgress, closureSuggestions);
     }
 
     private void RenderTasks(BoardSnapshot snapshot)
@@ -602,6 +613,7 @@ public partial class MainWindow : Window
         }
 
         UpdateReviewCandidatesButton(snapshot.Candidates.Count);
+        UpdateClosureSuggestionsButton(snapshot.ClosureSuggestions.Count);
         UpdateMainFilterHighlight();
     }
 
@@ -610,6 +622,13 @@ public partial class MainWindow : Window
         OpenReviewCandidatesButton.Content = count == 0
             ? "확인 필요"
             : $"확인 필요 {count}";
+    }
+
+    private void UpdateClosureSuggestionsButton(int count)
+    {
+        OpenClosureSuggestionsButton.Content = count == 0
+            ? "보관 제안"
+            : $"보관 제안 {count}";
     }
 
     private static DateTimeOffset SortKey(LocalTaskItem task) =>
@@ -644,6 +663,19 @@ public partial class MainWindow : Window
             _boardSnapshot = _boardSnapshot with { Candidates = candidates };
         }
         return candidates;
+    }
+
+    private async Task<IReadOnlyList<WaitingClosureSuggestion>> RefreshClosureSuggestionsAsync()
+    {
+        var store = await GetStoreAsync();
+        var suggestions = await store.ListWaitingClosureSuggestionsAsync();
+        UpdateClosureSuggestionsButton(suggestions.Count);
+        if (_boardSnapshot is not null)
+        {
+            _boardSnapshot = _boardSnapshot with { ClosureSuggestions = suggestions };
+        }
+
+        return suggestions;
     }
 
     private static string CompactLine(string? value, int maxChars)
@@ -910,6 +942,46 @@ public partial class MainWindow : Window
             ? "보관했습니다. 이 목록에는 다시 표시되지 않습니다."
             : "이미 처리된 항목입니다.";
         return archived;
+    }
+
+    private async Task OpenClosureSuggestionsAsync()
+    {
+        var suggestions = await RefreshClosureSuggestionsAsync();
+        if (suggestions.Count == 0)
+        {
+            StatusText.Text = "보관을 제안할 대기 항목이 없습니다.";
+            return;
+        }
+
+        var suggestion = suggestions[0];
+        var decision = System.Windows.MessageBox.Show(
+            $"{suggestion.TaskTitle}\n\n{suggestion.ActionText}\n\n사유: {suggestion.Reason}",
+            "대기 항목 보관 제안",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        var store = await GetStoreAsync();
+        var resolution = decision == MessageBoxResult.Yes
+            ? WaitingClosureResolution.Archived
+            : WaitingClosureResolution.Kept;
+        var resolved = await store.ResolveWaitingClosureSuggestionAsync(suggestion.Id, resolution, DateTimeOffset.UtcNow);
+        await RefreshTasksAsync();
+        StatusText.Text = resolved
+            ? resolution == WaitingClosureResolution.Archived
+                ? "대기 항목을 보관했습니다. Outlook 원본은 변경하지 않았습니다."
+                : "대기 항목을 유지하고 제안만 닫았습니다."
+            : "이미 처리된 보관 제안입니다.";
+    }
+
+    private async Task OpenWeeklyReviewAsync()
+    {
+        var store = await GetStoreAsync();
+        var openTasks = await store.ListOpenTasksAsync();
+        var archivedTasks = await store.ListArchivedTasksAsync(limit: 500);
+        var candidates = await store.ListReviewCandidatesAsync();
+        var suggestions = await store.ListWaitingClosureSuggestionsAsync();
+        var summary = new WeeklyReviewPlanner().Build(openTasks, archivedTasks, candidates, suggestions, DateTimeOffset.Now);
+        System.Windows.MessageBox.Show(summary.ToKoreanSummary(), "MailWhere 주간 리뷰", MessageBoxButton.OK, MessageBoxImage.Information);
+        StatusText.Text = "주간 리뷰를 열었습니다.";
     }
 
     private async Task<bool> SnoozeTaskAsync(LocalTaskItem task, DateTimeOffset until)
@@ -1290,6 +1362,18 @@ public partial class MainWindow : Window
         return new LlmBackedFollowUpAnalyzer(client, rule, settings.LlmFallbackPolicy);
     }
 
+    private IWaitingClosureJudge BuildWaitingClosureJudge(RuntimeSettings settings)
+    {
+        var rule = new RuleBasedWaitingClosureJudge();
+        if (!settings.ExternalLlmEnabled || settings.LlmProvider == LlmProviderKind.Disabled)
+        {
+            return rule;
+        }
+
+        var client = LlmClientFactory.Create(settings.ToLlmEndpointSettings());
+        return new LlmBackedWaitingClosureJudge(client, rule);
+    }
+
     private async Task<SqliteFollowUpStore> GetStoreAsync()
     {
         if (_store is not null)
@@ -1410,7 +1494,8 @@ public partial class MainWindow : Window
     private sealed record BoardSnapshot(
         IReadOnlyList<LocalTaskItem> Tasks,
         IReadOnlyList<ReviewCandidate> Candidates,
-        IReadOnlyDictionary<Guid, ReplyProgressItem> ReplyProgress);
+        IReadOnlyDictionary<Guid, ReplyProgressItem> ReplyProgress,
+        IReadOnlyList<WaitingClosureSuggestion> ClosureSuggestions);
 
     private sealed class TaskListItem
     {

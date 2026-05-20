@@ -135,6 +135,11 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("SQLite task final actions mark source processed", SqliteTaskFinalActionsMarkSourceProcessed),
     ("SQLite archived tasks can be listed and restored", SqliteArchivedTasksCanBeListedAndRestored),
     ("Pipeline records multi-recipient reply progress", PipelineRecordsMultiRecipientReplyProgress),
+    ("Pipeline suggests waiting closure from reply", PipelineSuggestsWaitingClosureFromReply),
+    ("Pipeline suggests waiting closure from user acknowledgement", PipelineSuggestsWaitingClosureFromUserAcknowledgement),
+    ("LLM closure judge can reject weak reply", LlmClosureJudgeCanRejectWeakReply),
+    ("Waiting closure keep and archive decisions persist", WaitingClosureKeepAndArchiveDecisionsPersist),
+    ("Weekly review summarizes waiting debt", WeeklyReviewSummarizesWaitingDebt),
     ("MailWhere export omits source ids and includes reply progress", MailWhereExportOmitsSourceIdsAndIncludesReplyProgress),
     ("SQLite task details edit persists", SqliteTaskDetailsEditPersists),
     ("SQLite task complete and snooze persist", SqliteTaskCompleteAndSnoozePersist),
@@ -3048,6 +3053,153 @@ static async Task PipelineRecordsMultiRecipientReplyProgress()
     }
 }
 
+static async Task PipelineSuggestsWaitingClosureFromReply()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var sentAt = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
+        var sent = new EmailSnapshot(
+            "closure-sent-request",
+            sentAt,
+            "Me",
+            "견적 확인 요청",
+            "20일까지 견적서 공유 부탁드립니다.",
+            "closure-conversation-1",
+            "Me",
+            new[] { "Finance Team" },
+            MailboxRecipientRole.Other);
+        var reply = sent with
+        {
+            SourceId = "closure-reply-finance",
+            ReceivedAt = sentAt.AddHours(2),
+            SenderDisplay = "Finance Team",
+            Body = "견적서 첨부드립니다.",
+            RecipientDisplayNames = null,
+            MailboxRecipientRole = MailboxRecipientRole.Direct
+        };
+        var analyzer = new SequenceAnalyzer(
+            new FollowUpAnalysis(FollowUpKind.WaitingForReply, AnalysisDisposition.AutoCreateTask, 0.9, "견적 확인 요청", "회신 대기", "공유 부탁드립니다", sentAt.AddDays(5)),
+            FollowUpAnalysis.Ignore("reply"));
+        var pipeline = new FollowUpPipeline(analyzer, store);
+
+        await pipeline.ProcessAsync(sent);
+        await pipeline.ProcessAsync(reply);
+
+        var suggestions = await store.ListWaitingClosureSuggestionsAsync();
+        Assert(suggestions.Count == 1, "Expected one waiting closure suggestion.");
+        Assert(suggestions[0].TriggerKind == WaitingClosureTriggerKind.RecipientReply, "Expected recipient reply trigger.");
+        Assert(suggestions[0].DecisionSource == WaitingClosureDecisionSource.Rule, "Expected rule fallback suggestion.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task PipelineSuggestsWaitingClosureFromUserAcknowledgement()
+{
+    var store = new FakeStore();
+    var now = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9));
+    var task = new LocalTaskItem(
+        Guid.NewGuid(),
+        "자료 공유 요청",
+        null,
+        StableHash.Create("ack-source"),
+        "ack-source",
+        0.8,
+        "대기",
+        null,
+        LocalTaskStatus.Open,
+        null,
+        now.AddDays(-1),
+        now.AddDays(-1),
+        Kind: FollowUpKind.WaitingForReply,
+        SourceConversationId: "ack-conversation",
+        SourceRecipientDisplayNames: new[] { "Partner" });
+    store.Tasks.Add(task);
+    var ack = new EmailSnapshot(
+        "ack-mail",
+        now,
+        "Me",
+        "RE: 자료 공유 요청",
+        "확인했습니다. 감사합니다.",
+        "ack-conversation",
+        "Me",
+        new[] { "Partner" },
+        MailboxRecipientRole.Other);
+
+    var service = new WaitingClosureSuggestionService(store, new RuleBasedWaitingClosureJudge());
+    var created = await service.CreateSuggestionsAsync(new[] { ack });
+    var suggestion = (await store.ListWaitingClosureSuggestionsAsync()).Single();
+
+    Assert(created == 1, "Expected acknowledgement to create one suggestion.");
+    Assert(suggestion.TriggerKind == WaitingClosureTriggerKind.UserAcknowledgement, "Expected user acknowledgement trigger.");
+}
+
+static async Task LlmClosureJudgeCanRejectWeakReply()
+{
+    var now = DateTimeOffset.UtcNow;
+    var task = new LocalTaskItem(Guid.NewGuid(), "견적 요청", null, "source", "source", 0.8, "대기", null, LocalTaskStatus.Open, null, now.AddDays(-1), now.AddDays(-1), Kind: FollowUpKind.WaitingForReply, SourceRecipientDisplayNames: new[] { "Partner" });
+    var email = Mail("RE: 견적 요청", "확인해보겠습니다.", id: "weak-reply", conversationId: "conv", mailboxOwner: "Me", sender: "Partner");
+    var trigger = new WaitingClosureTrigger(task, email, WaitingClosureTriggerKind.RecipientReply, 0.72, "요청한 상대의 회신이 감지되었습니다.");
+    var judge = new LlmBackedWaitingClosureJudge(new FakeLlmClient("""{"shouldSuggest":false,"confidence":0.2,"reason":"아직 확인 예정이라 완료가 아닙니다"}"""));
+
+    var judgment = await judge.JudgeAsync(trigger);
+
+    Assert(!judgment.ShouldSuggest, "Expected LLM to reject weak reply closure suggestion.");
+    Assert(judgment.Source == WaitingClosureDecisionSource.Llm, "Expected LLM decision source.");
+}
+
+static async Task WaitingClosureKeepAndArchiveDecisionsPersist()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var task = new LocalTaskItem(Guid.NewGuid(), "자료 요청", null, StableHash.Create("waiting-source"), "waiting-source", 0.8, "대기", null, LocalTaskStatus.Open, null, now.AddDays(-2), now, Kind: FollowUpKind.WaitingForReply, SourceConversationId: "closure-conversation-2", SourceRecipientDisplayNames: new[] { "Partner" });
+        await store.SaveTaskAsync(task);
+        var keep = new WaitingClosureSuggestion(Guid.NewGuid(), task.Id, task.Title, StableHash.Create("reply-keep"), WaitingClosureTriggerKind.RecipientReply, WaitingClosureDecisionSource.Rule, 0.7, "회신 감지", now, now);
+        var archive = keep with { Id = Guid.NewGuid(), TriggerSourceHash = StableHash.Create("reply-archive") };
+        await store.SaveWaitingClosureSuggestionAsync(keep);
+        await store.SaveWaitingClosureSuggestionAsync(archive);
+
+        var kept = await store.ResolveWaitingClosureSuggestionAsync(keep.Id, WaitingClosureResolution.Kept, now.AddMinutes(1));
+        var stillOpen = await store.ListOpenTasksAsync();
+        var archived = await store.ResolveWaitingClosureSuggestionAsync(archive.Id, WaitingClosureResolution.Archived, now.AddMinutes(2));
+        var openAfterArchive = await store.ListOpenTasksAsync();
+        var archivedTasks = await store.ListArchivedTasksAsync();
+
+        Assert(kept, "Expected keep decision to resolve suggestion.");
+        Assert(stillOpen.Any(item => item.Id == task.Id), "Keep must leave task open.");
+        Assert(archived, "Expected archive decision to resolve suggestion.");
+        Assert(!openAfterArchive.Any(item => item.Id == task.Id), "Archive must remove task from open list.");
+        Assert(archivedTasks.Any(item => item.Id == task.Id), "Archive decision must move task to archive list.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static Task WeeklyReviewSummarizesWaitingDebt()
+{
+    var now = new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.FromHours(9));
+    var aged = new LocalTaskItem(Guid.NewGuid(), "오래 기다림", null, "a", "a", 0.8, "대기", null, LocalTaskStatus.Open, null, now.AddDays(-8), now.AddDays(-8), Kind: FollowUpKind.WaitingForReply);
+    var fresh = aged with { Id = Guid.NewGuid(), Title = "새 업무", Kind = FollowUpKind.ActionRequested, CreatedAt = now.AddDays(-1) };
+    var archived = fresh with { Id = Guid.NewGuid(), Status = LocalTaskStatus.Archived, UpdatedAt = now.AddDays(-2) };
+    var suggestion = new WaitingClosureSuggestion(Guid.NewGuid(), aged.Id, aged.Title, "reply", WaitingClosureTriggerKind.RecipientReply, WaitingClosureDecisionSource.Rule, 0.7, "회신 감지", now.AddHours(-1), now);
+    var candidate = ReviewCandidate.FromAnalysis(Mail("확인", "검토 필요"), new FollowUpAnalysis(FollowUpKind.ReviewNeeded, AnalysisDisposition.Review, 0.5, "확인", "검토", null, null), now);
+
+    var summary = new WeeklyReviewPlanner().Build(new[] { aged, fresh }, new[] { archived }, new[] { candidate }, new[] { suggestion }, now);
+
+    Assert(summary.NewTaskCount == 1, "Expected fresh open task count.");
+    Assert(summary.ArchivedTaskCount == 1, "Expected weekly archived count.");
+    Assert(summary.AgedWaitingItems.Single().Id == aged.Id, "Expected aged waiting item.");
+    Assert(summary.ClosureSuggestions.Single().Id == suggestion.Id, "Expected closure suggestion in weekly review.");
+    return Task.CompletedTask;
+}
+
 static async Task MailWhereExportOmitsSourceIdsAndIncludesReplyProgress()
 {
     var (store, _, cleanup) = await CreateTempStoreAsync();
@@ -3470,6 +3622,7 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
     public List<LocalTaskItem> Tasks { get; } = [];
     public List<ReviewCandidate> Candidates { get; } = [];
     public List<ReplyReceipt> ReplyReceipts { get; } = [];
+    public List<WaitingClosureSuggestion> ClosureSuggestions { get; } = [];
     public HashSet<string> Processed { get; } = [];
     public Dictionary<string, string> AppState { get; } = new(StringComparer.Ordinal);
     public TimeSpan MutationDelay { get; init; }
@@ -3649,6 +3802,49 @@ sealed class FakeStore : IFollowUpStore, IAppStateStore
             .Where(progress => progress is not null)
             .Cast<ReplyProgressItem>()
             .ToList());
+
+    public Task<IReadOnlyList<WaitingClosureSuggestion>> ListWaitingClosureSuggestionsAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<WaitingClosureSuggestion>>(ClosureSuggestions
+            .Where(suggestion => Tasks.Any(task => task.Id == suggestion.TaskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed))
+            .ToList());
+
+    public Task<bool> SaveWaitingClosureSuggestionAsync(WaitingClosureSuggestion suggestion, CancellationToken cancellationToken = default)
+    {
+        if (ClosureSuggestions.Any(existing =>
+            existing.TaskId == suggestion.TaskId
+            && existing.TriggerSourceHash == suggestion.TriggerSourceHash
+            && existing.TriggerKind == suggestion.TriggerKind))
+        {
+            return Task.FromResult(false);
+        }
+
+        ClosureSuggestions.Add(suggestion);
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> ResolveWaitingClosureSuggestionAsync(Guid suggestionId, WaitingClosureResolution resolution, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var index = ClosureSuggestions.FindIndex(suggestion => suggestion.Id == suggestionId);
+        if (index < 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        var suggestion = ClosureSuggestions[index];
+        ClosureSuggestions.RemoveAt(index);
+        if (resolution == WaitingClosureResolution.Archived)
+        {
+            var taskIndex = Tasks.FindIndex(task => task.Id == suggestion.TaskId && task.Status is LocalTaskStatus.Open or LocalTaskStatus.Snoozed);
+            if (taskIndex < 0)
+            {
+                return Task.FromResult(false);
+            }
+
+            Tasks[taskIndex] = Tasks[taskIndex] with { Status = LocalTaskStatus.Archived, SnoozeUntil = null, UpdatedAt = now };
+        }
+
+        return Task.FromResult(true);
+    }
 
     public Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<ReviewCandidate>>(Candidates

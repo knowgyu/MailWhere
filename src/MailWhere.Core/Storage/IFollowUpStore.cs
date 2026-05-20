@@ -17,6 +17,9 @@ public interface IFollowUpStore
     Task<IReadOnlyList<LocalTaskItem>> ListOpenTasksAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LocalTaskItem>> ListArchivedTasksAsync(int limit = 100, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReplyProgressItem>> ListReplyProgressAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<WaitingClosureSuggestion>> ListWaitingClosureSuggestionsAsync(CancellationToken cancellationToken = default);
+    Task<bool> SaveWaitingClosureSuggestionAsync(WaitingClosureSuggestion suggestion, CancellationToken cancellationToken = default);
+    Task<bool> ResolveWaitingClosureSuggestionAsync(Guid suggestionId, WaitingClosureResolution resolution, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default);
     Task<ReviewCandidate?> GetReviewCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
     Task<LocalTaskItem?> ResolveReviewCandidateAsTaskAsync(Guid candidateId, DateTimeOffset now, CancellationToken cancellationToken = default);

@@ -21,6 +21,8 @@
 ## 제품/기획
 
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.
+- [`releases/v0.7.0.md`](releases/v0.7.0.md): 대기 항목 closure 제안, LLM closure 판단, 주간 리뷰 릴리즈 노트.
+- [`releases/v0.5.0.md`](releases/v0.5.0.md): LLM batch 안정화와 동시 처리 릴리즈 노트.
 - [`releases/v0.4.4.md`](releases/v0.4.4.md): 보관함, 다자 회신 현황, 안전 export SDK 릴리즈 노트.
 - [`releases/v0.4.3.md`](releases/v0.4.3.md): 새 로고와 portable 실행 파일 표시 개선 릴리즈 노트.
 - [`releases/v0.4.2.md`](releases/v0.4.2.md): 화면/확인 필요/LLM payload polish 릴리즈 노트.

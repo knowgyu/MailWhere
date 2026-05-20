@@ -59,6 +59,22 @@ internal static class Schema
             PRIMARY KEY (conversation_id, participant_key)
         );
 
+        CREATE TABLE IF NOT EXISTS waiting_closure_suggestions (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            task_title TEXT NOT NULL,
+            trigger_source_hash TEXT NOT NULL,
+            trigger_kind TEXT NOT NULL,
+            decision_source TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            reason TEXT NOT NULL,
+            triggered_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            resolved_at TEXT NULL,
+            resolution TEXT NULL,
+            UNIQUE(task_id, trigger_source_hash, trigger_kind)
+        );
+
         CREATE TABLE IF NOT EXISTS app_state (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
@@ -72,6 +88,8 @@ internal static class Schema
         CREATE INDEX IF NOT EXISTS idx_tasks_archive_updated ON tasks(status, updated_at);
         CREATE INDEX IF NOT EXISTS idx_tasks_conversation ON tasks(source_conversation_id);
         CREATE INDEX IF NOT EXISTS idx_reply_receipts_conversation ON reply_receipts(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_waiting_closure_active ON waiting_closure_suggestions(resolved_at, created_at);
+        CREATE INDEX IF NOT EXISTS idx_waiting_closure_task ON waiting_closure_suggestions(task_id);
         CREATE INDEX IF NOT EXISTS idx_review_source_hash ON review_candidates(source_id_hash);
         CREATE INDEX IF NOT EXISTS idx_review_active ON review_candidates(suppressed, resolved_at, created_at);
         CREATE INDEX IF NOT EXISTS idx_review_active_snooze ON review_candidates(suppressed, resolved_at, snooze_until, created_at);

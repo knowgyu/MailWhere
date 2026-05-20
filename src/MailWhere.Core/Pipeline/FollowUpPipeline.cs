@@ -24,12 +24,14 @@ public sealed class FollowUpPipeline
 {
     private readonly IFollowUpAnalyzer _analyzer;
     private readonly IFollowUpStore _store;
+    private readonly IWaitingClosureJudge _waitingClosureJudge;
     private readonly TimeProvider _timeProvider;
 
-    public FollowUpPipeline(IFollowUpAnalyzer analyzer, IFollowUpStore store, TimeProvider? timeProvider = null)
+    public FollowUpPipeline(IFollowUpAnalyzer analyzer, IFollowUpStore store, TimeProvider? timeProvider = null, IWaitingClosureJudge? waitingClosureJudge = null)
     {
         _analyzer = analyzer;
         _store = store;
+        _waitingClosureJudge = waitingClosureJudge ?? new RuleBasedWaitingClosureJudge();
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -66,10 +68,14 @@ public sealed class FollowUpPipeline
         var outcomes = new PipelineOutcome[emails.Count];
         var pendingIndexes = new List<int>(emails.Count);
         var pendingEmails = new List<EmailSnapshot>(emails.Count);
+        var closureCandidateEmails = new List<EmailSnapshot>(emails.Count);
+        foreach (var email in emails)
+        {
+            await _store.RecordReplyObservationAsync(email, cancellationToken).ConfigureAwait(false);
+        }
+
         for (var i = 0; i < emails.Count; i++)
         {
-            await _store.RecordReplyObservationAsync(emails[i], cancellationToken).ConfigureAwait(false);
-
             if (await _store.HasProcessedSourceAsync(emails[i].SourceHash, cancellationToken).ConfigureAwait(false))
             {
                 outcomes[i] = new PipelineOutcome(PipelineOutcomeKind.Duplicate);
@@ -82,9 +88,12 @@ public sealed class FollowUpPipeline
                 continue;
             }
 
+            closureCandidateEmails.Add(emails[i]);
             pendingIndexes.Add(i);
             pendingEmails.Add(emails[i]);
         }
+
+        await CreateWaitingClosureSuggestionsAsync(closureCandidateEmails, cancellationToken).ConfigureAwait(false);
 
         return new PreparedPipelineBatch(
             emails.ToArray(),
@@ -92,6 +101,10 @@ public sealed class FollowUpPipeline
             pendingIndexes.ToArray(),
             pendingEmails.ToArray());
     }
+
+    public Task<int> CreateWaitingClosureSuggestionsAsync(IReadOnlyList<EmailSnapshot> emails, CancellationToken cancellationToken = default) =>
+        new WaitingClosureSuggestionService(_store, _waitingClosureJudge, _timeProvider)
+            .CreateSuggestionsAsync(emails, cancellationToken);
 
     public async Task<IReadOnlyList<FollowUpAnalysis>> AnalyzePreparedBatchAsync(
         PreparedPipelineBatch prepared,
