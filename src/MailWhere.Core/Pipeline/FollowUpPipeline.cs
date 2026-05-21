@@ -20,6 +20,8 @@ public sealed record PreparedPipelineBatch(
     IReadOnlyList<int> PendingIndexes,
     IReadOnlyList<EmailSnapshot> PendingEmails);
 
+public sealed record MailFastFilterResult(IReadOnlyList<EmailSnapshot> PendingEmails, int DuplicateCount);
+
 public sealed class FollowUpPipeline
 {
     private readonly IFollowUpAnalyzer _analyzer;
@@ -100,6 +102,34 @@ public sealed class FollowUpPipeline
             outcomes,
             pendingIndexes.ToArray(),
             pendingEmails.ToArray());
+    }
+
+    public async Task<MailFastFilterResult> FastFilterAsync(
+        IReadOnlyList<EmailSnapshot> emails,
+        CancellationToken cancellationToken = default)
+    {
+        if (emails.Count == 0)
+        {
+            return new MailFastFilterResult(Array.Empty<EmailSnapshot>(), DuplicateCount: 0);
+        }
+
+        var pending = new List<EmailSnapshot>(emails.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var duplicates = 0;
+        foreach (var email in emails)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await _store.HasProcessedSourceAsync(email.SourceHash, cancellationToken).ConfigureAwait(false)
+                || !seen.Add(email.SourceHash))
+            {
+                duplicates++;
+                continue;
+            }
+
+            pending.Add(email);
+        }
+
+        return new MailFastFilterResult(pending.ToArray(), duplicates);
     }
 
     public Task<int> CreateWaitingClosureSuggestionsAsync(IReadOnlyList<EmailSnapshot> emails, CancellationToken cancellationToken = default) =>

@@ -21,6 +21,9 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 
 - Classic Outlook COM 기반 read-only Inbox/Sent Items 메일 읽기
 - **지금 메일 확인**: 기본은 최근 30일, 갯수 제한 없이 날짜 기준으로 확인하며 설정에서는 1/7/30/90일 선택지를 노출
+- **새 메일 자동 확인**: Outlook ItemAdd 이벤트를 감지해 짧게 debounce하고, 놓친 이벤트는 자동 확인 간격의 cursor scan으로 보정
+- 자동 확인은 Inbox/Sent Items cursor를 분리해 한쪽 실패가 다른 쪽 성공 시각을 잘못 앞당기지 않음
+- 자동 delta 확인에서는 중복/이미 처리한 source를 body/LLM 분석 전에 fast filter로 제거하고, 애매한 메일은 계속 분석 대상으로 유지
 - 규칙 기반 업무 후보 탐지와 선택형 LLM 분석
 - Ollama native `/api/chat`, OpenAI-compatible `/v1/chat/completions`, `/v1/responses` endpoint 지원
 - endpoint 모델 목록 불러오기와 LLM 연결 테스트
@@ -28,6 +31,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - 답장/전달 메일, To/CC 수신 여부, 담당자 표현을 보수적으로 판단
 - 같은 스레드의 동일 업무 후보 중복 생성 억제
 - 낮은 확신/LLM 실패 후보는 기본 업무 보드에 섞지 않고 별도 검토 후보 창에서 처리
+- 기다리던 메일의 회신/내 확인 답장은 확인 필요 창 안에서 `보관(Y)`/`유지(N)`로 처리
 - 업무 카드 더블클릭으로 제목과 기한 수정
 - `나중에`로 지정 시각까지 active 목록에서 제외하고, 시간이 지나면 다시 표시
 - `보관`으로 active 목록에서 제외하고, 보관함에서 원본 열기/복원
@@ -91,7 +95,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.7.2-win-x64-portable.zip
+artifacts/MailWhere-v0.8.0-win-x64-portable.zip
 ```
 
 ## LLM endpoint
@@ -118,7 +122,7 @@ vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatComp
 
 portable 폴더에 `MailWhere.defaults.json`을 같이 두면, 사용자별 설정 파일이 아직 없을 때 첫 실행에서 그 값을 기본 설정으로 복사합니다. 릴리즈에는 `MailWhere.defaults.sample.json`만 포함되며, 실제 endpoint/model 값은 배포자가 sample을 복사해 수정하세요. API key나 개인 토큰은 이 파일에 넣지 않는 것을 권장합니다.
 
-`새 메일 자동 확인`은 한 번 수동 확인이 성공해 안전 gate가 열린 뒤에만 동작합니다. 켜져 있으면 설정한 자동 확인 간격마다 실행하고, 첫 자동 확인 이후에는 마지막 성공 시각에 짧은 overlap을 더한 구간만 다시 읽어 전체 기간을 매번 훑지 않습니다.
+`새 메일 자동 확인`은 한 번 수동 확인이 성공해 안전 gate가 열린 뒤에만 동작합니다. 켜져 있으면 Outlook 새 항목 이벤트로 빠르게 확인하고, 이벤트가 누락되거나 앱/Outlook이 쉬고 있던 동안의 메일은 설정한 자동 확인 간격마다 cursor scan으로 보정합니다. 첫 자동 확인 이후에는 마지막 성공 시각에 짧은 overlap을 더한 구간만 다시 읽어 전체 기간을 매번 훑지 않습니다.
 
 ## 문서
 

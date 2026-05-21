@@ -1,10 +1,18 @@
 namespace MailWhere.Core.Scanning;
 
-public sealed record AutomaticScanWindowPlan(DateTimeOffset Since, bool UsedLastSuccessfulScan);
+public sealed record AutomaticScanWindowPlan(
+    DateTimeOffset Since,
+    bool UsedLastSuccessfulScan,
+    DateTimeOffset? InboxSince = null,
+    DateTimeOffset? SentSince = null,
+    bool UsedInboxLastSuccessfulScan = false,
+    bool UsedSentLastSuccessfulScan = false);
 
 public static class AutomaticScanWindowPlanner
 {
     public const string LastSuccessfulScanStateKey = "mail.auto.last_successful_scan_at";
+    public const string LastSuccessfulInboxScanStateKey = "mail.auto.inbox.last_successful_scan_at";
+    public const string LastSuccessfulSentScanStateKey = "mail.auto.sent.last_successful_scan_at";
     public static readonly TimeSpan DefaultOverlap = TimeSpan.FromMinutes(10);
 
     public static AutomaticScanWindowPlan Plan(
@@ -35,5 +43,25 @@ public static class AutomaticScanWindowPlanner
         return new AutomaticScanWindowPlan(
             overlappedStart < fullWindowStart ? fullWindowStart : overlappedStart,
             UsedLastSuccessfulScan: overlappedStart >= fullWindowStart);
+    }
+
+    public static AutomaticScanWindowPlan PlanFolders(
+        DateTimeOffset now,
+        int recentScanDays,
+        string? lastSuccessfulInboxScanValue,
+        string? lastSuccessfulSentScanValue,
+        string? legacyLastSuccessfulScanValue = null,
+        TimeSpan? overlap = null)
+    {
+        var inbox = Plan(now, recentScanDays, lastSuccessfulInboxScanValue ?? legacyLastSuccessfulScanValue, overlap);
+        var sent = Plan(now, recentScanDays, lastSuccessfulSentScanValue ?? legacyLastSuccessfulScanValue, overlap);
+        var since = inbox.Since <= sent.Since ? inbox.Since : sent.Since;
+        return new AutomaticScanWindowPlan(
+            since,
+            inbox.UsedLastSuccessfulScan && sent.UsedLastSuccessfulScan,
+            InboxSince: inbox.Since,
+            SentSince: sent.Since,
+            UsedInboxLastSuccessfulScan: inbox.UsedLastSuccessfulScan,
+            UsedSentLastSuccessfulScan: sent.UsedLastSuccessfulScan);
     }
 }

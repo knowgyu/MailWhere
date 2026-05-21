@@ -4,7 +4,7 @@ using MailWhere.Core.Mail;
 
 namespace MailWhere.OutlookCom;
 
-public sealed class OutlookComMailSource : IEmailSource
+public sealed class OutlookComMailSource : IEmailHydratingSource
 {
     public Task<EmailReadResult> ReadRecentAsync(int maxItems, bool includeBody, CancellationToken cancellationToken = default) =>
         ReadAsync(new MailReadRequest(maxItems, includeBody), cancellationToken);
@@ -173,7 +173,8 @@ public sealed class OutlookComMailSource : IEmailSource
                         request.IncludeBody,
                         mailboxIdentity,
                         fallbackSourceId: $"unknown-{folderCode}-{i}");
-                    if (request.Since is not null && snapshot.ReceivedAt < request.Since.Value)
+                    var since = request.SinceFor(snapshot.SourceFolder);
+                    if (since is not null && snapshot.ReceivedAt < since.Value)
                     {
                         break;
                     }
@@ -286,7 +287,12 @@ public sealed class OutlookComMailSource : IEmailSource
         string? body = includeBody ? Convert.ToString(itemDynamic.Body) : null;
         string? conversationId = TryReadString(item, "ConversationID");
         var recipients = SplitRecipients(TryReadString(item, "To"), TryReadString(item, "CC"));
-        var recipientRole = folderCode == "sent"
+        var sourceFolder = folderCode == "sent"
+            ? MailSourceFolder.Sent
+            : folderCode == "inbox"
+                ? MailSourceFolder.Inbox
+                : MailSourceFolder.Other;
+        var recipientRole = sourceFolder == MailSourceFolder.Sent
             ? MailboxRecipientRole.Other
             : TryResolveMailboxRecipientRole(item, mailboxIdentity);
 
@@ -299,7 +305,8 @@ public sealed class OutlookComMailSource : IEmailSource
             conversationId,
             mailboxIdentity.DisplayName,
             recipients,
-            recipientRole);
+            recipientRole,
+            sourceFolder);
     }
 
     private static DateTime? TryReadDateTime(object item, string propertyName)

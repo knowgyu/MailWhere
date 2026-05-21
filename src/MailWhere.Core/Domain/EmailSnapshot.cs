@@ -8,6 +8,13 @@ public enum MailboxRecipientRole
     Other
 }
 
+public enum MailSourceFolder
+{
+    Inbox,
+    Sent,
+    Other
+}
+
 public sealed record EmailSnapshot(
     string SourceId,
     DateTimeOffset ReceivedAt,
@@ -17,7 +24,8 @@ public sealed record EmailSnapshot(
     string? ConversationId = null,
     string? MailboxOwnerDisplayName = null,
     IReadOnlyList<string>? RecipientDisplayNames = null,
-    MailboxRecipientRole MailboxRecipientRole = MailboxRecipientRole.Direct)
+    MailboxRecipientRole MailboxRecipientRole = MailboxRecipientRole.Direct,
+    MailSourceFolder SourceFolder = MailSourceFolder.Inbox)
 {
     public string SourceHash => StableHash.Create(SourceId);
 }

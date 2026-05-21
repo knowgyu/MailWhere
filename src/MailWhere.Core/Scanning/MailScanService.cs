@@ -1,4 +1,5 @@
 using MailWhere.Core.Analysis;
+using MailWhere.Core.Capabilities;
 using MailWhere.Core.Domain;
 using MailWhere.Core.Mail;
 using MailWhere.Core.Pipeline;
@@ -10,7 +11,10 @@ public sealed record MailScanRequest(
     bool IncludeBody,
     DateTimeOffset Since,
     int LlmInitialConcurrency = 2,
-    int LlmMaxConcurrency = 4)
+    int LlmMaxConcurrency = 4,
+    DateTimeOffset? InboxSince = null,
+    DateTimeOffset? SentSince = null,
+    bool UseFastFilter = false)
 {
     public static MailScanRequest RecentMonth(DateTimeOffset now, int maxItems = 0, bool includeBody = true) =>
         new(maxItems, includeBody, now.AddDays(-30));
@@ -57,8 +61,29 @@ public sealed class MailActionScanner
         CancellationToken cancellationToken = default)
     {
         progress?.Report(new MailScanProgress("reading", 0, null, "Outlook에서 최근 1개월 메일을 읽는 중입니다…"));
-        var result = await _emailSource.ReadAsync(new MailReadRequest(request.MaxItems, request.IncludeBody, request.Since), cancellationToken).ConfigureAwait(false);
-        progress?.Report(new MailScanProgress("analyzing", 0, result.Messages.Count, $"메일 {result.Messages.Count}건을 분석하는 중입니다…"));
+        var metadataFirst = request.UseFastFilter && request.IncludeBody && _emailSource is IEmailHydratingSource;
+        var result = await _emailSource.ReadAsync(
+            new MailReadRequest(request.MaxItems, !metadataFirst && request.IncludeBody, request.Since, request.InboxSince, request.SentSince),
+            cancellationToken).ConfigureAwait(false);
+        var messages = result.Messages;
+        var prefilteredDuplicate = 0;
+        var warnings = result.Warnings;
+        if (metadataFirst && _emailSource is IEmailHydratingSource hydratingSource)
+        {
+            var fastFilter = await _pipeline.FastFilterAsync(messages, cancellationToken).ConfigureAwait(false);
+            prefilteredDuplicate = fastFilter.DuplicateCount;
+            var hydration = await HydrateEmailsAsync(hydratingSource, fastFilter.PendingEmails, cancellationToken).ConfigureAwait(false);
+            messages = hydration.Messages;
+            if (hydration.FailureCount > 0)
+            {
+                warnings = result.Warnings.Concat(new[]
+                {
+                    new MailReadWarning("mail-fast-filter-hydration-failed", CapabilitySeverity.Degraded, "HydrationFailure")
+                }).ToArray();
+            }
+        }
+
+        progress?.Report(new MailScanProgress("analyzing", 0, messages.Count, $"메일 {messages.Count}건을 분석하는 중입니다…"));
         var created = 0;
         var review = 0;
         var ignored = 0;
@@ -68,22 +93,22 @@ public sealed class MailActionScanner
         var maxBatchSize = Math.Max(1, _pipeline.PreferredBatchSize);
         var preparedBatches = new List<PreparedPipelineBatch>();
         var reservedSourceHashes = new HashSet<string>(StringComparer.Ordinal);
-        for (var start = 0; start < result.Messages.Count;)
+        for (var start = 0; start < messages.Count;)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var batchSize = SelectAdaptiveBatchSize(result.Messages, start, maxBatchSize);
-            var batch = result.Messages.Skip(start).Take(batchSize).ToArray();
-            var nextCount = Math.Min(result.Messages.Count, start + batch.Length);
+            var batchSize = SelectAdaptiveBatchSize(messages, start, maxBatchSize);
+            var batch = messages.Skip(start).Take(batchSize).ToArray();
+            var nextCount = Math.Min(messages.Count, start + batch.Length);
             var message = batch.Length == 1
-                ? $"메일 분석 중 {start + 1}/{result.Messages.Count} · 오래 걸리면 중지할 수 있습니다"
-                : $"메일 분석 중 {start + 1}-{nextCount}/{result.Messages.Count} · 오래 걸리면 중지할 수 있습니다";
-            progress?.Report(new MailScanProgress("analyzing", processed, result.Messages.Count, message));
+                ? $"메일 분석 중 {start + 1}/{messages.Count} · 오래 걸리면 중지할 수 있습니다"
+                : $"메일 분석 중 {start + 1}-{nextCount}/{messages.Count} · 오래 걸리면 중지할 수 있습니다";
+            progress?.Report(new MailScanProgress("analyzing", processed, messages.Count, message));
 
             preparedBatches.Add(await _pipeline.PrepareBatchAsync(batch, reservedSourceHashes, cancellationToken).ConfigureAwait(false));
             start += batch.Length;
         }
 
-        var analysesByBatch = await AnalyzePreparedBatchesAsync(preparedBatches, request, maxBatchSize, progress, result.Messages.Count, cancellationToken).ConfigureAwait(false);
+        var analysesByBatch = await AnalyzePreparedBatchesAsync(preparedBatches, request, maxBatchSize, progress, messages.Count, cancellationToken).ConfigureAwait(false);
 
         for (var batchIndex = 0; batchIndex < preparedBatches.Count; batchIndex++)
         {
@@ -108,13 +133,53 @@ public sealed class MailActionScanner
                         break;
                 }
 
-                progress?.Report(new MailScanProgress("analyzing", processed, result.Messages.Count, $"메일 분석 중 {processed}/{result.Messages.Count}"));
+                progress?.Report(new MailScanProgress("analyzing", processed, messages.Count, $"메일 분석 중 {processed}/{messages.Count}"));
             }
         }
 
-        progress?.Report(new MailScanProgress("completed", processed, result.Messages.Count, "메일 확인이 완료되었습니다."));
-        return new MailScanSummary(result.Messages.Count, created, review, ignored, duplicate, result.SkippedCount, result.Warnings);
+        progress?.Report(new MailScanProgress("completed", processed, messages.Count, "메일 확인이 완료되었습니다."));
+        return new MailScanSummary(result.Messages.Count, created, review, ignored, duplicate + prefilteredDuplicate, result.SkippedCount, warnings);
     }
+
+    private static async Task<MailHydrationResult> HydrateEmailsAsync(
+        IEmailHydratingSource source,
+        IReadOnlyList<EmailSnapshot> metadataEmails,
+        CancellationToken cancellationToken)
+    {
+        if (metadataEmails.Count == 0)
+        {
+            return new MailHydrationResult(Array.Empty<EmailSnapshot>(), FailureCount: 0);
+        }
+
+        var hydrated = new List<EmailSnapshot>(metadataEmails.Count);
+        var failureCount = 0;
+        foreach (var metadata in metadataEmails)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EmailSnapshot? full = null;
+            try
+            {
+                full = await source.TryReadBySourceIdAsync(metadata.SourceId, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                failureCount++;
+            }
+
+            hydrated.Add((full ?? metadata) with
+            {
+                ReceivedAt = metadata.ReceivedAt,
+                SourceFolder = metadata.SourceFolder,
+                MailboxRecipientRole = metadata.MailboxRecipientRole,
+                RecipientDisplayNames = metadata.RecipientDisplayNames,
+                MailboxOwnerDisplayName = metadata.MailboxOwnerDisplayName
+            });
+        }
+
+        return new MailHydrationResult(hydrated, failureCount);
+    }
+
+    private sealed record MailHydrationResult(IReadOnlyList<EmailSnapshot> Messages, int FailureCount);
 
     private async Task<IReadOnlyList<FollowUpAnalysis>[]> AnalyzePreparedBatchesAsync(
         IReadOnlyList<PreparedPipelineBatch> preparedBatches,

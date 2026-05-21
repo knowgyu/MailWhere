@@ -111,7 +111,11 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Automatic scan window uses full range without cursor", AutomaticScanWindowUsesFullRangeWithoutCursor),
     ("Automatic scan window uses cursor with overlap", AutomaticScanWindowUsesCursorWithOverlap),
     ("Automatic scan window caps stale and invalid cursor", AutomaticScanWindowCapsStaleAndInvalidCursor),
+    ("Automatic scan window plans folder deltas independently", AutomaticScanWindowPlansFolderDeltasIndependently),
+    ("Pipeline fast filter skips processed sources only", PipelineFastFilterSkipsProcessedSourcesOnly),
     ("Recent mail scan honors request window", RecentMailScanHonorsRequestWindow),
+    ("Recent mail scan fast filter hydrates pending sources only", RecentMailScanFastFilterHydratesPendingSourcesOnly),
+    ("Recent mail scan records hydration failures", RecentMailScanRecordsHydrationFailures),
     ("Recent mail scan supports unlimited count", RecentMailScanSupportsUnlimitedCount),
     ("Mail scan reports progress", MailScanReportsProgress),
     ("Mail scan adapts batch size by content length", MailScanAdaptsBatchSizeByContentLength),
@@ -2241,6 +2245,41 @@ static Task AutomaticScanWindowCapsStaleAndInvalidCursor()
     return Task.CompletedTask;
 }
 
+static Task AutomaticScanWindowPlansFolderDeltasIndependently()
+{
+    var now = new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.FromHours(9));
+    var inboxLast = now.AddMinutes(-20).ToString("O");
+    var plan = AutomaticScanWindowPlanner.PlanFolders(
+        now,
+        recentScanDays: 7,
+        lastSuccessfulInboxScanValue: inboxLast,
+        lastSuccessfulSentScanValue: null,
+        legacyLastSuccessfulScanValue: null,
+        overlap: TimeSpan.FromMinutes(10));
+
+    Assert(plan.InboxSince == now.AddMinutes(-30), "Expected inbox to use its recent cursor with overlap.");
+    Assert(plan.SentSince == now.AddDays(-7), "Expected sent to fall back to full configured range without its own cursor.");
+    Assert(plan.Since == now.AddDays(-7), "Expected aggregate lower bound to be the earliest folder window.");
+    Assert(plan.UsedInboxLastSuccessfulScan, "Expected inbox cursor to be marked used.");
+    Assert(!plan.UsedSentLastSuccessfulScan, "Expected sent cursor to be marked missing.");
+    return Task.CompletedTask;
+}
+
+static async Task PipelineFastFilterSkipsProcessedSourcesOnly()
+{
+    var store = new FakeStore();
+    var processed = Mail("이미 처리", "처리된 본문", "fast-processed");
+    var duplicate = Mail("중복", "중복 본문", "fast-duplicate");
+    var ambiguous = Mail("공지처럼 보임", string.Empty, "fast-ambiguous");
+    store.Processed.Add(processed.SourceHash);
+    var pipeline = new FollowUpPipeline(new RuleBasedFollowUpAnalyzer(), store);
+
+    var result = await pipeline.FastFilterAsync(new[] { processed, duplicate, duplicate, ambiguous });
+
+    Assert(result.DuplicateCount == 2, "Expected processed source and in-batch duplicate to be skipped.");
+    Assert(result.PendingEmails.Select(mail => mail.SourceId).SequenceEqual(new[] { duplicate.SourceId, ambiguous.SourceId }), "Expected unprocessed ambiguous mail to remain analyzable.");
+}
+
 static async Task RecentMailScanHonorsRequestWindow()
 {
     var now = new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9));
@@ -2262,6 +2301,44 @@ static async Task RecentMailScanHonorsRequestWindow()
     Assert(summary.TaskCreatedCount == 2, "Expected direct actionable mail to become tasks.");
     Assert(summary.ReviewCandidateCount == 0, "Expected no review candidate for direct actionable mail.");
     Assert(summary.IgnoredCount == 1, "Expected one ignored message.");
+}
+
+static async Task RecentMailScanFastFilterHydratesPendingSourcesOnly()
+{
+    var now = new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9));
+    var processed = Mail("이미 처리", string.Empty, "fast-scan-processed") with { Body = null };
+    var pending = Mail("자료 요청", string.Empty, "fast-scan-pending") with { Body = null };
+    var source = new HydratingSequenceEmailSource(new[] { processed, pending }, new Dictionary<string, EmailSnapshot>
+    {
+        [pending.SourceId] = pending with { Body = "내일까지 검토 후 회신 부탁드립니다." }
+    });
+    var store = new FakeStore();
+    store.Processed.Add(processed.SourceHash);
+    var scanner = new MailActionScanner(source, new FollowUpPipeline(new RuleBasedFollowUpAnalyzer(), store));
+
+    var summary = await scanner.ScanAsync(new MailScanRequest(0, IncludeBody: true, now.AddDays(-1), UseFastFilter: true));
+
+    Assert(source.HydrateCalls == 1, "Expected only the unprocessed pending source to be hydrated.");
+    Assert(summary.ReadCount == 2, "Expected metadata read count to include processed and pending messages.");
+    Assert(summary.DuplicateCount == 1, "Expected processed source to be counted as duplicate.");
+    Assert(summary.TaskCreatedCount == 1, "Expected hydrated pending body to become a task.");
+}
+
+static async Task RecentMailScanRecordsHydrationFailures()
+{
+    var now = new DateTimeOffset(2026, 5, 14, 9, 0, 0, TimeSpan.FromHours(9));
+    var pending = Mail("자료 요청", "제목으로라도 확인 부탁드립니다.", "fast-scan-hydration-failure") with { Body = null };
+    var source = new HydratingSequenceEmailSource(
+        new[] { pending },
+        new Dictionary<string, EmailSnapshot>(),
+        new HashSet<string> { pending.SourceId });
+    var scanner = new MailActionScanner(source, new FollowUpPipeline(new RuleBasedFollowUpAnalyzer(), new FakeStore()));
+
+    var summary = await scanner.ScanAsync(new MailScanRequest(0, IncludeBody: true, now.AddDays(-1), UseFastFilter: true));
+
+    Assert(source.HydrateCalls == 1, "Expected the pending metadata row to be hydrated once.");
+    Assert(summary.Warnings.Any(warning => warning.Code == "mail-fast-filter-hydration-failed"), "Expected hydration failure evidence to be preserved as a warning.");
+    Assert(summary.TaskCreatedCount + summary.ReviewCandidateCount + summary.IgnoredCount == 1, "Expected scan to continue with metadata after hydration failure.");
 }
 
 static async Task RecentMailScanSupportsUnlimitedCount()
@@ -4389,5 +4466,41 @@ sealed class SequenceEmailSource : IEmailSource
         LastRequest = request;
         var messages = request.MaxItems <= 0 ? _messages : _messages.Take(request.MaxItems).ToArray();
         return Task.FromResult(new EmailReadResult(messages.ToArray(), Array.Empty<MailReadWarning>(), 0));
+    }
+}
+
+sealed class HydratingSequenceEmailSource : IEmailHydratingSource
+{
+    private readonly IReadOnlyList<EmailSnapshot> _metadataMessages;
+    private readonly IReadOnlyDictionary<string, EmailSnapshot> _hydratedBySourceId;
+    private readonly IReadOnlySet<string> _throwingSourceIds;
+
+    public HydratingSequenceEmailSource(
+        IReadOnlyList<EmailSnapshot> metadataMessages,
+        IReadOnlyDictionary<string, EmailSnapshot> hydratedBySourceId,
+        IReadOnlySet<string>? throwingSourceIds = null)
+    {
+        _metadataMessages = metadataMessages;
+        _hydratedBySourceId = hydratedBySourceId;
+        _throwingSourceIds = throwingSourceIds ?? new HashSet<string>();
+    }
+
+    public int HydrateCalls { get; private set; }
+
+    public Task<EmailReadResult> ReadAsync(MailReadRequest request, CancellationToken cancellationToken = default)
+    {
+        var messages = request.MaxItems <= 0 ? _metadataMessages : _metadataMessages.Take(request.MaxItems).ToArray();
+        return Task.FromResult(new EmailReadResult(messages.ToArray(), Array.Empty<MailReadWarning>(), 0));
+    }
+
+    public Task<EmailSnapshot?> TryReadBySourceIdAsync(string? sourceId, CancellationToken cancellationToken = default)
+    {
+        HydrateCalls++;
+        if (sourceId is not null && _throwingSourceIds.Contains(sourceId))
+        {
+            throw new InvalidOperationException("Hydration failed.");
+        }
+
+        return Task.FromResult(sourceId is not null && _hydratedBySourceId.TryGetValue(sourceId, out var snapshot) ? snapshot : null);
     }
 }

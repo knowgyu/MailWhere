@@ -31,6 +31,8 @@ public partial class MainWindow : Window
     private DispatcherTimer? _reminderTimer;
     private DispatcherTimer? _dailyBoardTimer;
     private DispatcherTimer? _automaticScanTimer;
+    private DispatcherTimer? _eventScanDebounceTimer;
+    private OutlookItemAddWatcher? _outlookItemAddWatcher;
     private CancellationTokenSource? _scanCancellationSource;
     private readonly DateTimeOffset _appStartedAt = DateTimeOffset.Now;
     private bool _scanInProgress;
@@ -45,6 +47,7 @@ public partial class MainWindow : Window
     private AnalysisTelemetry _lastAnalysisTelemetry = AnalysisTelemetry.Empty;
     private bool _dailyBoardCheckInProgress;
     private bool _reminderCheckInProgress;
+    private bool _eventScanPending;
 
     public MainWindow()
     {
@@ -106,6 +109,7 @@ public partial class MainWindow : Window
     {
         if (_allowExit)
         {
+            StopOutlookEventWatcher();
             return;
         }
 
@@ -327,12 +331,6 @@ public partial class MainWindow : Window
 
     private async void OpenReviewCandidates_Click(object sender, RoutedEventArgs e)
     {
-        if (_boardSnapshot?.Candidates.Count == 0 && _boardSnapshot.ClosureSuggestions.Count > 0)
-        {
-            await OpenClosureSuggestionsAsync();
-            return;
-        }
-
         await OpenReviewCandidatesWindowAsync();
     }
 
@@ -354,6 +352,7 @@ public partial class MainWindow : Window
 
         if (_settings.AutomaticWatcherRequested && _settings.SmokeGatePassed)
         {
+            StartOutlookEventWatcher();
             await ScanRecentMailAsync(showSummaryNotification: false);
             StartAutomaticScanTimer();
         }
@@ -397,13 +396,27 @@ public partial class MainWindow : Window
                 IncludeBody: true,
                 windowPlan.Since,
                 _settings.LlmInitialConcurrency,
-                _settings.LlmMaxConcurrency);
+                _settings.LlmMaxConcurrency,
+                InboxSince: windowPlan.InboxSince,
+                SentSince: windowPlan.SentSince,
+                UseFastFilter: automaticScan && (windowPlan.UsedInboxLastSuccessfulScan || windowPlan.UsedSentLastSuccessfulScan));
             var progress = new Progress<MailScanProgress>(UpdateScanProgress);
 
             var summary = await scanner.ScanAsync(request, progress, scanCancellationToken);
             if (automaticScan && !summary.Warnings.Any(warning => warning.Severity == CapabilitySeverity.Blocked))
             {
-                await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulScanStateKey, scanStartedAt.ToString("O"), scanCancellationToken);
+                var cursorValue = scanStartedAt.ToString("O");
+                if (FolderScanSucceeded(summary.Warnings, MailSourceFolder.Inbox))
+                {
+                    await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulInboxScanStateKey, cursorValue, scanCancellationToken);
+                }
+
+                if (FolderScanSucceeded(summary.Warnings, MailSourceFolder.Sent))
+                {
+                    await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulSentScanStateKey, cursorValue, scanCancellationToken);
+                }
+
+                await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulScanStateKey, cursorValue, scanCancellationToken);
             }
             _lastAnalysisTelemetry = analyzer is IAnalysisTelemetrySource telemetrySource
                 ? telemetrySource.GetTelemetrySnapshot()
@@ -414,13 +427,14 @@ public partial class MainWindow : Window
                 StatusText.Text = "수동 확인이 성공해 자동 메일 확인을 켤 수 있습니다.";
                 if (_settings.AutomaticWatcherRequested)
                 {
+                    StartOutlookEventWatcher();
                     StartAutomaticScanTimer();
                 }
             }
 
             await RefreshTasksAsync();
             var reviewCandidates = _boardSnapshot?.Candidates ?? Array.Empty<ReviewCandidate>();
-            _reviewCandidatesWindow?.Refresh(reviewCandidates, CanRetryLlmFailures);
+            _reviewCandidatesWindow?.Refresh(reviewCandidates, _boardSnapshot?.ClosureSuggestions ?? Array.Empty<WaitingClosureSuggestion>(), CanRetryLlmFailures);
             if (!showSummaryNotification)
             {
                 await NotifyDueRemindersAsync();
@@ -466,8 +480,24 @@ public partial class MainWindow : Window
 
     private async Task<AutomaticScanWindowPlan> PlanAutomaticScanWindowAsync(SqliteFollowUpStore store, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        var inboxLastSuccessfulScan = await store.GetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulInboxScanStateKey, cancellationToken);
+        var sentLastSuccessfulScan = await store.GetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulSentScanStateKey, cancellationToken);
         var lastSuccessfulScan = await store.GetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulScanStateKey, cancellationToken);
-        return AutomaticScanWindowPlanner.Plan(now, _settings.RecentScanDays, lastSuccessfulScan);
+        return AutomaticScanWindowPlanner.PlanFolders(now, _settings.RecentScanDays, inboxLastSuccessfulScan, sentLastSuccessfulScan, lastSuccessfulScan);
+    }
+
+    private static bool FolderScanSucceeded(IReadOnlyList<MailReadWarning> warnings, MailSourceFolder folder)
+    {
+        if (warnings.Any(warning => warning.Severity == CapabilitySeverity.Blocked))
+        {
+            return false;
+        }
+
+        var folderCode = folder == MailSourceFolder.Sent ? "sent" : "inbox";
+        return !warnings.Any(warning =>
+            warning.Code.Equals($"outlook-{folderCode}-read-failed", StringComparison.OrdinalIgnoreCase)
+            || warning.Code.Equals($"outlook-{folderCode}-folder-unavailable", StringComparison.OrdinalIgnoreCase)
+            || (folder == MailSourceFolder.Sent && warning.Code.Equals("outlook-sent-folder-unavailable", StringComparison.OrdinalIgnoreCase)));
     }
 
     private void StartReminderTimer()
@@ -571,6 +601,94 @@ public partial class MainWindow : Window
         _automaticScanTimer.Start();
     }
 
+    private void StartOutlookEventWatcher()
+    {
+        if (_outlookItemAddWatcher is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            _outlookItemAddWatcher = OutlookItemAddWatcher.Start();
+            _outlookItemAddWatcher.ItemAdded += OutlookItemAddWatcher_ItemAdded;
+            StatusText.Text = "새 메일 이벤트 감지를 시작했습니다. 놓친 항목은 자동 확인 간격으로 보정합니다.";
+        }
+        catch (Exception ex)
+        {
+            _outlookItemAddWatcher = null;
+            StatusText.Text = $"새 메일 이벤트 감지를 사용할 수 없어 자동 확인 간격으로 보정합니다: {ex.GetType().Name}";
+        }
+    }
+
+    private void StopOutlookEventWatcher()
+    {
+        if (_outlookItemAddWatcher is not null)
+        {
+            _outlookItemAddWatcher.ItemAdded -= OutlookItemAddWatcher_ItemAdded;
+            _outlookItemAddWatcher.Dispose();
+            _outlookItemAddWatcher = null;
+        }
+
+        _eventScanDebounceTimer?.Stop();
+        _eventScanPending = false;
+    }
+
+    private void OutlookItemAddWatcher_ItemAdded(object? sender, OutlookItemAddedEvent e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.InvokeAsync(() => OutlookItemAddWatcher_ItemAdded(sender, e));
+            return;
+        }
+
+        if (!_settings.AutomaticWatcherRequested || !_settings.SmokeGatePassed)
+        {
+            return;
+        }
+
+        _eventScanPending = true;
+        _eventScanDebounceTimer ??= CreateEventScanDebounceTimer();
+        _eventScanDebounceTimer.Stop();
+        _eventScanDebounceTimer.Start();
+        StatusText.Text = e.SourceFolder == MailSourceFolder.Sent
+            ? "보낸 메일 변화를 감지했습니다. 곧 확인합니다…"
+            : "새 메일을 감지했습니다. 곧 확인합니다…";
+    }
+
+    private DispatcherTimer CreateEventScanDebounceTimer()
+    {
+        var timer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(10)
+        };
+        timer.Tick += async (_, _) =>
+        {
+            timer.Stop();
+            if (!_eventScanPending || !_settings.AutomaticWatcherRequested || !_settings.SmokeGatePassed)
+            {
+                return;
+            }
+
+            if (_scanInProgress)
+            {
+                timer.Start();
+                return;
+            }
+
+            _eventScanPending = false;
+            try
+            {
+                await ScanRecentMailAsync(showSummaryNotification: false);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"새 메일 이벤트 확인 실패: {ex.GetType().Name}";
+            }
+        };
+        return timer;
+    }
+
     private async Task RefreshTasksAsync()
     {
         _boardSnapshot = await LoadBoardSnapshotAsync();
@@ -648,15 +766,16 @@ public partial class MainWindow : Window
     {
         var store = await GetStoreAsync();
         var candidates = await store.ListReviewCandidatesAsync();
-        _reviewCandidatesWindow?.Refresh(candidates, CanRetryLlmFailures);
+        var suggestions = await store.ListWaitingClosureSuggestionsAsync();
+        _reviewCandidatesWindow?.Refresh(candidates, suggestions, CanRetryLlmFailures);
         if (_boardSnapshot is not null)
         {
-            _boardSnapshot = _boardSnapshot with { Candidates = candidates };
+            _boardSnapshot = _boardSnapshot with { Candidates = candidates, ClosureSuggestions = suggestions };
             UpdateReviewCandidatesButton(_boardSnapshot.Candidates.Count, _boardSnapshot.ClosureSuggestions.Count);
         }
         else
         {
-            UpdateReviewCandidatesButton(candidates.Count, 0);
+            UpdateReviewCandidatesButton(candidates.Count, suggestions.Count);
         }
         return candidates;
     }
@@ -673,6 +792,12 @@ public partial class MainWindow : Window
         else
         {
             UpdateReviewCandidatesButton(0, suggestions.Count);
+        }
+
+        if (_reviewCandidatesWindow?.IsVisible == true)
+        {
+            var candidates = _boardSnapshot?.Candidates ?? await store.ListReviewCandidatesAsync();
+            _reviewCandidatesWindow.Refresh(candidates, suggestions, CanRetryLlmFailures);
         }
 
         return suggestions;
@@ -832,7 +957,7 @@ public partial class MainWindow : Window
             await RefreshTasksAsync();
             if (_boardSnapshot is not null)
             {
-                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, CanRetryLlmFailures);
+                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, _boardSnapshot.ClosureSuggestions, CanRetryLlmFailures);
             }
             StatusText.Text = task is null
                 ? "이미 처리된 항목입니다."
@@ -946,30 +1071,7 @@ public partial class MainWindow : Window
 
     private async Task OpenClosureSuggestionsAsync()
     {
-        var suggestions = await RefreshClosureSuggestionsAsync();
-        if (suggestions.Count == 0)
-        {
-            StatusText.Text = "보관을 제안할 대기 항목이 없습니다.";
-            return;
-        }
-
-        var suggestion = suggestions[0];
-        var decision = System.Windows.MessageBox.Show(
-            $"{suggestion.TaskTitle}\n\n{suggestion.ActionText}\n\n사유: {suggestion.Reason}",
-            "대기 항목 보관 제안",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        var store = await GetStoreAsync();
-        var resolution = decision == MessageBoxResult.Yes
-            ? WaitingClosureResolution.Archived
-            : WaitingClosureResolution.Kept;
-        var resolved = await store.ResolveWaitingClosureSuggestionAsync(suggestion.Id, resolution, DateTimeOffset.UtcNow);
-        await RefreshTasksAsync();
-        StatusText.Text = resolved
-            ? resolution == WaitingClosureResolution.Archived
-                ? "대기 항목을 보관했습니다. Outlook 원본은 변경하지 않았습니다."
-                : "대기 항목을 유지하고 제안만 닫았습니다."
-            : "이미 처리된 보관 제안입니다.";
+        await OpenReviewCandidatesWindowAsync();
     }
 
     public async Task OpenClosureSuggestionsFromTrayAsync()
@@ -1075,19 +1177,22 @@ public partial class MainWindow : Window
     private async Task OpenReviewCandidatesWindowAsync()
     {
         var candidates = await RefreshReviewCandidatesAsync();
+        var closureSuggestions = _boardSnapshot?.ClosureSuggestions ?? await RefreshClosureSuggestionsAsync();
         if (_reviewCandidatesWindow?.IsVisible == true)
         {
-            _reviewCandidatesWindow.Refresh(candidates, CanRetryLlmFailures);
+            _reviewCandidatesWindow.Refresh(candidates, closureSuggestions, CanRetryLlmFailures);
             BringWindowToFront(_reviewCandidatesWindow);
             return;
         }
 
         _reviewCandidatesWindow = new ReviewCandidatesWindow(
             candidates,
+            closureSuggestions,
             ApproveReviewCandidateAsync,
             OpenReviewCandidateMailAsync,
             SnoozeReviewCandidateAsync,
             IgnoreReviewCandidateAsync,
+            ResolveClosureSuggestionAsync,
             RetryLlmFailureReviewCandidatesAsync,
             CanRetryLlmFailures)
         {
@@ -1096,9 +1201,10 @@ public partial class MainWindow : Window
         _reviewCandidatesWindow.Closed += (_, _) => _reviewCandidatesWindow = null;
         _reviewCandidatesWindow.Show();
         BringWindowToFront(_reviewCandidatesWindow);
-        StatusText.Text = candidates.Count == 0
+        var total = candidates.Count + closureSuggestions.Count;
+        StatusText.Text = total == 0
             ? "표시할 확인 필요 항목이 없습니다."
-            : $"확인 필요 {candidates.Count}개를 열었습니다.";
+            : $"확인 필요 {total}개를 열었습니다.";
     }
 
     private async Task OpenArchiveWindowAsync()
@@ -1147,6 +1253,24 @@ public partial class MainWindow : Window
         await OpenSourceMailAsync(candidate.SourceId);
     }
 
+    private async Task ResolveClosureSuggestionAsync(WaitingClosureSuggestion suggestion, bool archive)
+    {
+        var store = await GetStoreAsync();
+        var resolution = archive ? WaitingClosureResolution.Archived : WaitingClosureResolution.Kept;
+        var resolved = await store.ResolveWaitingClosureSuggestionAsync(suggestion.Id, resolution, DateTimeOffset.UtcNow);
+        await RefreshTasksAsync();
+        if (_boardSnapshot is not null)
+        {
+            _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, _boardSnapshot.ClosureSuggestions, CanRetryLlmFailures);
+        }
+
+        StatusText.Text = resolved
+            ? archive
+                ? "대기 항목을 보관했습니다. Outlook 원본은 변경하지 않았습니다."
+                : "대기 항목을 유지하고 제안만 닫았습니다."
+            : "이미 처리된 보관 제안입니다.";
+    }
+
     private async Task<ReviewCandidateRetrySummary> RetryLlmFailureReviewCandidatesAsync()
     {
         if (!CanRetryLlmFailures)
@@ -1178,7 +1302,7 @@ public partial class MainWindow : Window
             await RefreshTasksAsync();
             if (_boardSnapshot is not null)
             {
-                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, CanRetryLlmFailures);
+                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, _boardSnapshot.ClosureSuggestions, CanRetryLlmFailures);
             }
             StatusText.Text = ToRetryStatus(summary);
             return summary;
@@ -1236,7 +1360,12 @@ public partial class MainWindow : Window
         var startupRegistration = SyncStartupRegistration();
         if (_settings.AutomaticWatcherRequested && _settings.SmokeGatePassed)
         {
+            StartOutlookEventWatcher();
             StartAutomaticScanTimer();
+        }
+        else
+        {
+            StopOutlookEventWatcher();
         }
 
         StatusText.Text = startupRegistration.Succeeded
@@ -1297,7 +1426,7 @@ public partial class MainWindow : Window
             new Dictionary<Guid, ReplyProgressItem>(),
             Array.Empty<WaitingClosureSuggestion>());
         RenderTasks(_boardSnapshot);
-        _reviewCandidatesWindow?.Refresh(Array.Empty<ReviewCandidate>(), CanRetryLlmFailures);
+        _reviewCandidatesWindow?.Refresh(Array.Empty<ReviewCandidate>(), Array.Empty<WaitingClosureSuggestion>(), CanRetryLlmFailures);
         _archiveWindow?.Refresh(Array.Empty<LocalTaskItem>());
         StatusText.Text = deleted == 0
             ? "삭제할 로컬 업무 데이터가 없습니다. 설정은 유지됩니다."

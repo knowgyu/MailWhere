@@ -61,9 +61,9 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="18,0,0,0">
                                     <Button Content="원본 열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenMail_Click" Margin="0,0,6,0"/>
-                                    <Button Content="등록(Y)" IsEnabled="{Binding CanAct}" Tag="{Binding}" Click="Approve_Click" Style="{StaticResource MwButton.Primary}" Margin="0,0,6,0"/>
-                                    <Button Content="나중에(S)" IsEnabled="{Binding CanAct}" Tag="{Binding}" Click="Snooze_Click" Style="{StaticResource MwButton.Ghost}" Margin="0,0,6,0"/>
-                                    <Button Content="무시(I)" IsEnabled="{Binding CanAct}" Tag="{Binding}" Click="Ignore_Click" Style="{StaticResource MwButton.Danger}" Margin="0"/>
+                                    <Button Content="{Binding PrimaryText}" IsEnabled="{Binding CanAct}" Tag="{Binding}" Click="Approve_Click" Style="{StaticResource MwButton.Primary}" Margin="0,0,6,0"/>
+                                    <Button Content="나중에(S)" IsEnabled="{Binding CanAct}" Tag="{Binding}" Click="Snooze_Click" Style="{StaticResource MwButton.Ghost}" Visibility="{Binding SnoozeVisibility}" Margin="0,0,6,0"/>
+                                    <Button Content="{Binding SecondaryText}" IsEnabled="{Binding CanAct}" Tag="{Binding}" Click="Ignore_Click" Style="{StaticResource MwButton.Danger}" Margin="0"/>
                                 </StackPanel>
                             </Grid>
                         </DataTemplate>
