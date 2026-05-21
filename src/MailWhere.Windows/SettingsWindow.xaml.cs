@@ -11,6 +11,7 @@ public sealed record DeveloperToolActions(
     Func<BoardRouteFilter, Task> OpenFilterAsync,
     Func<Task> ShowToastAsync,
     Func<Task> ResetTodayMarkerAsync,
+    Func<Task> ResetLocalDataAsync,
     Func<Task> AddSampleTasksAsync,
     Func<Task> AddSampleReviewAsync);
 
@@ -208,6 +209,7 @@ public partial class SettingsWindow : Window
     private async void SampleTasks_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(_developerToolActions.AddSampleTasksAsync, "샘플 업무를 추가했습니다.");
     private async void SampleReview_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(_developerToolActions.AddSampleReviewAsync, "샘플 확인 필요 항목을 추가했습니다.");
     private async void ResetTodayMarker_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(_developerToolActions.ResetTodayMarkerAsync, "오늘 표시 기록을 초기화했습니다.");
+    private async void ResetLocalData_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(_developerToolActions.ResetLocalDataAsync, "로컬 업무 데이터를 삭제했습니다. 설정은 유지됩니다.");
 
     private async Task RunDeveloperActionAsync(Func<Task> action, string successMessage)
     {
@@ -215,6 +217,10 @@ public partial class SettingsWindow : Window
         {
             await action();
             DeveloperStatusText.Text = successMessage;
+        }
+        catch (OperationCanceledException)
+        {
+            DeveloperStatusText.Text = "취소했습니다.";
         }
         catch (Exception ex)
         {
@@ -224,6 +230,7 @@ public partial class SettingsWindow : Window
 
     private static int NormalizeInterval(int value) => value switch
     {
+        <= 1 => 1,
         <= 10 => 10,
         <= 15 => 15,
         <= 30 => 30,
@@ -240,6 +247,7 @@ public partial class SettingsWindow : Window
 
     private static string ToRecentRangeLabel(int days) => days switch
     {
+        1 => "최근 1일",
         7 => "최근 7일",
         30 => "최근 30일",
         90 => "최근 90일",

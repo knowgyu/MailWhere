@@ -6,6 +6,7 @@ public static class RecentMailRangeChoices
 {
     public static IReadOnlyList<RecentMailRangeChoice> All { get; } =
     [
+        new(1),
         new(7),
         new(30),
         new(90)
@@ -20,9 +21,11 @@ public static class RecentMailRangeChoices
             return days;
         }
 
-        return days <= 7
-            ? 7
-            : days <= 30
+        return days <= 1
+            ? 1
+            : days <= 7
+                ? 7
+                : days <= 30
                 ? 30
                 : 90;
     }

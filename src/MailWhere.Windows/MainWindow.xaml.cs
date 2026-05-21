@@ -1217,6 +1217,7 @@ public partial class MainWindow : Window
                 OpenFilterFromDeveloperAsync,
                 ShowDeveloperToastAsync,
                 ResetTodayBoardMarkerAsync,
+                ResetLocalDataFromDeveloperAsync,
                 AddSampleTasksAsync,
                 AddSampleReviewCandidateAsync))
         {
@@ -1272,6 +1273,36 @@ public partial class MainWindow : Window
         var store = await GetStoreAsync();
         await store.SetAppStateAsync(DailyBoardPlanner.LastShownDateKey, string.Empty);
         StatusText.Text = "오늘 업무 자동 표시 기록을 초기화했습니다.";
+    }
+
+    private async Task ResetLocalDataFromDeveloperAsync()
+    {
+        var result = System.Windows.MessageBox.Show(
+            this,
+            "로컬 업무/확인 필요/처리 기록 DB를 삭제할까요?\n\n설정(runtime-settings.json)은 유지되고 Outlook 원본 메일은 변경하지 않습니다.",
+            "로컬 업무 데이터 삭제",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (result != MessageBoxResult.Yes)
+        {
+            StatusText.Text = "로컬 업무 데이터 삭제를 취소했습니다.";
+            throw new OperationCanceledException();
+        }
+
+        _store = null;
+        var deleted = WindowsRuntimeDiagnostics.DeleteFollowUpDatabaseFiles();
+        _boardSnapshot = new BoardSnapshot(
+            Array.Empty<LocalTaskItem>(),
+            Array.Empty<ReviewCandidate>(),
+            new Dictionary<Guid, ReplyProgressItem>(),
+            Array.Empty<WaitingClosureSuggestion>());
+        RenderTasks(_boardSnapshot);
+        _reviewCandidatesWindow?.Refresh(Array.Empty<ReviewCandidate>(), CanRetryLlmFailures);
+        _archiveWindow?.Refresh(Array.Empty<LocalTaskItem>());
+        StatusText.Text = deleted == 0
+            ? "삭제할 로컬 업무 데이터가 없습니다. 설정은 유지됩니다."
+            : $"로컬 업무 데이터 파일 {deleted}개를 삭제했습니다. 설정은 유지됩니다.";
+        await Task.CompletedTask;
     }
 
     private async Task AddSampleTasksAsync()

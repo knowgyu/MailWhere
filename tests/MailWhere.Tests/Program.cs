@@ -770,6 +770,7 @@ static Task RuntimeSettingsDefaultUnlimitedRecentScan()
     var defaults = RuntimeSettingsSerializer.ParseOrDefault("{}");
     Assert(defaults.RecentScanDays == 30, "Expected recent scan days default.");
     Assert(defaults.RecentScanMaxItems == 0, "Expected default scan max to mean unlimited.");
+    Assert(defaults.AutomaticScanIntervalMinutes == 15, "Expected automatic scan interval default.");
     Assert(defaults.LlmFallbackPolicy == LlmFallbackPolicy.LlmOnly, "Expected default LLM failure handling to require explicit fallback consent.");
     Assert(defaults.WindowsStartupRequested, "Expected startup tray registration to be requested by default.");
     Assert(defaults.LlmEndpoint.Length == 0, "Expected default LLM endpoint to stay empty until user input.");
@@ -778,6 +779,8 @@ static Task RuntimeSettingsDefaultUnlimitedRecentScan()
     var explicitUnlimited = RuntimeSettingsSerializer.ParseOrDefault("""{"RecentScanMaxItems":0,"LlmFallbackPolicy":"LlmThenRules"}""");
     Assert(explicitUnlimited.RecentScanMaxItems == 0, "Expected explicit unlimited scan max.");
     Assert(explicitUnlimited.LlmFallbackPolicy == LlmFallbackPolicy.LlmThenRules, "Expected explicit fallback policy to be preserved.");
+    Assert(RuntimeSettingsSerializer.ParseOrDefault("""{"AutomaticScanIntervalMinutes":1}""").AutomaticScanIntervalMinutes == 1, "Expected one-minute automatic scan interval to be supported.");
+    Assert(RuntimeSettingsSerializer.ParseOrDefault("""{"AutomaticScanIntervalMinutes":0}""").AutomaticScanIntervalMinutes == 1, "Expected automatic scan interval minimum clamp.");
     return Task.CompletedTask;
 }
 
@@ -814,6 +817,7 @@ static Task RuntimeSettingsClampsLlmConcurrency()
 
 static Task RuntimeSettingsSimpleSettingChoicesMap()
 {
+    Assert(RecentMailRangeChoices.NormalizeDays(1) == 1, "Expected one-day range to stay selectable.");
     Assert(RecentMailRangeChoices.NormalizeDays(3) == 7, "Expected short custom range to normalize to 7-day UI choice.");
     Assert(RecentMailRangeChoices.NormalizeDays(20) == 30, "Expected mid custom range to normalize to 30-day UI choice.");
     Assert(RecentMailRangeChoices.NormalizeDays(45) == 90, "Expected long custom range to normalize to 90-day UI choice.");

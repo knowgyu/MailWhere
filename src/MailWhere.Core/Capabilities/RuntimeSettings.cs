@@ -141,7 +141,7 @@ public static class RuntimeSettingsSerializer
             ExternalLlmEnabled: partial?.ExternalLlmEnabled ?? defaults.ExternalLlmEnabled,
             WindowsStartupRequested: partial?.WindowsStartupRequested ?? defaults.WindowsStartupRequested,
             AutomaticWatcherRequested: partial?.AutomaticWatcherRequested ?? defaults.AutomaticWatcherRequested,
-            AutomaticScanIntervalMinutes: Clamp(partial?.AutomaticScanIntervalMinutes, 5, 240, defaults.AutomaticScanIntervalMinutes),
+            AutomaticScanIntervalMinutes: Clamp(partial?.AutomaticScanIntervalMinutes, 1, 240, defaults.AutomaticScanIntervalMinutes),
             SmokeGatePassed: partial?.SmokeGatePassed ?? defaults.SmokeGatePassed,
             RuleOnlyModeAccepted: partial?.RuleOnlyModeAccepted ?? defaults.RuleOnlyModeAccepted,
             LlmProvider: partial?.LlmProvider ?? defaults.LlmProvider,

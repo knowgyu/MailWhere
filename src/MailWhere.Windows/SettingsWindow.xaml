@@ -72,6 +72,7 @@
                                         <StackPanel Grid.Column="1">
                                             <TextBlock Text="자동 확인 간격" FontWeight="SemiBold"/>
                                             <ComboBox x:Name="AutomaticScanIntervalBox">
+                                                <ComboBoxItem Tag="1" Content="1분마다"/>
                                                 <ComboBoxItem Tag="10" Content="10분마다"/>
                                                 <ComboBoxItem Tag="15" Content="15분마다"/>
                                                 <ComboBoxItem Tag="30" Content="30분마다"/>
@@ -233,6 +234,7 @@
                                         <Button Click="SampleTasks_Click">샘플 업무 추가</Button>
                                         <Button Click="SampleReview_Click">샘플 확인 필요 추가</Button>
                                         <Button Click="ResetTodayMarker_Click">오늘 표시 기록 초기화</Button>
+                                        <Button Click="ResetLocalData_Click" Style="{StaticResource MwButton.Danger}">로컬 업무 데이터 삭제</Button>
                                     </WrapPanel>
                                     <TextBlock x:Name="DeveloperStatusText" Style="{StaticResource HintText}" Text="테스트 버튼은 로컬 데이터와 알림 동작 확인용입니다." Margin="0,8,0,0"/>
                                 </StackPanel>

@@ -7,6 +7,7 @@
   "LlmFallbackPolicy": "LlmOnly",
   "RecentScanDays": 30,
   "RecentScanMaxItems": 0,
+  "AutomaticScanIntervalMinutes": 15,
   "ReminderLookAheadHours": 24,
   "DailyBoardTime": "08:00",
   "WindowsStartupRequested": true

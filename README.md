@@ -20,7 +20,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 ## 지금 되는 것
 
 - Classic Outlook COM 기반 read-only Inbox/Sent Items 메일 읽기
-- **지금 메일 확인**: 기본은 최근 30일, 갯수 제한 없이 날짜 기준으로 확인하며 설정에서는 7/30/90일 선택지만 노출
+- **지금 메일 확인**: 기본은 최근 30일, 갯수 제한 없이 날짜 기준으로 확인하며 설정에서는 1/7/30/90일 선택지를 노출
 - 규칙 기반 업무 후보 탐지와 선택형 LLM 분석
 - Ollama native `/api/chat`, OpenAI-compatible `/v1/chat/completions`, `/v1/responses` endpoint 지원
 - endpoint 모델 목록 불러오기와 LLM 연결 테스트
@@ -82,7 +82,7 @@ Linux/CI-like 환경에서는 repo-local SDK가 있을 때 아래 검증을 사�
 PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 ```
 
-테스트 중 로컬 업무/검토 데이터를 지우고 다시 시작하려면 아래 스크립트를 실행합니다. 기본은 `%LOCALAPPDATA%\\MailWhere\\followups.sqlite*`만 삭제하고 설정은 유지합니다.
+테스트 중 로컬 업무/검토 데이터를 지우고 다시 시작하려면 설정 > 개발자 도구의 **로컬 업무 데이터 삭제**를 누르거나 아래 스크립트를 실행합니다. 기본은 `%LOCALAPPDATA%\\MailWhere\\followups.sqlite*`만 삭제하고 설정은 유지합니다.
 
 ```powershell
 .\scripts\reset-local-data.ps1
@@ -91,7 +91,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.7.1-win-x64-portable.zip
+artifacts/MailWhere-v0.7.2-win-x64-portable.zip
 ```
 
 ## LLM endpoint
@@ -117,6 +117,8 @@ vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatComp
 ## 팀 기본 설정 seed
 
 portable 폴더에 `MailWhere.defaults.json`을 같이 두면, 사용자별 설정 파일이 아직 없을 때 첫 실행에서 그 값을 기본 설정으로 복사합니다. 릴리즈에는 `MailWhere.defaults.sample.json`만 포함되며, 실제 endpoint/model 값은 배포자가 sample을 복사해 수정하세요. API key나 개인 토큰은 이 파일에 넣지 않는 것을 권장합니다.
+
+`새 메일 자동 확인`은 한 번 수동 확인이 성공해 안전 gate가 열린 뒤에만 동작합니다. 켜져 있으면 설정한 자동 확인 간격마다 실행하고, 첫 자동 확인 이후에는 마지막 성공 시각에 짧은 overlap을 더한 구간만 다시 읽어 전체 기간을 매번 훑지 않습니다.
 
 ## 문서
 

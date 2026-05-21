@@ -50,8 +50,10 @@ If a small team should start with the same approved local LLM endpoint/model, co
 - `LlmModel`
 - `LlmTimeoutSeconds`
 - `LlmFallbackPolicy`
+- `RecentScanDays`
+- `AutomaticScanIntervalMinutes`
 
-On first run, if the user's `%AppData%\\MailWhere\\runtime-settings.json` does not exist, MailWhere reads the seed file and saves it as the user setting. Do not put API keys, personal tokens, or mailbox-specific data in the seed file.
+On first run, if the user's `%LOCALAPPDATA%\\MailWhere\\runtime-settings.json` does not exist, MailWhere reads the seed file and saves it as the user setting. Do not put API keys, personal tokens, or mailbox-specific data in the seed file.
 
 ## Local Windows portable build
 

@@ -21,6 +21,7 @@
 ## 제품/기획
 
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.
+- [`releases/v0.7.2.md`](releases/v0.7.2.md): 최근 1일/1분 자동 확인, 로컬 데이터 삭제, 설정 공유 안내 릴리즈 노트.
 - [`releases/v0.7.1.md`](releases/v0.7.1.md): 상단 버튼 과밀을 줄인 보관 제안/주간 리뷰 UX 정리 릴리즈 노트.
 - [`releases/v0.7.0.md`](releases/v0.7.0.md): 대기 항목 closure 제안, LLM closure 판단, 주간 리뷰 릴리즈 노트.
 - [`releases/v0.5.0.md`](releases/v0.5.0.md): LLM batch 안정화와 동시 처리 릴리즈 노트.
