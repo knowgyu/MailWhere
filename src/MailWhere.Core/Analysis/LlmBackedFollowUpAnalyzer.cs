@@ -14,7 +14,6 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private const int MaxForwardedContextChars = 900;
     private const int MaxQuotedPreviewChars = 240;
     private const int DefaultBatchSize = 12;
-    private const int DefaultContextTokens = 32768;
     private const int MinOutputTokens = 512;
     private const int MaxOutputTokens = 4096;
     private readonly ILlmClient _llmClient;
@@ -132,7 +131,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private static LlmRequestOptions BuildRequestOptions(int itemCount)
     {
         var maxOutputTokens = Math.Clamp(256 + Math.Max(1, itemCount) * 160, MinOutputTokens, MaxOutputTokens);
-        return new LlmRequestOptions(DefaultContextTokens, maxOutputTokens);
+        return new LlmRequestOptions(MaxOutputTokens: maxOutputTokens);
     }
 
     private static string BuildPayload(EmailSnapshot email)

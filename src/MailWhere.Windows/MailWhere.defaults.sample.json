@@ -5,6 +5,8 @@
   "LlmModel": "",
   "LlmTimeoutSeconds": 120,
   "LlmFallbackPolicy": "LlmOnly",
+  "LlmInitialConcurrency": 1,
+  "LlmMaxConcurrency": 1,
   "RecentScanDays": 30,
   "RecentScanMaxItems": 0,
   "AutomaticScanIntervalMinutes": 15,

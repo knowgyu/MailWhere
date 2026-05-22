@@ -22,8 +22,8 @@
   "LlmModel": "",
   "LlmTimeoutSeconds": 90,
   "LlmFallbackPolicy": "LlmOnly",
-  "LlmInitialConcurrency": 2,
-  "LlmMaxConcurrency": 4
+  "LlmInitialConcurrency": 1,
+  "LlmMaxConcurrency": 1
 }
 ```
 
@@ -31,12 +31,12 @@ Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다
 
 - `think=false`: Qwen 계열처럼 thinking-capable 모델이 긴 내부 reasoning을 하느라 느려지는 것을 줄입니다.
 - `format=json`: JSON object 출력을 요구합니다.
-- `num_ctx=32768`: 서버 전역 context가 더 크더라도 MailWhere 업무 triage 요청은 32K context로 제한해 parallel slot별 KV/cache 예약량을 줄입니다.
+- 기본적으로 `num_ctx`를 보내지 않습니다. 이미 OpenWebUI/CLI/서버 설정으로 VRAM에 올라간 Ollama runner를 다른 context 크기로 다시 로드하지 않기 위해 서버/현재 runner의 context 정책을 따릅니다.
 - `num_predict=clamp(256 + batchCount * 160, 512, 4096)`: batch 크기에 맞춰 JSON 출력 예산을 늘리되 과도한 생성을 막습니다.
 - `temperature=0.1`, `top_p=0.9`: strict JSON 분류 안정성을 유지하면서 너무 경직된 샘플링은 피합니다.
-- `keep_alive=30m`: 대량 스캔 중 모델이 자주 unload되는 것을 줄입니다.
+- 기본적으로 `keep_alive`를 보내지 않습니다. MailWhere가 모델 lifetime을 덮어쓰지 않고 Ollama 서버/OpenWebUI/CLI에서 정한 유지 정책을 그대로 따릅니다.
 
-초기/대량 스캔에서는 기본 최대 12건 batch 단위로 여러 메일을 한 번에 분석하고, 메일 본문 길이에 따라 8/4/2/1건으로 자동 축소합니다. scan loop는 준비/중복 확인과 저장을 직렬로 유지하되, 준비된 LLM batch 분석 요청만 기본 2개 동시로 보냅니다. 고급 설정 파일에서 `LlmInitialConcurrency`와 `LlmMaxConcurrency`를 조정할 수 있으며, v0.5.0에서는 둘 다 1~4로 clamp되고 effective concurrency는 `min(initial,max)`입니다. 각 메일 결과는 독립 JSON item으로 매핑하며, 마지막 batch가 작거나 모델이 일부 id를 빠뜨려도 전체 스캔을 실패시키지 않고 누락 item만 다시 시도 가능한 AI 분석 실패 항목으로 남깁니다.
+초기/대량 스캔에서는 기본 최대 12건 batch 단위로 여러 메일을 한 번에 분석하고, 메일 본문 길이에 따라 8/4/2/1건으로 자동 축소합니다. scan loop는 준비/중복 확인과 저장을 직렬로 유지하되, 준비된 LLM batch 분석 요청도 기본 1개씩 보내 VRAM이 부족한 로컬 Ollama runner를 흔들지 않도록 합니다. 고급 설정 파일에서 `LlmInitialConcurrency`와 `LlmMaxConcurrency`를 조정할 수 있으며, 둘 다 1~4로 clamp되고 effective concurrency는 `min(initial,max)`입니다. 기존 v0.5.0 기본값으로 저장된 `2/4` 조합은 안정 기본값 `1/1`로 자동 낮춥니다. 병렬 처리가 확실히 유리한 환경에서는 `2/2`처럼 명시적으로 올릴 수 있습니다. 각 메일 결과는 독립 JSON item으로 매핑하며, 마지막 batch가 작거나 모델이 일부 id를 빠뜨려도 전체 스캔을 실패시키지 않고 누락 item만 다시 시도 가능한 AI 분석 실패 항목으로 남깁니다.
 
 프롬프트는 cache locality를 고려해 system prompt에 고정 정책/스키마를 두고, user payload는 짧은 metadata 뒤 긴 본문을 마지막 블록에 둡니다. 단일 분석은 final `content`, batch 분석은 final `contents[]`를 사용하며, batch의 `items[]` metadata와 `contents[]` body는 같은 `id`로 연결합니다. 매 호출마다 크게 바뀌는 `now` timestamp 대신 `analysisDate`, `timezone`, `utcOffset`만 전달합니다.
 

@@ -95,7 +95,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.8.0-win-x64-portable.zip
+artifacts/MailWhere-v0.9.0-win-x64-portable.zip
 ```
 
 ## LLM endpoint
@@ -112,7 +112,9 @@ artifacts/MailWhere-v0.8.0-win-x64-portable.zip
   "LlmEndpoint": "",
   "LlmModel": "",
   "LlmTimeoutSeconds": 90,
-  "LlmFallbackPolicy": "LlmOnly"
+  "LlmFallbackPolicy": "LlmOnly",
+  "LlmInitialConcurrency": 1,
+  "LlmMaxConcurrency": 1
 }
 ```
 

@@ -76,11 +76,10 @@ public sealed class OllamaLlmClient : HttpJsonLlmClient
             stream = false,
             think = false,
             format = "json",
-            keep_alive = "30m",
             options = new
             {
                 temperature = 0.1,
-                num_ctx = requestOptions?.ContextTokens ?? 32768,
+                num_ctx = requestOptions?.ContextTokens,
                 num_predict = requestOptions?.MaxOutputTokens ?? 1280,
                 top_p = 0.9
             },

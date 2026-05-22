@@ -10,8 +10,8 @@ public sealed record MailScanRequest(
     int MaxItems,
     bool IncludeBody,
     DateTimeOffset Since,
-    int LlmInitialConcurrency = 2,
-    int LlmMaxConcurrency = 4,
+    int LlmInitialConcurrency = 1,
+    int LlmMaxConcurrency = 1,
     DateTimeOffset? InboxSince = null,
     DateTimeOffset? SentSince = null,
     bool UseFastFilter = false)

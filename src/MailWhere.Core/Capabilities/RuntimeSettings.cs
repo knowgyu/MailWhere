@@ -44,8 +44,8 @@ public sealed record RuntimeSettings(
         LlmApiKeyEnvironmentVariable: null,
         LlmTimeoutSeconds: 90,
         LlmFallbackPolicy: LlmFallbackPolicy.LlmOnly,
-        LlmInitialConcurrency: 2,
-        LlmMaxConcurrency: 4,
+        LlmInitialConcurrency: 1,
+        LlmMaxConcurrency: 1,
         RecentScanDays: 30,
         RecentScanMaxItems: 0,
         ReminderLookAheadHours: 24,
@@ -136,6 +136,14 @@ public static class RuntimeSettingsSerializer
         var defaults = RuntimeSettings.ManagedSafeDefault;
         var llmInitialConcurrency = Clamp(partial?.LlmInitialConcurrency, 1, MaxLlmConcurrency, defaults.LlmInitialConcurrency);
         var llmMaxConcurrency = Clamp(partial?.LlmMaxConcurrency, 1, MaxLlmConcurrency, defaults.LlmMaxConcurrency);
+        if (partial?.LlmInitialConcurrency == 2 && partial?.LlmMaxConcurrency == 4)
+        {
+            // v0.5.0 serialized this pair as the default. Treat it as a
+            // legacy default rather than an intentional opt-in so existing
+            // installs move to the stable local-Ollama default automatically.
+            llmInitialConcurrency = defaults.LlmInitialConcurrency;
+            llmMaxConcurrency = defaults.LlmMaxConcurrency;
+        }
         return new RuntimeSettings(
             ManagedMode: partial?.ManagedMode ?? defaults.ManagedMode,
             ExternalLlmEnabled: partial?.ExternalLlmEnabled ?? defaults.ExternalLlmEnabled,

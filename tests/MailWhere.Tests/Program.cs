@@ -104,6 +104,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Repeated LLM failure does not duplicate review candidate", RepeatedLlmFailureDoesNotDuplicateReviewCandidate),
     ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
     ("Ollama client records diagnostics and temperature", OllamaClientRecordsDiagnosticsAndTemperature),
+    ("Ollama client does not override runner lifetime or context by default", OllamaClientDoesNotOverrideRunnerLifetimeOrContextByDefault),
     ("OpenAI compatible clients honor output token request options", OpenAiCompatibleClientsHonorOutputTokenRequestOptions),
     ("OpenAI Responses client extracts output text", OpenAiResponsesClientExtractsOutputText),
     ("LLM model catalog loads Ollama models", LlmModelCatalogLoadsOllamaModels),
@@ -792,12 +793,17 @@ static Task RuntimeSettingsDefaultLlmConcurrency()
 {
     var defaults = RuntimeSettingsSerializer.ParseOrDefault("{}");
 
-    Assert(defaults.LlmInitialConcurrency == 2, "Expected default LLM initial concurrency 2.");
-    Assert(defaults.LlmMaxConcurrency == 4, "Expected default LLM max concurrency 4.");
+    Assert(defaults.LlmInitialConcurrency == 1, "Expected default LLM initial concurrency 1.");
+    Assert(defaults.LlmMaxConcurrency == 1, "Expected default LLM max concurrency 1.");
+    Assert(new MailScanRequest(0, true, DateTimeOffset.UtcNow).EffectiveLlmConcurrency == 1, "Expected scan request default concurrency 1.");
 
     var json = RuntimeSettingsSerializer.Serialize(defaults);
-    Assert(json.Contains("\"LlmInitialConcurrency\": 2", StringComparison.Ordinal), "Expected initial concurrency in serialized settings.");
-    Assert(json.Contains("\"LlmMaxConcurrency\": 4", StringComparison.Ordinal), "Expected max concurrency in serialized settings.");
+    Assert(json.Contains("\"LlmInitialConcurrency\": 1", StringComparison.Ordinal), "Expected initial concurrency in serialized settings.");
+    Assert(json.Contains("\"LlmMaxConcurrency\": 1", StringComparison.Ordinal), "Expected max concurrency in serialized settings.");
+
+    var legacy = RuntimeSettingsSerializer.ParseOrDefault("""{"LlmInitialConcurrency":2,"LlmMaxConcurrency":4}""");
+    Assert(legacy.LlmInitialConcurrency == 1, "Expected legacy persisted default initial concurrency to downgrade to stable default.");
+    Assert(legacy.LlmMaxConcurrency == 1, "Expected legacy persisted default max concurrency to downgrade to stable default.");
     return Task.CompletedTask;
 }
 
@@ -1544,7 +1550,7 @@ static async Task BatchLlmPassesAdaptiveRequestOptionsAndPromptLimits()
         .Select(index => Mail($"공지 {index}", "참고만 해주세요.", $"batch-options-{index}"))
         .ToArray());
 
-    Assert(llm.LastRequestOptions?.ContextTokens == 32768, "Expected per-request context tokens.");
+    Assert(llm.LastRequestOptions?.ContextTokens is null, "Batch requests should inherit Ollama/server context by default.");
     Assert(llm.LastRequestOptions?.MaxOutputTokens == 2176, "Expected adaptive batch output token budget.");
 
     var prompt = llm.LastSystemPrompt ?? string.Empty;
@@ -2077,6 +2083,40 @@ static async Task OllamaClientRecordsDiagnosticsAndTemperature()
     Assert(Math.Abs(request.RootElement.GetProperty("options").GetProperty("temperature").GetDouble() - 0.1) < 0.0001, "Expected temperature 0.1.");
     Assert(request.RootElement.GetProperty("options").GetProperty("num_ctx").GetInt32() == 32768, "Expected per-request num_ctx.");
     Assert(request.RootElement.GetProperty("options").GetProperty("num_predict").GetInt32() == 2048, "Expected adaptive num_predict.");
+}
+
+static async Task OllamaClientDoesNotOverrideRunnerLifetimeOrContextByDefault()
+{
+    var settings = new LlmEndpointSettings(
+        LlmProviderKind.OllamaNative,
+        Enabled: true,
+        Endpoint: "http://localhost:11434",
+        Model: "qwen3.6:latest",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+    var handler = new StubHttpMessageHandler("""
+        {
+          "model": "qwen3.6:latest",
+          "message": {
+            "role": "assistant",
+            "content": "{\"ok\":true}"
+          },
+          "done": true
+        }
+        """);
+    var client = new OllamaLlmClient(new HttpClient(handler), settings);
+
+    await client.CompleteJsonAsync(
+        "system",
+        "user",
+        requestOptions: new LlmRequestOptions(MaxOutputTokens: 512));
+
+    Assert(handler.LastRequestBody is not null, "Expected request body capture.");
+    using var request = JsonDocument.Parse(handler.LastRequestBody!);
+    Assert(!request.RootElement.TryGetProperty("keep_alive", out _), "Default Ollama calls should not override existing runner lifetime.");
+    var options = request.RootElement.GetProperty("options");
+    Assert(!options.TryGetProperty("num_ctx", out _), "Default Ollama calls should not force a different context window.");
+    Assert(options.GetProperty("num_predict").GetInt32() == 512, "Expected output cap to remain explicit.");
 }
 
 static async Task OpenAiCompatibleClientsHonorOutputTokenRequestOptions()

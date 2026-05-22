@@ -79,7 +79,7 @@ public sealed class LlmBackedWaitingClosureJudge : IWaitingClosureJudge
                     ruleReason = trigger.Reason
                 }
             });
-            var completion = await _client.CompleteJsonAsync(SystemPrompt, payload, cancellationToken, new LlmRequestOptions(MaxOutputTokens: 256, ContextTokens: 4096)).ConfigureAwait(false);
+            var completion = await _client.CompleteJsonAsync(SystemPrompt, payload, cancellationToken, new LlmRequestOptions(MaxOutputTokens: 256)).ConfigureAwait(false);
             var response = JsonSerializer.Deserialize<LlmClosureResponse>(completion.Content, new JsonSerializerOptions(JsonSerializerDefaults.Web));
             if (response?.ShouldSuggest is not bool shouldSuggest)
             {
