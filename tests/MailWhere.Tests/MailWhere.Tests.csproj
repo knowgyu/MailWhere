@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/MailWhere.Cli/MailWhere.Cli.csproj" />
     <ProjectReference Include="../../src/MailWhere.Core/MailWhere.Core.csproj" />
     <ProjectReference Include="../../src/MailWhere.Storage/MailWhere.Storage.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />

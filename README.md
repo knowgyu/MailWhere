@@ -38,6 +38,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - 가능한 경우 `열기`로 Outlook 원본 메일 열기
 - 다자 수신자에게 보낸 회신 요청은 Outlook 대화 ID/보낸 사람 기준으로 `n/m명 회신` 현황 표시 및 export
 - 향후 LLM skill이 읽을 수 있는 raw-mail-free export SDK/API (`MailWhereExportService`)
+- Codex/where-skills 같은 외부 자동화가 안전하게 읽을 수 있는 read-only JSON CLI provider (`MailWhere.Cli.exe`)
 - D-day, D-7/D-1/D-day reminder planning, snooze-due reminder
 - MailWhere 자체 우하단 toast stack과 tray 메뉴
 - 설정 > 개발자 도구 탭의 샘플 데이터/알림/필터 테스트와 `scripts/reset-local-data.ps1`
@@ -62,6 +63,20 @@ MailWhere.exe
 
 zip 안의 `START_HERE_시작하기.txt`를 먼저 읽는 것을 권장합니다.
 
+## Read-only CLI provider
+
+portable zip에는 UI 앱 `MailWhere.exe`와 별도로 `MailWhere.Cli.exe`가 포함됩니다. CLI는 `MailWhere.Core`/`MailWhere.Storage`만 사용하며 Outlook COM, WPF, mailbox 열기/변경, schema 초기화를 수행하지 않습니다. 기본 DB는 `%LOCALAPPDATA%\\MailWhere\\followups.sqlite`이고, 없는 DB는 JSON 오류 `database-not-found`와 exit code `2`로 끝나며 DB/WAL/SHM 파일을 만들지 않습니다.
+
+```powershell
+.\MailWhere.Cli.exe health --json
+.\MailWhere.Cli.exe manifest --json
+.\MailWhere.Cli.exe export --json --db "$env:LOCALAPPDATA\MailWhere\followups.sqlite"
+.\MailWhere.Cli.exe list-tasks --json --status open --due-window 7d --limit 50
+.\MailWhere.Cli.exe list-review-candidates --json --limit 25
+```
+
+모든 응답은 `provider: "MailWhere"`, `contract_version: "v1"`, `app_version`, `generated_at`, `ok`를 포함하는 JSON envelope입니다. 성공은 exit code `0`, 예상 가능한 사용 불가 상태는 `2`, 사용법 오류는 `64`, 예기치 못한 실패는 `70`입니다. CLI JSON은 raw body, source id/hash, evidence snippet, 전체 수신자 목록, prompt logs, API keys를 내보내지 않습니다.
+
 ## 기본 사용 흐름
 
 1. `MailWhere.exe`를 직접 실행하면 오늘 기준 업무 보드가 열리고 앱은 tray에도 상주합니다. Windows 자동 시작은 tray-only로 실행됩니다.
@@ -83,6 +98,7 @@ Linux/CI-like 환경에서는 repo-local SDK가 있을 때 아래 검증을 사�
 ```bash
 .tools/dotnet/dotnet build MailWhere.sln -v:minimal
 .tools/dotnet/dotnet run --project tests/MailWhere.Tests/MailWhere.Tests.csproj
+PATH="$PWD/.tools/dotnet:$PATH" dotnet run --project src/MailWhere.Cli/MailWhere.Cli.csproj -c Release -- manifest --json
 PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 ```
 
@@ -95,7 +111,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.9.0-win-x64-portable.zip
+artifacts/MailWhere-v0.10.0-win-x64-portable.zip
 ```
 
 ## LLM endpoint

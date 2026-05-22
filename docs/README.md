@@ -21,6 +21,7 @@
 ## 제품/기획
 
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.
+- [`releases/v0.10.0.md`](releases/v0.10.0.md): where-skills/Codex용 read-only CLI provider 릴리즈 노트.
 - [`releases/v0.9.0.md`](releases/v0.9.0.md): Ollama runner/context/lifetime override 제거와 안정 우선 LLM 동시성 릴리즈 노트.
 - [`releases/v0.8.0.md`](releases/v0.8.0.md): Outlook 이벤트+fallback 자동 확인, fast filter, Inbox/Sent delta, 확인 필요 Y/N 보관 제안 릴리즈 노트.
 - [`releases/v0.7.2.md`](releases/v0.7.2.md): 최근 1일/1분 자동 확인, 로컬 데이터 삭제, 설정 공유 안내 릴리즈 노트.

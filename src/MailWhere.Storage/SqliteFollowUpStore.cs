@@ -11,6 +11,13 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
     private readonly string _connectionString;
 
     public SqliteFollowUpStore(string databasePath)
+        : this(databasePath, SqliteOpenMode.ReadWriteCreate)
+    {
+    }
+
+    public static SqliteFollowUpStore OpenReadOnly(string databasePath) => new(databasePath, SqliteOpenMode.ReadOnly);
+
+    private SqliteFollowUpStore(string databasePath, SqliteOpenMode mode)
     {
         if (string.IsNullOrWhiteSpace(databasePath))
         {
@@ -20,7 +27,7 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
+            Mode = mode,
             Pooling = false
         }.ToString();
     }

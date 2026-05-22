@@ -18,6 +18,9 @@ required=(
   scripts/publish-portable.ps1
   src/MailWhere.Core/MailWhere.Core.csproj
   src/MailWhere.Storage/MailWhere.Storage.csproj
+  src/MailWhere.Cli/MailWhere.Cli.csproj
+  src/MailWhere.Cli/Program.cs
+  src/MailWhere.Cli/CliApp.cs
   src/MailWhere.OutlookCom/MailWhere.OutlookCom.csproj
   src/MailWhere.Windows/MailWhere.Windows.csproj
   tests/MailWhere.Tests/Program.cs
@@ -41,6 +44,19 @@ fi
 
 if grep -RInE '\.(Send|Delete|Move|Reply|ReplyAll|Forward)\s*\(|\bUnRead\s*=|\bCategories\s*=|\bFlagStatus\s*=|\bSaveAsFile\s*\(' src/MailWhere.Windows; then
   echo "Forbidden Outlook mutation/display/attachment call found" >&2
+  exit 1
+fi
+
+echo "[static] Checking CLI provider dependency and read-only boundaries"
+cli_refs=$(grep -RIn '<ProjectReference' src/MailWhere.Cli/MailWhere.Cli.csproj)
+grep -q '../MailWhere.Core/MailWhere.Core.csproj' <<<"$cli_refs" || { echo "CLI must reference MailWhere.Core" >&2; exit 1; }
+grep -q '../MailWhere.Storage/MailWhere.Storage.csproj' <<<"$cli_refs" || { echo "CLI must reference MailWhere.Storage" >&2; exit 1; }
+if grep -RInE 'MailWhere\.Windows|MailWhere\.OutlookCom|Microsoft\.Office\.Interop|UseWPF|UseWindowsForms|EnableWindowsTargeting' src/MailWhere.Cli; then
+  echo "CLI must not depend on Windows/WPF/Outlook COM surfaces" >&2
+  exit 1
+fi
+if grep -RInE 'InitializeAsync\s*\(|ReadWriteCreate' src/MailWhere.Cli; then
+  echo "CLI read commands must not initialize or create the SQLite database" >&2
   exit 1
 fi
 

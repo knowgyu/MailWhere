@@ -57,6 +57,15 @@ echo "[portable] publish self-contained folder"
   -p:PublishReadyToRun=false \
   -o "$publish_dir"
 
+echo "[portable] publish CLI provider into portable folder"
+"$dotnet_cmd" publish ./src/MailWhere.Cli/MailWhere.Cli.csproj \
+  -c "$configuration" \
+  -r "$runtime_identifier" \
+  --self-contained true \
+  -p:PublishSingleFile=false \
+  -p:PublishReadyToRun=false \
+  -o "$publish_dir"
+
 echo "[portable] copy operator docs"
 cp ./README.md "$publish_dir/README.md"
 cp -R ./docs "$publish_dir/docs"
@@ -85,8 +94,18 @@ manifest = {
     "commit": commit,
     "builtAtUtc": datetime.datetime.now(datetime.UTC).isoformat(),
     "installMode": "portable-self-contained",
+    "cliExecutable": "MailWhere.Cli.exe",
+    "cliContractVersion": "v1",
+    "cliCommands": [
+        "health --json",
+        "manifest --json",
+        "export --json [--db PATH] [--archived-limit N]",
+        "list-tasks --json [--status open|archived|all] [--due-window today|overdue|7d|30d|none|all] [--limit N] [--db PATH]",
+        "list-review-candidates --json [--limit N] [--db PATH]",
+    ],
     "safetyDefaults": [
         "Phase 0/1 Outlook access is read-only",
+        "MailWhere.Cli is read-only and does not load Outlook COM",
         "External LLM providers are disabled by default",
         "Managed automation requires diagnostics and smoke-test approval",
     ],

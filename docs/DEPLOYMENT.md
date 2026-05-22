@@ -33,12 +33,39 @@ It runs on:
 The workflow performs the Windows verification path and uploads:
 
 ```text
-artifacts/MailWhere-v0.4.4-win-x64-portable.zip
+artifacts/MailWhere-v0.10.0-win-x64-portable.zip
 ```
 
-The zip contains the published app, README, operator docs, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`.
+The zip contains the published app, the read-only CLI provider, README, operator docs, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`.
 
 Before compression, the publish scripts update only the published `MailWhere.exe` modified time. This makes the executable easier to find when users extract the portable folder and sort by recent modified time. No helper touch script is copied into the release payload.
+
+## Read-only CLI provider in portable releases
+
+Starting with v0.10.0, portable releases include:
+
+```text
+MailWhere.exe
+MailWhere.Cli.exe
+```
+
+`MailWhere.Cli.exe` is for local automation such as where-skills/Codex. It reads the existing MailWhere SQLite database in read-only mode and emits JSON only:
+
+```powershell
+.\MailWhere.Cli.exe health --json
+.\MailWhere.Cli.exe manifest --json
+.\MailWhere.Cli.exe export --json [--db PATH] [--archived-limit N]
+.\MailWhere.Cli.exe list-tasks --json [--status open|archived|all] [--due-window today|overdue|7d|30d|none|all] [--limit N] [--db PATH]
+.\MailWhere.Cli.exe list-review-candidates --json [--limit N] [--db PATH]
+```
+
+Safety boundaries:
+
+- CLI references only `MailWhere.Core` and `MailWhere.Storage`.
+- CLI does not load Outlook COM, WPF, or the tray app.
+- CLI read commands do not initialize schema and do not create the database.
+- Missing DB returns JSON error code `database-not-found` with exit code `2`.
+- Exported JSON omits raw body, source id/hash, evidence snippet, full recipient lists, prompt logs, and API keys.
 
 ## Team default settings seed
 

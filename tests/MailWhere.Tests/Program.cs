@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
+using MailWhere.Cli;
 using Microsoft.Data.Sqlite;
 using MailWhere.Core.Analysis;
 using MailWhere.Core.Capabilities;
@@ -146,6 +148,10 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Waiting closure keep and archive decisions persist", WaitingClosureKeepAndArchiveDecisionsPersist),
     ("Weekly review summarizes waiting debt", WeeklyReviewSummarizesWaitingDebt),
     ("MailWhere export omits source ids and includes reply progress", MailWhereExportOmitsSourceIdsAndIncludesReplyProgress),
+    ("MailWhere CLI manifest and health emit provider envelopes", MailWhereCliManifestAndHealthEmitProviderEnvelopes),
+    ("MailWhere CLI missing database returns JSON error without creating files", MailWhereCliMissingDatabaseReturnsJsonErrorWithoutCreatingFiles),
+    ("MailWhere CLI read commands emit sanitized schemas", MailWhereCliReadCommandsEmitSanitizedSchemas),
+    ("MailWhere CLI project references only Core and Storage", MailWhereCliProjectReferencesOnlyCoreAndStorage),
     ("SQLite task details edit persists", SqliteTaskDetailsEditPersists),
     ("SQLite task complete and snooze persist", SqliteTaskCompleteAndSnoozePersist),
     ("SQLite stale review ignore does not redact approved task", SqliteStaleReviewIgnoreDoesNotRedactApprovedTask),
@@ -3390,6 +3396,175 @@ static async Task MailWhereExportOmitsSourceIdsAndIncludesReplyProgress()
     }
 }
 
+static async Task MailWhereCliManifestAndHealthEmitProviderEnvelopes()
+{
+    var manifest = await RunCliAsync("manifest", "--json");
+    var health = await RunCliAsync("health", "--json");
+
+    Assert(manifest.ExitCode == CliApp.ExitSuccess, "Expected manifest to succeed.");
+    Assert(health.ExitCode == CliApp.ExitSuccess, "Expected health to succeed.");
+
+    using var manifestJson = JsonDocument.Parse(manifest.Stdout);
+    using var healthJson = JsonDocument.Parse(health.Stdout);
+    AssertProviderEnvelope(manifestJson.RootElement, ok: true);
+    AssertProviderEnvelope(healthJson.RootElement, ok: true);
+
+    var manifestData = manifestJson.RootElement.GetProperty("data");
+    Assert(manifestData.GetProperty("read_only").GetBoolean(), "Expected manifest to declare read-only mode.");
+    Assert(manifestData.GetProperty("no_outlook_com").GetBoolean(), "Expected manifest to declare no Outlook COM dependency.");
+    Assert(manifestData.GetProperty("exit_codes").GetProperty("expected_unavailable").GetInt32() == CliApp.ExitExpectedUnavailable, "Expected unavailable exit code in manifest.");
+    Assert(manifestData.GetProperty("commands").EnumerateArray().Any(command => command.GetProperty("name").GetString() == "export"), "Expected export command in manifest.");
+
+    var healthData = healthJson.RootElement.GetProperty("data");
+    Assert(healthData.GetProperty("read_only").GetBoolean(), "Expected health to declare read-only mode.");
+    Assert(healthData.GetProperty("commands").EnumerateArray().Any(command => command.GetString() == "list-tasks"), "Expected list-tasks in health command list.");
+}
+
+static async Task MailWhereCliMissingDatabaseReturnsJsonErrorWithoutCreatingFiles()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "MailWhere.Tests", Guid.NewGuid().ToString("N"));
+    var dbPath = Path.Combine(directory, "followups.sqlite");
+    try
+    {
+        var result = await RunCliAsync("export", "--json", "--db", dbPath);
+
+        Assert(result.ExitCode == CliApp.ExitExpectedUnavailable, "Expected missing database to use expected-unavailable exit code.");
+        using var json = JsonDocument.Parse(result.Stdout);
+        AssertProviderEnvelope(json.RootElement, ok: false);
+        Assert(json.RootElement.GetProperty("code").GetString() == "database-not-found", "Expected database-not-found error code.");
+        Assert(!File.Exists(dbPath), "Expected missing database file not to be created.");
+        Assert(!File.Exists(dbPath + "-wal"), "Expected missing WAL file not to be created.");
+        Assert(!File.Exists(dbPath + "-shm"), "Expected missing SHM file not to be created.");
+    }
+    finally
+    {
+        if (Directory.Exists(directory))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+}
+
+static async Task MailWhereCliReadCommandsEmitSanitizedSchemas()
+{
+    var (store, dbPath, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var openSource = "cli-open-source-secret";
+        var archivedSource = "cli-archived-source-secret";
+        var reviewSource = "cli-review-source-secret";
+        var privateRecipient = "Private Recipient <private-recipient@example.com>";
+        var sensitiveEvidence = "cli-secret-evidence";
+        var sensitiveReason = "cli-secret-reason";
+        var openTask = new LocalTaskItem(
+            Guid.NewGuid(),
+            "CLI 열린 업무",
+            now.AddDays(1),
+            StableHash.Create(openSource),
+            openSource,
+            0.9,
+            sensitiveReason,
+            sensitiveEvidence,
+            LocalTaskStatus.Open,
+            null,
+            now,
+            now,
+            SourceSenderDisplay: "Safe Sender",
+            SourceConversationId: "cli-private-conversation",
+            SourceRecipientDisplayNames: new[] { privateRecipient });
+        var archivedTask = openTask with
+        {
+            Id = Guid.NewGuid(),
+            Title = "CLI 보관 업무",
+            SourceIdHash = StableHash.Create(archivedSource),
+            SourceId = archivedSource
+        };
+        var review = ReviewCandidate.FromAnalysis(
+            Mail("CLI 검토", "raw body must stay transient", reviewSource, sender: "Safe Reviewer", recipients: new[] { privateRecipient }),
+            new FollowUpAnalysis(FollowUpKind.ReviewNeeded, AnalysisDisposition.Review, 0.55, "CLI 검토 후보", sensitiveReason, sensitiveEvidence, null),
+            now);
+
+        await store.SaveTaskAsync(openTask);
+        await store.SaveTaskAsync(archivedTask);
+        await store.ArchiveTaskAsync(archivedTask.Id, now.AddMinutes(1));
+        await store.SaveReviewCandidateAsync(review);
+
+        var export = await RunCliAsync("export", "--json", "--db", dbPath, "--archived-limit", "10");
+        var tasks = await RunCliAsync("list-tasks", "--json", "--db", dbPath, "--status", "all", "--due-window", "all", "--limit", "10");
+        var candidates = await RunCliAsync("list-review-candidates", "--json", "--db", dbPath, "--limit", "10");
+
+        Assert(export.ExitCode == CliApp.ExitSuccess, "Expected export command to succeed.");
+        Assert(tasks.ExitCode == CliApp.ExitSuccess, "Expected list-tasks command to succeed.");
+        Assert(candidates.ExitCode == CliApp.ExitSuccess, "Expected list-review-candidates command to succeed.");
+
+        using var exportJson = JsonDocument.Parse(export.Stdout);
+        using var tasksJson = JsonDocument.Parse(tasks.Stdout);
+        using var candidatesJson = JsonDocument.Parse(candidates.Stdout);
+        AssertProviderEnvelope(exportJson.RootElement, ok: true);
+        AssertProviderEnvelope(tasksJson.RootElement, ok: true);
+        AssertProviderEnvelope(candidatesJson.RootElement, ok: true);
+
+        Assert(exportJson.RootElement.GetProperty("data").GetProperty("open_tasks").GetArrayLength() == 1, "Expected one open task in CLI export.");
+        Assert(exportJson.RootElement.GetProperty("data").GetProperty("archived_tasks").GetArrayLength() == 1, "Expected one archived task in CLI export.");
+        Assert(exportJson.RootElement.GetProperty("data").GetProperty("review_items").GetArrayLength() == 1, "Expected one review item in CLI export.");
+        Assert(tasksJson.RootElement.GetProperty("data").GetProperty("tasks").GetArrayLength() == 2, "Expected list-tasks all to include open and archived tasks.");
+        Assert(candidatesJson.RootElement.GetProperty("data").GetProperty("candidates").GetArrayLength() == 1, "Expected one review candidate.");
+
+        foreach (var output in new[] { export.Stdout, tasks.Stdout, candidates.Stdout })
+        {
+            Assert(!output.Contains(openSource, StringComparison.Ordinal), "Expected source id omitted from CLI JSON.");
+            Assert(!output.Contains(archivedSource, StringComparison.Ordinal), "Expected archived source id omitted from CLI JSON.");
+            Assert(!output.Contains(reviewSource, StringComparison.Ordinal), "Expected review source id omitted from CLI JSON.");
+            Assert(!output.Contains(StableHash.Create(openSource), StringComparison.Ordinal), "Expected source hash omitted from CLI JSON.");
+            Assert(!output.Contains(StableHash.Create(archivedSource), StringComparison.Ordinal), "Expected archived source hash omitted from CLI JSON.");
+            Assert(!output.Contains(StableHash.Create(reviewSource), StringComparison.Ordinal), "Expected review source hash omitted from CLI JSON.");
+            Assert(!output.Contains(sensitiveEvidence, StringComparison.Ordinal), "Expected evidence snippet omitted from CLI JSON.");
+            Assert(!output.Contains(sensitiveReason, StringComparison.Ordinal), "Expected analysis reason omitted from CLI JSON.");
+            Assert(!output.Contains(privateRecipient, StringComparison.Ordinal), "Expected full recipient list omitted from CLI JSON.");
+            Assert(!output.Contains("private-recipient@example.com", StringComparison.OrdinalIgnoreCase), "Expected recipient email omitted from CLI JSON.");
+            Assert(!output.Contains("raw body", StringComparison.OrdinalIgnoreCase), "Expected raw body omitted from CLI JSON.");
+            Assert(!ContainsJsonPropertyName(output, "source_id"), "Expected no source_id JSON property.");
+            Assert(!ContainsJsonPropertyName(output, "source_id_hash"), "Expected no source_id_hash JSON property.");
+            Assert(!ContainsJsonPropertyName(output, "evidence_snippet"), "Expected no evidence_snippet JSON property.");
+        }
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static Task MailWhereCliProjectReferencesOnlyCoreAndStorage()
+{
+    var repoRoot = FindRepoRoot();
+    var projectPath = Path.Combine(repoRoot, "src", "MailWhere.Cli", "MailWhere.Cli.csproj");
+    Assert(File.Exists(projectPath), "Expected CLI project file to exist.");
+
+    var document = XDocument.Load(projectPath);
+    var projectReferences = document
+        .Descendants("ProjectReference")
+        .Select(element => element.Attribute("Include")?.Value.Replace('\\', '/'))
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .OrderBy(value => value, StringComparer.Ordinal)
+        .ToArray();
+
+    Assert(projectReferences.SequenceEqual(new[]
+    {
+        "../MailWhere.Core/MailWhere.Core.csproj",
+        "../MailWhere.Storage/MailWhere.Storage.csproj"
+    }, StringComparer.Ordinal), $"Expected CLI project to reference only Core and Storage, found: {string.Join(", ", projectReferences)}.");
+
+    var projectText = File.ReadAllText(projectPath);
+    Assert(!projectText.Contains("MailWhere.Windows", StringComparison.Ordinal), "CLI must not reference MailWhere.Windows.");
+    Assert(!projectText.Contains("MailWhere.OutlookCom", StringComparison.Ordinal), "CLI must not reference MailWhere.OutlookCom.");
+    Assert(!projectText.Contains("<UseWPF>", StringComparison.OrdinalIgnoreCase), "CLI must not enable WPF.");
+    Assert(!projectText.Contains("<UseWindowsForms>", StringComparison.OrdinalIgnoreCase), "CLI must not enable Windows Forms.");
+    Assert(!projectText.Contains("<EnableWindowsTargeting>", StringComparison.OrdinalIgnoreCase), "CLI must not require Windows targeting.");
+    Assert(projectText.Contains("<TargetFramework>net10.0</TargetFramework>", StringComparison.Ordinal), "CLI should target cross-platform net10.0.");
+    return Task.CompletedTask;
+}
+
 static async Task SqliteTaskDetailsEditPersists()
 {
     var (store, _, cleanup) = await CreateTempStoreAsync();
@@ -3659,6 +3834,96 @@ static async Task<(SqliteFollowUpStore Store, string DbPath, Action Cleanup)> Cr
             // Test cleanup is best-effort.
         }
     });
+}
+
+static async Task<(int ExitCode, string Stdout, string Stderr)> RunCliAsync(params string[] args)
+{
+    await using var stdout = new StringWriter();
+    await using var stderr = new StringWriter();
+    var exitCode = await CliApp.RunAsync(args, stdout, stderr);
+    return (exitCode, stdout.ToString(), stderr.ToString());
+}
+
+static void AssertProviderEnvelope(JsonElement root, bool ok)
+{
+    Assert(root.GetProperty("provider").GetString() == CliApp.ProviderName, "Expected MailWhere provider.");
+    Assert(root.GetProperty("contract_version").GetString() == CliApp.ContractVersion, "Expected v1 contract.");
+    Assert(!string.IsNullOrWhiteSpace(root.GetProperty("app_version").GetString()), "Expected app version.");
+    Assert(DateTimeOffset.TryParse(root.GetProperty("generated_at").GetString(), out _), "Expected parseable generated_at.");
+    Assert(root.GetProperty("ok").GetBoolean() == ok, $"Expected ok={ok}.");
+    if (ok)
+    {
+        Assert(root.TryGetProperty("data", out var data) && data.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined, "Expected success data.");
+        Assert(!root.TryGetProperty("code", out var code) || code.ValueKind == JsonValueKind.Null, "Expected no error code on success.");
+    }
+    else
+    {
+        Assert(root.TryGetProperty("code", out var code) && !string.IsNullOrWhiteSpace(code.GetString()), "Expected error code.");
+        Assert(root.TryGetProperty("message", out var message) && !string.IsNullOrWhiteSpace(message.GetString()), "Expected error message.");
+    }
+}
+
+static bool ContainsJsonPropertyName(string json, string propertyName)
+{
+    using var document = JsonDocument.Parse(json);
+    return ContainsJsonPropertyName(document.RootElement, propertyName);
+
+    static bool ContainsJsonPropertyName(JsonElement element, string propertyName)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase)
+                        || ContainsJsonPropertyName(property.Value, propertyName))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (ContainsJsonPropertyName(item, propertyName))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            default:
+                return false;
+        }
+    }
+}
+
+static string FindRepoRoot()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "MailWhere.sln")))
+        {
+            return directory.FullName;
+        }
+
+        directory = directory.Parent;
+    }
+
+    directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+    while (directory is not null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "MailWhere.sln")))
+        {
+            return directory.FullName;
+        }
+
+        directory = directory.Parent;
+    }
+
+    throw new InvalidOperationException("Could not find repository root.");
 }
 
 static async Task<string?[]> QuerySingleRowAsync(string dbPath, string sql, params (string Name, string Value)[] parameters)
