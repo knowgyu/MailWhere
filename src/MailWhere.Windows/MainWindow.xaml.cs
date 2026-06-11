@@ -26,7 +26,7 @@ public partial class MainWindow : Window
 {
     private SqliteFollowUpStore? _store;
     private IUserNotificationSink _notificationSink = new NullNotificationSink();
-    private readonly NotificationThrottle _notificationThrottle = new(TimeSpan.FromHours(1));
+    private readonly NotificationThrottle _notificationThrottle = new();
     private RuntimeSettings _settings;
     private DispatcherTimer? _reminderTimer;
     private DispatcherTimer? _dailyBoardTimer;
@@ -387,10 +387,8 @@ public partial class MainWindow : Window
             var scanner = new MailActionScanner(new OutlookComMailSource(), pipeline);
             var now = DateTimeOffset.Now;
             var scanStartedAt = now;
-            var automaticScan = !showSummaryNotification;
-            var windowPlan = automaticScan
-                ? await PlanAutomaticScanWindowAsync(store, now, scanCancellationToken)
-                : new AutomaticScanWindowPlan(now.AddDays(-_settings.RecentScanDays), UsedLastSuccessfulScan: false);
+            var windowPlan = await PlanIncrementalScanWindowAsync(store, now, scanCancellationToken);
+            StatusText.Text = $"{BuildScanWindowText(windowPlan)}을 읽고 업무를 찾는 중입니다…";
             var request = new MailScanRequest(
                 _settings.RecentScanMaxItems,
                 IncludeBody: true,
@@ -399,24 +397,13 @@ public partial class MainWindow : Window
                 _settings.LlmMaxConcurrency,
                 InboxSince: windowPlan.InboxSince,
                 SentSince: windowPlan.SentSince,
-                UseFastFilter: automaticScan && (windowPlan.UsedInboxLastSuccessfulScan || windowPlan.UsedSentLastSuccessfulScan));
+                UseFastFilter: true);
             var progress = new Progress<MailScanProgress>(UpdateScanProgress);
 
             var summary = await scanner.ScanAsync(request, progress, scanCancellationToken);
-            if (automaticScan && !summary.Warnings.Any(warning => warning.Severity == CapabilitySeverity.Blocked))
+            if (!summary.Warnings.Any(warning => warning.Severity == CapabilitySeverity.Blocked))
             {
-                var cursorValue = scanStartedAt.ToString("O");
-                if (FolderScanSucceeded(summary.Warnings, MailSourceFolder.Inbox))
-                {
-                    await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulInboxScanStateKey, cursorValue, scanCancellationToken);
-                }
-
-                if (FolderScanSucceeded(summary.Warnings, MailSourceFolder.Sent))
-                {
-                    await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulSentScanStateKey, cursorValue, scanCancellationToken);
-                }
-
-                await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulScanStateKey, cursorValue, scanCancellationToken);
+                await RecordSuccessfulScanCursorAsync(store, summary.Warnings, scanStartedAt, scanCancellationToken);
             }
             _lastAnalysisTelemetry = analyzer is IAnalysisTelemetrySource telemetrySource
                 ? telemetrySource.GetTelemetrySnapshot()
@@ -442,12 +429,12 @@ public partial class MainWindow : Window
             var newReviewCandidateCount = reviewCandidates.Count(candidate => !beforeCandidateIds.Contains(candidate.Id));
 
             var llmSummary = _lastAnalysisTelemetry.ToKoreanSummary();
-            var scanWindowText = automaticScan && windowPlan.UsedLastSuccessfulScan
-                ? "최근 변경 메일"
-                : $"최근 {_settings.RecentScanDays}일 메일";
+            var scanWindowText = BuildScanWindowText(windowPlan);
             StatusText.Text = $"{scanWindowText} {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 확인 필요 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {llmSummary}"
                 + (smokeGateRecorded ? " · 자동 확인 준비 완료" : string.Empty);
-            if (showSummaryNotification)
+            if (showSummaryNotification
+                && !ShouldSuppressPopupNotifications()
+                && (summary.TaskCreatedCount > 0 || newReviewCandidateCount > 0))
             {
                 await _notificationSink.ShowAsync(new UserNotification(
                     UserNotificationKind.ScanSummary,
@@ -478,12 +465,47 @@ public partial class MainWindow : Window
     }
 
 
-    private async Task<AutomaticScanWindowPlan> PlanAutomaticScanWindowAsync(SqliteFollowUpStore store, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<AutomaticScanWindowPlan> PlanIncrementalScanWindowAsync(SqliteFollowUpStore store, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var inboxLastSuccessfulScan = await store.GetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulInboxScanStateKey, cancellationToken);
         var sentLastSuccessfulScan = await store.GetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulSentScanStateKey, cancellationToken);
         var lastSuccessfulScan = await store.GetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulScanStateKey, cancellationToken);
         return AutomaticScanWindowPlanner.PlanFolders(now, _settings.RecentScanDays, inboxLastSuccessfulScan, sentLastSuccessfulScan, lastSuccessfulScan);
+    }
+
+    private async Task RecordSuccessfulScanCursorAsync(
+        SqliteFollowUpStore store,
+        IReadOnlyList<MailReadWarning> warnings,
+        DateTimeOffset scanStartedAt,
+        CancellationToken cancellationToken)
+    {
+        var cursorValue = scanStartedAt.ToString("O");
+        if (FolderScanSucceeded(warnings, MailSourceFolder.Inbox))
+        {
+            await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulInboxScanStateKey, cursorValue, cancellationToken);
+        }
+
+        if (FolderScanSucceeded(warnings, MailSourceFolder.Sent))
+        {
+            await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulSentScanStateKey, cursorValue, cancellationToken);
+        }
+
+        await store.SetAppStateAsync(AutomaticScanWindowPlanner.LastSuccessfulScanStateKey, cursorValue, cancellationToken);
+    }
+
+    private string BuildScanWindowText(AutomaticScanWindowPlan windowPlan)
+    {
+        if (windowPlan.UsedLastSuccessfulScan)
+        {
+            return "최근 변경 메일";
+        }
+
+        if (windowPlan.UsedInboxLastSuccessfulScan || windowPlan.UsedSentLastSuccessfulScan)
+        {
+            return "최근 변경+누락 보정 메일";
+        }
+
+        return $"최근 {_settings.RecentScanDays}일 메일";
     }
 
     private static bool FolderScanSucceeded(IReadOnlyList<MailReadWarning> warnings, MailSourceFolder folder)
@@ -1020,6 +1042,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (ShouldSuppressPopupNotifications())
+        {
+            return;
+        }
+
         var store = await GetStoreAsync();
         var tasks = await store.ListOpenTasksAsync();
         var now = DateTimeOffset.Now;
@@ -1048,6 +1075,8 @@ public partial class MainWindow : Window
     private static bool IsDailyInterruptReminder(ReminderCandidate reminder) =>
         reminder.ReminderKey.EndsWith(":D-day", StringComparison.Ordinal)
         || reminder.ReminderKey.EndsWith(":snooze-due", StringComparison.Ordinal);
+
+    private bool ShouldSuppressPopupNotifications() => IsVisible && IsActive;
 
     private async Task OpenTaskSourceAsync(LocalTaskItem task)
     {

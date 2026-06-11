@@ -80,7 +80,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="{Binding Title}" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}"/>
-                                <TextBlock Grid.Column="1" Text="{Binding Meta}" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="12" VerticalAlignment="Center" Margin="14,0,14,0" TextTrimming="CharacterEllipsis" MaxWidth="360"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Meta}" Foreground="{StaticResource MwBrush.TextMuted}" FontSize="13" VerticalAlignment="Center" Margin="14,0,14,0" TextTrimming="CharacterEllipsis" MaxWidth="360"/>
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
                                     <Button Content="열기" IsEnabled="{Binding CanOpen}" Tag="{Binding}" Click="OpenTaskButton_Click" Style="{StaticResource MwButton.Base}" Padding="10,4" MinHeight="28" Margin="0,0,5,0"/>
                                     <Button Content="나중에" IsEnabled="{Binding HasTask}" Tag="{Binding}" Click="SnoozeTaskButton_Click" Style="{StaticResource MwButton.Ghost}" Padding="10,4" MinHeight="28" Margin="0,0,5,0"/>

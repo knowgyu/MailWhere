@@ -60,7 +60,7 @@ public sealed class MailActionScanner
         IProgress<MailScanProgress>? progress,
         CancellationToken cancellationToken = default)
     {
-        progress?.Report(new MailScanProgress("reading", 0, null, "Outlook에서 최근 1개월 메일을 읽는 중입니다…"));
+        progress?.Report(new MailScanProgress("reading", 0, null, "Outlook에서 메일 목록을 읽는 중입니다…"));
         var metadataFirst = request.UseFastFilter && request.IncludeBody && _emailSource is IEmailHydratingSource;
         var result = await _emailSource.ReadAsync(
             new MailReadRequest(request.MaxItems, !metadataFirst && request.IncludeBody, request.Since, request.InboxSince, request.SentSince),
@@ -72,6 +72,13 @@ public sealed class MailActionScanner
         {
             var fastFilter = await _pipeline.FastFilterAsync(messages, cancellationToken).ConfigureAwait(false);
             prefilteredDuplicate = fastFilter.DuplicateCount;
+            progress?.Report(new MailScanProgress(
+                "reading",
+                0,
+                fastFilter.PendingEmails.Count,
+                prefilteredDuplicate == 0
+                    ? $"새로 확인할 메일 {fastFilter.PendingEmails.Count}건의 본문을 읽는 중입니다…"
+                    : $"이미 처리한 메일 {prefilteredDuplicate}건을 건너뛰고 새 메일 {fastFilter.PendingEmails.Count}건의 본문을 읽는 중입니다…"));
             var hydration = await HydrateEmailsAsync(hydratingSource, fastFilter.PendingEmails, cancellationToken).ConfigureAwait(false);
             messages = hydration.Messages;
             if (hydration.FailureCount > 0)
@@ -83,7 +90,7 @@ public sealed class MailActionScanner
             }
         }
 
-        progress?.Report(new MailScanProgress("analyzing", 0, messages.Count, $"메일 {messages.Count}건을 분석하는 중입니다…"));
+        progress?.Report(new MailScanProgress("analyzing", 0, messages.Count, $"새로 확인할 메일 {messages.Count}건을 분석하는 중입니다…"));
         var created = 0;
         var review = 0;
         var ignored = 0;

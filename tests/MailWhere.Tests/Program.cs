@@ -89,6 +89,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Invalid LLM JSON falls back to rules", InvalidLlmJsonFallsBackToRules),
     ("LLM only failure creates review candidate", LlmOnlyFailureCreatesReviewCandidate),
     ("LLM timeout becomes retryable review", LlmTimeoutBecomesRetryableReview),
+    ("LLM HTTP failure exposes status code", LlmHttpFailureExposesStatusCode),
+    ("LLM scanner batch size is conservative", LlmScannerBatchSizeIsConservative),
     ("LLM user cancellation propagates", LlmUserCancellationPropagates),
     ("Batch LLM maps results", BatchLlmMapsResults),
     ("Batch LLM passes adaptive request options and prompt limits", BatchLlmPassesAdaptiveRequestOptionsAndPromptLimits),
@@ -1447,9 +1449,36 @@ static async Task LlmTimeoutBecomesRetryableReview()
 {
     var analyzer = new LlmBackedFollowUpAnalyzer(new ThrowingLlmClient(new TaskCanceledException("timeout")), new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
     var result = await analyzer.AnalyzeAsync(Mail("자료 요청", "내일까지 검토 후 회신 부탁드립니다."));
+    var telemetry = analyzer.GetTelemetrySnapshot();
 
     Assert(result.Disposition == AnalysisDisposition.Review, "Timeout should become review instead of throwing.");
     Assert(result.Reason.Contains("LLM 분석 실패(timeout)", StringComparison.Ordinal), "Expected timeout failure code.");
+    Assert(result.Summary?.Contains("응답 시간 초과", StringComparison.Ordinal) == true, "Expected timeout cause in retry summary.");
+    Assert(telemetry.ToKoreanSummary().Contains("응답 시간 초과", StringComparison.Ordinal), "Expected telemetry to describe timeout cause.");
+}
+
+static async Task LlmHttpFailureExposesStatusCode()
+{
+    var analyzer = new LlmBackedFollowUpAnalyzer(
+        new ThrowingLlmClient(new HttpRequestException("too many requests", null, HttpStatusCode.TooManyRequests)),
+        new RuleBasedFollowUpAnalyzer(),
+        LlmFallbackPolicy.LlmOnly);
+
+    var result = await analyzer.AnalyzeAsync(Mail("자료 요청", "내일까지 검토 후 회신 부탁드립니다."));
+    var telemetry = analyzer.GetTelemetrySnapshot();
+
+    Assert(result.Reason.Contains("LLM 분석 실패(http-429)", StringComparison.Ordinal), "Expected HTTP status code in failure reason.");
+    Assert(result.Summary?.Contains("요청 한도", StringComparison.Ordinal) == true, "Expected rate-limit guidance in retry summary.");
+    Assert(telemetry.ToKoreanSummary().Contains("요청 한도", StringComparison.Ordinal), "Expected telemetry to explain rate-limit failures.");
+}
+
+static Task LlmScannerBatchSizeIsConservative()
+{
+    var analyzer = new LlmBackedFollowUpAnalyzer(new FakeLlmClient("{}"), new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
+    var pipeline = new FollowUpPipeline(analyzer, new FakeStore());
+
+    Assert(pipeline.PreferredBatchSize == 4, "Expected scanner LLM batches to stay small enough for local models.");
+    return Task.CompletedTask;
 }
 
 static async Task LlmUserCancellationPropagates()

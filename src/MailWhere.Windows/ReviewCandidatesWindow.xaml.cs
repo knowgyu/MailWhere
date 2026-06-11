@@ -367,7 +367,7 @@ public partial class ReviewCandidatesWindow : Window
             candidate,
             null,
             FollowUpPresentation.ActionTitle(candidate.Analysis.SuggestedTitle),
-            $"{FollowUpPresentation.HumanDueText(candidate.Analysis.DueAt, now)} · {FollowUpPresentation.HumanSenderText(candidate.SourceSenderDisplay, "알 수 없음")}" + (isBusy ? " · 처리 중" : string.Empty),
+            BuildCandidateMeta(candidate, now, isBusy),
             "등록(Y)",
             "무시(I)",
             Visibility.Visible,
@@ -385,5 +385,37 @@ public partial class ReviewCandidatesWindow : Window
             Visibility.Collapsed,
             false,
             !isBusy);
+
+        private static string BuildCandidateMeta(ReviewCandidate candidate, DateTimeOffset now, bool isBusy)
+        {
+            var parts = new List<string>
+            {
+                FollowUpPresentation.HumanDueText(candidate.Analysis.DueAt, now),
+                FollowUpPresentation.HumanSenderText(candidate.SourceSenderDisplay, "알 수 없음")
+            };
+            var reason = Compact(candidate.Analysis.Summary ?? candidate.Analysis.Reason, 120);
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                parts.Add(reason);
+            }
+
+            if (isBusy)
+            {
+                parts.Add("처리 중");
+            }
+
+            return string.Join(" · ", parts);
+        }
+
+        private static string Compact(string? value, int maxChars)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            var compact = string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+            return compact.Length <= maxChars ? compact : compact[..maxChars].TrimEnd() + "…";
+        }
     }
 }

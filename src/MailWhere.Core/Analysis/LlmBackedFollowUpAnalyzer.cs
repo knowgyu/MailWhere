@@ -13,7 +13,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private const int MaxCurrentMessageChars = 1300;
     private const int MaxForwardedContextChars = 900;
     private const int MaxQuotedPreviewChars = 240;
-    private const int DefaultBatchSize = 12;
+    private const int DefaultBatchSize = 4;
     private const int MinOutputTokens = 512;
     private const int MaxOutputTokens = 4096;
     private readonly ILlmClient _llmClient;
@@ -311,7 +311,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
             $"LLM 분석 실패({failureCode})로 자동 등록하지 않았습니다.",
             null,
             null,
-            "LLM endpoint 상태를 확인한 뒤 다시 메일을 확인하세요.");
+            $"원인: {DescribeFailureCode(failureCode)}. LLM endpoint 상태를 확인한 뒤 다시 시도하세요.");
     }
 
     private static bool TryParse(string raw, EmailSnapshot email, out FollowUpAnalysis parsed)
@@ -624,10 +624,26 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         ex switch
         {
             TaskCanceledException => "timeout",
+            HttpRequestException { StatusCode: { } statusCode } => $"http-{(int)statusCode}",
             HttpRequestException => "http-error",
             JsonException => "invalid-json",
             InvalidOperationException => "invalid-settings",
             _ => ex.GetType().Name
+        };
+
+    private static string DescribeFailureCode(string failureCode) =>
+        failureCode switch
+        {
+            "timeout" => "응답 시간 초과",
+            "invalid-json" => "AI 응답 형식 오류",
+            "empty-response" => "빈 응답",
+            "invalid-settings" => "AI 설정 오류",
+            "missing-batch-item" => "배치 응답 누락",
+            "partial-batch" => "일부 배치 응답 누락",
+            _ when failureCode.StartsWith("http-429", StringComparison.OrdinalIgnoreCase) => "요청 한도 초과 또는 과도한 동시 요청",
+            _ when failureCode.StartsWith("http-5", StringComparison.OrdinalIgnoreCase) => "AI 서버 오류",
+            _ when failureCode.StartsWith("http-", StringComparison.OrdinalIgnoreCase) => "AI HTTP 오류",
+            _ => failureCode
         };
 
     private const string SharedTriagePolicyPrompt = """

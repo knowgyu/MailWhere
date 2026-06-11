@@ -55,6 +55,7 @@ public sealed class OutlookComMailSource : IEmailHydratingSource
 
             dynamic outlookDynamic = outlook;
             session = outlookDynamic.Session;
+            TryRequestMailboxSync(session, warnings);
             dynamic sessionDynamic = session;
             var mailboxIdentity = TryReadCurrentUserIdentity(session);
             inbox = sessionDynamic.GetDefaultFolder(6); // olFolderInbox
@@ -89,6 +90,23 @@ public sealed class OutlookComMailSource : IEmailHydratingSource
         }
 
         return new EmailReadResult(messages, warnings, skipped);
+    }
+
+    private static void TryRequestMailboxSync(object session, List<MailReadWarning> warnings)
+    {
+        try
+        {
+            session.GetType().InvokeMember(
+                "SendAndReceive",
+                System.Reflection.BindingFlags.InvokeMethod,
+                null,
+                session,
+                new object[] { false });
+        }
+        catch (Exception ex)
+        {
+            warnings.Add(new MailReadWarning("outlook-send-receive-unavailable", CapabilitySeverity.Info, ex.GetType().Name));
+        }
     }
 
     private static IReadOnlyList<EmailSnapshot> ReadSentMessages(

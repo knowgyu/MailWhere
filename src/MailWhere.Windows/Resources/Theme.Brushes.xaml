@@ -7,7 +7,7 @@
     <SolidColorBrush x:Key="MwBrush.BorderStrong" Color="#D8E2FF"/>
     <SolidColorBrush x:Key="MwBrush.Text" Color="#20304F"/>
     <SolidColorBrush x:Key="MwBrush.TextStrong" Color="#14213D"/>
-    <SolidColorBrush x:Key="MwBrush.TextMuted" Color="#667085"/>
+    <SolidColorBrush x:Key="MwBrush.TextMuted" Color="#475467"/>
     <SolidColorBrush x:Key="MwBrush.Primary" Color="#2458F2"/>
     <SolidColorBrush x:Key="MwBrush.PrimarySoft" Color="#EEF3FF"/>
     <SolidColorBrush x:Key="MwBrush.Success" Color="#067647"/>
