@@ -9,4 +9,13 @@
     <ProjectReference Include="../../src/MailWhere.Storage/MailWhere.Storage.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
   </ItemGroup>
+  <PropertyGroup>
+    <ManualTestRunnerHost Condition="'$(ManualTestRunnerHost)' == '' and '$(DOTNET_HOST_PATH)' != ''">$(DOTNET_HOST_PATH)</ManualTestRunnerHost>
+    <ManualTestRunnerHost Condition="'$(ManualTestRunnerHost)' == '' and '$(DotNetHostPath)' != ''">$(DotNetHostPath)</ManualTestRunnerHost>
+    <ManualTestRunnerHost Condition="'$(ManualTestRunnerHost)' == ''">dotnet</ManualTestRunnerHost>
+  </PropertyGroup>
+  <Target Name="RunManualTestsForDotnetTest" BeforeTargets="VSTest" DependsOnTargets="Build">
+    <Exec Condition="'$(ManualTestRunnerCommand)' == ''" Command="&quot;$(ManualTestRunnerHost)&quot; &quot;$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(OutputPath)$(AssemblyName).dll'))&quot;" />
+    <Exec Condition="'$(ManualTestRunnerCommand)' != ''" Command="$(ManualTestRunnerCommand)" />
+  </Target>
 </Project>

@@ -5,17 +5,37 @@ namespace MailWhere.Core.Capabilities;
 
 public static class SanitizedDiagnosticsExporter
 {
-    private static readonly HashSet<string> AllowedDetailKeys = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly string[] NumericDetailKeys =
+    [
         "count",
         "skippedCount",
+        "durationMs",
+        "elapsedMs",
+        "p50Ms",
+        "p95Ms",
+        "batchSize",
+        "pageSize",
+        "rowCount",
+        "hitCount",
+        "failureCount",
+        "fallbackCount"
+    ];
+
+    private static readonly HashSet<string> AllowedDetailKeys = new(
+        NumericDetailKeys.Concat(new[]
+        {
         "version",
         "feature",
         "enabled",
         "mode",
         "errorClass",
-        "statusCode"
-    };
+        "statusCode",
+        "tokenizer",
+        "journalMode",
+        "connectionMode",
+        "operation"
+        }),
+        StringComparer.OrdinalIgnoreCase);
 
     private static readonly Regex NumericValue = new("^\\d{1,9}$", RegexOptions.Compiled);
     private static readonly Regex SafeCodeValue = new("^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$", RegexOptions.Compiled);
@@ -95,8 +115,7 @@ public static class SanitizedDiagnosticsExporter
         }
 
         var trimmed = value.Trim();
-        if (key.Equals("count", StringComparison.OrdinalIgnoreCase)
-            || key.Equals("skippedCount", StringComparison.OrdinalIgnoreCase))
+        if (NumericDetailKeys.Contains(key, StringComparer.OrdinalIgnoreCase))
         {
             if (!NumericValue.IsMatch(trimmed))
             {

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using MailWhere.Core.Domain;
 using MailWhere.Core.Export;
+using MailWhere.Core.Search;
 using MailWhere.Storage;
 using Microsoft.Data.Sqlite;
 
@@ -22,6 +23,7 @@ public static class CliApp
     private const int DefaultArchivedLimit = 100;
     private const int DefaultListLimit = 50;
     private const int DefaultReviewLimit = 50;
+    private const int DefaultMailSearchLimit = 20;
     private const int MaxLimit = 500;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -62,6 +64,7 @@ public static class CliApp
                 "export" => await ExportAsync(options, stdout, generatedAt, cancellationToken).ConfigureAwait(false),
                 "list-tasks" => await ListTasksAsync(options, stdout, generatedAt, cancellationToken).ConfigureAwait(false),
                 "list-review-candidates" => await ListReviewCandidatesAsync(options, stdout, generatedAt, cancellationToken).ConfigureAwait(false),
+                "search-mail" => await SearchMailAsync(options, stdout, generatedAt, cancellationToken).ConfigureAwait(false),
                 _ => await UsageErrorAsync(stdout, generatedAt, $"Unknown command `{command}`.").ConfigureAwait(false)
             };
         }
@@ -119,7 +122,7 @@ public static class CliApp
             read_only = true,
             default_database_path = dbPath,
             database_exists = File.Exists(dbPath),
-            commands = new[] { "health", "manifest", "export", "list-tasks", "list-review-candidates" }
+            commands = new[] { "health", "manifest", "export", "list-tasks", "list-review-candidates", "search-mail" }
         });
     }
 
@@ -143,7 +146,9 @@ public static class CliApp
                     "evidence_snippet",
                     "full_recipient_lists",
                     "prompt_logs",
-                    "api_keys"
+                    "api_keys",
+                    "store_id",
+                    "entry_id"
                 }
             },
             exit_codes = new
@@ -184,6 +189,12 @@ public static class CliApp
                     name = "list-review-candidates",
                     usage = "list-review-candidates --json [--limit N] [--db PATH]",
                     description = "Return sanitized active review candidates from the read-only database."
+                },
+                new
+                {
+                    name = "search-mail",
+                    usage = "search-mail --json --query TEXT [--folder inbox|sent|all] [--sender-recipient TEXT] [--conversation ID] [--limit N] [--db PATH]",
+                    description = "Search the local SQLite mail mirror only; returns bounded snippets and opaque can_open_source flags."
                 }
             }
         });
@@ -250,6 +261,48 @@ public static class CliApp
         }).ConfigureAwait(false);
     }
 
+    private static async Task<int> SearchMailAsync(CliOptions options, TextWriter stdout, DateTimeOffset generatedAt, CancellationToken cancellationToken)
+    {
+        EnsureNoExtraOptions(options, allowed: ["db", "query", "folder", "sender-recipient", "conversation", "limit"]);
+        if (!options.Values.TryGetValue("query", out var query) || string.IsNullOrWhiteSpace(query))
+        {
+            throw new UsageException("Option `--query` is required.");
+        }
+
+        var limit = options.GetPositiveInt("limit", DefaultMailSearchLimit, MaxLimit);
+        var folder = options.GetChoice("folder", "all", ["inbox", "sent", "all"]);
+        await using var mirror = OpenReadOnlyMirror(options.GetDatabasePath());
+        var results = await mirror.SearchAsync(new MailMirrorSearchRequest(
+            Query: query,
+            SenderOrRecipient: options.Values.GetValueOrDefault("sender-recipient"),
+            Folder: folder switch
+            {
+                "inbox" => MailSourceFolder.Inbox,
+                "sent" => MailSourceFolder.Sent,
+                _ => null
+            },
+            ConversationId: options.Values.GetValueOrDefault("conversation"),
+            Limit: limit), cancellationToken).ConfigureAwait(false);
+
+        return await WriteSuccessAsync(stdout, generatedAt, new
+        {
+            query = query.Trim(),
+            folder,
+            limit,
+            results = results.Select(result => new
+            {
+                folder = result.Folder.ToString(),
+                subject = result.Subject,
+                sender_display = result.SenderDisplay,
+                received_at = result.ReceivedAt,
+                sent_at = result.SentAt,
+                conversation_id = result.ConversationId,
+                snippet = result.Snippet,
+                can_open_source = result.Locator.IsValid
+            }).ToArray()
+        }).ConfigureAwait(false);
+    }
+
     private static SqliteFollowUpStore OpenReadOnlyStore(string databasePath)
     {
         if (!File.Exists(databasePath))
@@ -258,6 +311,16 @@ public static class CliApp
         }
 
         return SqliteFollowUpStore.OpenReadOnly(databasePath);
+    }
+
+    private static SqliteMailMirrorStore OpenReadOnlyMirror(string databasePath)
+    {
+        if (!File.Exists(databasePath))
+        {
+            throw new DatabaseNotFoundException($"MailWhere database was not found at `{databasePath}`.");
+        }
+
+        return new SqliteMailMirrorStore(databasePath);
     }
 
     private static bool MatchesDueWindow(DateTimeOffset? dueAt, string dueWindow, DateTimeOffset generatedAt)

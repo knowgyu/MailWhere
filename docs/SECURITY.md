@@ -10,3 +10,10 @@
 - Diagnostics exports are allowlist-based, validate allowed values, and omit free-form probe messages.
 - `MailWhereExportService` is also allowlist-style: it exports board/archive/review/reply-progress metadata, not source ids/hashes, raw bodies, prompt payloads, evidence snippets, or full recipient lists.
 - Phase 0/1 must not mutate Outlook mailbox state.
+
+
+## Mail mirror retention
+
+When the mail mirror is enabled, normalized plain-text mail bodies are retained locally in SQLite/FTS5 for search. This is a mirror, not an archive: completed Outlook folder inventories remove local searchable bodies for deleted or moved-away mail. The SQLite file is visible to the Windows user account and may be inspected by company EDR/security tools.
+
+Default exports and contextWhere-oriented machine-readable surfaces remain body-free: no raw body, StoreID, EntryID, source id/hash, prompt payloads, or full recipient lists. Explicit search returns bounded snippets only, and explicit source-open uses the current `(StoreID, EntryID)` internally without exporting that locator. Attachment contents belong in OfficeWhere, not MailWhere.

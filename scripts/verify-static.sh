@@ -8,6 +8,7 @@ required=(
   MailWhere.sln
   docs/ASSUMPTIONS.md
   docs/CAPABILITY_PROBES.md
+  docs/BASELINE_METRICS.md
   docs/SECURITY.md
   docs/UX_AND_INTEGRATION_REVIEW.md
   docs/ROADMAP.md

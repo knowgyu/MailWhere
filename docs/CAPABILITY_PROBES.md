@@ -19,7 +19,7 @@ Required Phase 0 probes:
 - `notification-capability`
 - `startup-toggle`
 
-Diagnostics use an allowlist (`count`, `skippedCount`, `version`, `feature`, `enabled`, `mode`, `errorClass`, `statusCode`) with per-key value validation and safe gate reason codes. Probe messages are intentionally not exported.
+Diagnostics use an allowlist (`count`, `skippedCount`, `version`, `feature`, `enabled`, `mode`, `errorClass`, `statusCode`, plus content-free mirror timing/count/mode keys listed in `BASELINE_METRICS.md`) with per-key value validation and safe gate reason codes. Probe messages are intentionally not exported.
 
 Managed mode gates **새 메일 자동 확인** until a real Windows manual-readiness check passes. If automatic mail checking is not explicitly requested, the runtime gate reports `manual` mode even when probes pass.
 

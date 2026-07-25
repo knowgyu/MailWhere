@@ -102,6 +102,7 @@ manifest = {
         "export --json [--db PATH] [--archived-limit N]",
         "list-tasks --json [--status open|archived|all] [--due-window today|overdue|7d|30d|none|all] [--limit N] [--db PATH]",
         "list-review-candidates --json [--limit N] [--db PATH]",
+        "search-mail --json --query TEXT [--folder inbox|sent|all] [--sender-recipient TEXT] [--conversation ID] [--limit N] [--db PATH]",
     ],
     "safetyDefaults": [
         "Phase 0/1 Outlook access is read-only",

@@ -36,6 +36,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - `나중에`로 지정 시각까지 active 목록에서 제외하고, 시간이 지나면 다시 표시
 - `보관`으로 active 목록에서 제외하고, 보관함에서 원본 열기/복원
 - 가능한 경우 `열기`로 Outlook 원본 메일 열기
+- 로컬 메일 mirror가 있는 경우 SQLite/FTS5만 읽는 `search-mail` CLI 검색
 - 다자 수신자에게 보낸 회신 요청은 Outlook 대화 ID/보낸 사람 기준으로 `n/m명 회신` 현황 표시 및 export
 - 향후 LLM skill이 읽을 수 있는 raw-mail-free export SDK/API (`MailWhereExportService`)
 - Codex/where-skills 같은 외부 자동화가 안전하게 읽을 수 있는 read-only JSON CLI provider (`MailWhere.Cli.exe`)
@@ -50,7 +51,8 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - 첨부파일 자동 분석 없음
 - vendor-specific mailbox export 파일 직접 parsing 없음
 - 외부/endpoint LLM 기본 OFF
-- raw mail body와 prompt 로그 저장 없음
+- 업무/검토/export에는 raw mail body와 prompt 로그 저장 없음
+- 메일 검색 mirror를 켠 경우 normalized plain-text body가 `%LOCALAPPDATA%\MailWhere\followups.sqlite`의 FTS5 corpus에 로컬 저장됨
 - 새 메일 자동 확인은 설정에서 켜되, 앱이 안전 조건을 만족할 때만 read-only로 동작
 
 ## 다운로드해서 실행
@@ -75,7 +77,7 @@ portable zip에는 UI 앱 `MailWhere.exe`와 별도로 `MailWhere.Cli.exe`가 �
 .\MailWhere.Cli.exe list-review-candidates --json --limit 25
 ```
 
-모든 응답은 `provider: "MailWhere"`, `contract_version: "v1"`, `app_version`, `generated_at`, `ok`를 포함하는 JSON envelope입니다. 성공은 exit code `0`, 예상 가능한 사용 불가 상태는 `2`, 사용법 오류는 `64`, 예기치 못한 실패는 `70`입니다. CLI JSON은 raw body, source id/hash, evidence snippet, 전체 수신자 목록, prompt logs, API keys를 내보내지 않습니다.
+모든 응답은 `provider: "MailWhere"`, `contract_version: "v1"`, `app_version`, `generated_at`, `ok`를 포함하는 JSON envelope입니다. 성공은 exit code `0`, 예상 가능한 사용 불가 상태는 `2`, 사용법 오류는 `64`, 예기치 못한 실패는 `70`입니다. CLI JSON은 raw body, source id/hash, evidence snippet, 전체 수신자 목록, prompt logs, API keys를 내보내지 않습니다. `search-mail`은 일반 export와 별도의 명시적 검색 명령이며 Outlook을 열지 않고 SQLite FTS5 mirror만 읽어 160자 이하 snippet과 `can_open_source` flag만 반환합니다. StoreID/EntryID는 출력하지 않습니다.
 
 ## 기본 사용 흐름
 
@@ -111,7 +113,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.10.0-win-x64-portable.zip
+artifacts/MailWhere-v0.11.0-win-x64-portable.zip
 ```
 
 ## LLM endpoint

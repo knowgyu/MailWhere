@@ -16,6 +16,7 @@ using MailWhere.Core.Pipeline;
 using MailWhere.Core.Reminders;
 using MailWhere.Core.Scheduling;
 using MailWhere.Core.Scanning;
+using MailWhere.Core.Search;
 using MailWhere.Core.Storage;
 using MailWhere.Storage;
 
@@ -50,6 +51,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Notification throttle supports once per date", NotificationThrottleSupportsOncePerDate),
     ("Diagnostics exporter drops sensitive detail keys", DiagnosticsExporterDropsSensitiveDetailKeys),
     ("Diagnostics exporter sanitizes allowed detail values", DiagnosticsExporterSanitizesAllowedDetailValues),
+    ("Diagnostics exporter allows content-free mirror metrics", DiagnosticsExporterAllowsContentFreeMirrorMetrics),
+    ("Mail mirror diagnostics contract names only content-free keys", MailMirrorDiagnosticsContractNamesOnlyContentFreeKeys),
     ("Runtime diagnostics export includes safe gate codes", RuntimeDiagnosticsExportIncludesSafeGateCodes),
     ("Partial runtime settings keep safe defaults", PartialRuntimeSettingsKeepSafeDefaults),
     ("Runtime settings map Ollama endpoint", RuntimeSettingsMapOllamaEndpoint),
@@ -153,13 +156,27 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("MailWhere CLI manifest and health emit provider envelopes", MailWhereCliManifestAndHealthEmitProviderEnvelopes),
     ("MailWhere CLI missing database returns JSON error without creating files", MailWhereCliMissingDatabaseReturnsJsonErrorWithoutCreatingFiles),
     ("MailWhere CLI read commands emit sanitized schemas", MailWhereCliReadCommandsEmitSanitizedSchemas),
+    ("MailWhere CLI search mail is SQLite only and sanitized", MailWhereCliSearchMailIsSqliteOnlyAndSanitized),
     ("MailWhere CLI project references only Core and Storage", MailWhereCliProjectReferencesOnlyCoreAndStorage),
     ("SQLite task details edit persists", SqliteTaskDetailsEditPersists),
     ("SQLite task complete and snooze persist", SqliteTaskCompleteAndSnoozePersist),
     ("SQLite stale review ignore does not redact approved task", SqliteStaleReviewIgnoreDoesNotRedactApprovedTask),
     ("SQLite migrates pre daily board schema", SqliteMigratesPreDailyBoardSchema),
     ("SQLite delete source-derived data redacts task and candidate", SqliteDeleteSourceDerivedDataRedactsTaskAndCandidate),
-    ("SQLite schema avoids raw mail columns", SqliteSchemaAvoidsRawMailColumns)
+    ("SQLite schema avoids raw mail columns", SqliteSchemaAvoidsRawMailColumns),
+    ("Mail mirror FTS insert update delete rebuild", MailMirrorFtsInsertUpdateDeleteRebuild),
+    ("Mail mirror batch checkpoint atomic", MailMirrorBatchCheckpointAtomic),
+    ("Mail mirror search filters normalize and short query fallback", MailMirrorSearchFiltersNormalizeAndShortQueryFallback),
+    ("Mail mirror preserves task board database", MailMirrorPreservesTaskBoardDatabase),
+    ("Mail mirror concurrent searches use serialized reader", MailMirrorConcurrentSearchesUseSerializedReader),
+    ("Mail mirror backfill hydrates only new changed checkpoints folders", MailMirrorBackfillHydratesOnlyNewChangedCheckpointsFolders),
+    ("Mail mirror backfill cancel resume keeps atomic batches no duplicates", MailMirrorBackfillCancelResumeKeepsAtomicBatchesNoDuplicates),
+    ("Mail mirror backfill isolates hydration failures", MailMirrorBackfillIsolatesHydrationFailures),
+    ("Mail mirror reconcile deletes unseen and FTS terms", MailMirrorReconcileDeletesUnseenAndFtsTerms),
+    ("Mail mirror reconcile handles Inbox to Sent move", MailMirrorReconcileHandlesInboxToSentMove),
+    ("Mail mirror interrupted reconcile retains unseen", MailMirrorInterruptedReconcileRetainsUnseen),
+    ("Mail mirror warning reconcile retains unseen", MailMirrorWarningReconcileRetainsUnseen),
+    ("Mail mirror event hint only wakes missed event recovery", MailMirrorEventHintOnlyWakesMissedEventRecovery)
 };
 
 var failures = 0;
@@ -621,6 +638,49 @@ static Task DiagnosticsExporterSanitizesAllowedDetailValues()
     Assert(!json.Contains("yes", StringComparison.OrdinalIgnoreCase), "Expected non-boolean enabled removed.");
     Assert(json.Contains("manual", StringComparison.OrdinalIgnoreCase), "Expected safe mode retained.");
     Assert(json.Contains("writable", StringComparison.OrdinalIgnoreCase), "Expected safe status code retained.");
+    return Task.CompletedTask;
+}
+
+static Task DiagnosticsExporterAllowsContentFreeMirrorMetrics()
+{
+    var report = new CapabilityReport(DateTimeOffset.UtcNow, new[]
+    {
+        CapabilityProbeResult.Passed(MailMirrorDiagnostics.Fts5ProbeId, "ok", new Dictionary<string, string>
+        {
+            ["durationMs"] = "12",
+            ["p95Ms"] = "345",
+            ["batchSize"] = "25",
+            ["pageSize"] = "200",
+            ["rowCount"] = "1000",
+            ["tokenizer"] = "unicode61",
+            ["journalMode"] = "wal",
+            ["connectionMode"] = "read-only",
+            ["operation"] = "fts5-probe",
+            ["body"] = "secret body",
+            ["subject"] = "secret subject",
+            ["entryId"] = "secret-entry",
+            ["storeId"] = "secret-store"
+        })
+    });
+
+    var json = SanitizedDiagnosticsExporter.Export(report);
+
+    Assert(json.Contains("durationMs", StringComparison.Ordinal), "Expected timing metric retained.");
+    Assert(json.Contains("p95Ms", StringComparison.Ordinal), "Expected p95 metric retained.");
+    Assert(json.Contains("unicode61", StringComparison.Ordinal), "Expected tokenizer code retained.");
+    Assert(json.Contains("wal", StringComparison.OrdinalIgnoreCase), "Expected SQLite journal mode retained.");
+    Assert(!json.Contains("secret", StringComparison.OrdinalIgnoreCase), "Expected mail identifiers/content removed.");
+    return Task.CompletedTask;
+}
+
+static Task MailMirrorDiagnosticsContractNamesOnlyContentFreeKeys()
+{
+    var forbidden = MailMirrorDiagnostics.ForbiddenDetailKeys;
+    Assert(forbidden.Contains("body"), "Expected body to be explicitly forbidden.");
+    Assert(forbidden.Contains("entryId"), "Expected Outlook EntryID to be explicitly forbidden.");
+    Assert(MailMirrorDiagnostics.ContentFreeMetricKeys.Contains("p95Ms"), "Expected p95 baseline metric.");
+    Assert(MailMirrorDiagnostics.ContentFreeMetricKeys.Contains("tokenizer"), "Expected tokenizer capability metric.");
+    Assert(MailMirrorDiagnostics.ContentFreeMetricKeys.Contains("journalMode"), "Expected SQLite journal metric.");
     return Task.CompletedTask;
 }
 
@@ -3443,10 +3503,12 @@ static async Task MailWhereCliManifestAndHealthEmitProviderEnvelopes()
     Assert(manifestData.GetProperty("no_outlook_com").GetBoolean(), "Expected manifest to declare no Outlook COM dependency.");
     Assert(manifestData.GetProperty("exit_codes").GetProperty("expected_unavailable").GetInt32() == CliApp.ExitExpectedUnavailable, "Expected unavailable exit code in manifest.");
     Assert(manifestData.GetProperty("commands").EnumerateArray().Any(command => command.GetProperty("name").GetString() == "export"), "Expected export command in manifest.");
+    Assert(manifestData.GetProperty("commands").EnumerateArray().Any(command => command.GetProperty("name").GetString() == "search-mail"), "Expected search-mail command in manifest.");
 
     var healthData = healthJson.RootElement.GetProperty("data");
     Assert(healthData.GetProperty("read_only").GetBoolean(), "Expected health to declare read-only mode.");
     Assert(healthData.GetProperty("commands").EnumerateArray().Any(command => command.GetString() == "list-tasks"), "Expected list-tasks in health command list.");
+    Assert(healthData.GetProperty("commands").EnumerateArray().Any(command => command.GetString() == "search-mail"), "Expected search-mail in health command list.");
 }
 
 static async Task MailWhereCliMissingDatabaseReturnsJsonErrorWithoutCreatingFiles()
@@ -3557,6 +3619,53 @@ static async Task MailWhereCliReadCommandsEmitSanitizedSchemas()
             Assert(!ContainsJsonPropertyName(output, "source_id_hash"), "Expected no source_id_hash JSON property.");
             Assert(!ContainsJsonPropertyName(output, "evidence_snippet"), "Expected no evidence_snippet JSON property.");
         }
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task MailWhereCliSearchMailIsSqliteOnlyAndSanitized()
+{
+    var (store, dbPath, cleanup) = await CreateTempStoreAsync();
+    await using var mirror = new SqliteMailMirrorStore(dbPath);
+    try
+    {
+        await mirror.InitializeAsync();
+        await mirror.UpsertBatchAsync(new[]
+        {
+            MirrorMessage("secret-store", "secret-entry", "검색 제목", "needle body with bounded snippet", MailSourceFolder.Inbox, sender: "Safe Sender")
+        });
+        await store.SaveTaskAsync(new LocalTaskItem(
+            Guid.NewGuid(),
+            "Export task",
+            null,
+            StableHash.Create("source-secret"),
+            "source-secret",
+            0.9,
+            "reason",
+            "evidence",
+            LocalTaskStatus.Open,
+            null,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow));
+
+        var search = await RunCliAsync("search-mail", "--json", "--db", dbPath, "--query", "needle", "--folder", "inbox", "--limit", "5");
+        var export = await RunCliAsync("export", "--json", "--db", dbPath);
+
+        Assert(search.ExitCode == CliApp.ExitSuccess, "Expected search-mail command to succeed.");
+        using var searchJson = JsonDocument.Parse(search.Stdout);
+        AssertProviderEnvelope(searchJson.RootElement, ok: true);
+        var results = searchJson.RootElement.GetProperty("data").GetProperty("results");
+        Assert(results.GetArrayLength() == 1, "Expected one mail search hit.");
+        Assert(results[0].GetProperty("can_open_source").GetBoolean(), "Expected opaque source-open capability flag.");
+        Assert(results[0].GetProperty("snippet").GetString()!.Length <= 160, "Expected bounded snippet.");
+        Assert(!search.Stdout.Contains("secret-store", StringComparison.Ordinal), "Expected StoreID omitted from CLI search JSON.");
+        Assert(!search.Stdout.Contains("secret-entry", StringComparison.Ordinal), "Expected EntryID omitted from CLI search JSON.");
+        Assert(!ContainsJsonPropertyName(search.Stdout, "store_id"), "Expected no store_id JSON property.");
+        Assert(!ContainsJsonPropertyName(search.Stdout, "entry_id"), "Expected no entry_id JSON property.");
+        Assert(!export.Stdout.Contains("needle body", StringComparison.Ordinal), "Expected default export remain body-free.");
     }
     finally
     {
@@ -3826,6 +3935,350 @@ static async Task SqliteDeleteSourceDerivedDataRedactsTaskAndCandidate()
     }
 }
 
+
+static async Task MailMirrorFtsInsertUpdateDeleteRebuild()
+{
+    var (mirror, dbPath, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        var first = MirrorMessage("store", "entry-1", "분기 보고", "alpha body", MailSourceFolder.Inbox, conversationId: "thread-1");
+        await mirror.UpsertBatchAsync(new[] { first });
+
+        var subjectHits = await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "분기", Limit: 10));
+        Assert(subjectHits.Count == 1 && subjectHits[0].Locator.EntryId == "entry-1", "Expected inserted subject searchable.");
+
+        var updated = first with { Subject = "다른 제목", BodyText = "새로운 beta 본문" };
+        await mirror.UpsertBatchAsync(new[] { updated });
+        var oldHits = await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "alpha", Limit: 10));
+        var newHits = await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "beta", Limit: 10));
+        Assert(oldHits.Count == 0, "Expected old FTS terms removed on update.");
+        Assert(newHits.Count == 1, "Expected new FTS terms searchable on update.");
+
+        await ClearMailMirrorFtsAsync(dbPath);
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "beta", Limit: 10))).Count == 0, "Expected cleared FTS to hide term before rebuild.");
+        await mirror.RebuildFtsAsync();
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "beta", Limit: 10))).Count == 1, "Expected explicit rebuild restore FTS parity.");
+
+        await mirror.DeleteAsync(new[] { first.Locator });
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "beta", Limit: 10))).Count == 0, "Expected delete remove FTS terms.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorBatchCheckpointAtomic()
+{
+    var (mirror, dbPath, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        var batch = Enumerable.Range(0, SqliteMailMirrorStore.MaxWriteBatchSize)
+            .Select(i => MirrorMessage("store", $"entry-{i:00}", $"제목 {i}", $"atomic body {i}", MailSourceFolder.Inbox))
+            .ToArray();
+        await mirror.UpsertBatchAsync(batch, new MailMirrorCheckpoint("Inbox", "checkpoint-1"));
+
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_messages") == SqliteMailMirrorStore.MaxWriteBatchSize, "Expected max-sized batch rows committed.");
+        var checkpoint = await QuerySingleStringAsync(dbPath, "SELECT checkpoint FROM mail_mirror_checkpoints WHERE folder = 'Inbox'");
+        Assert(checkpoint == "checkpoint-1", "Expected checkpoint committed with batch.");
+
+        try
+        {
+            var tooLarge = Enumerable.Range(0, SqliteMailMirrorStore.MaxWriteBatchSize + 1)
+                .Select(i => MirrorMessage("store", $"too-large-{i:00}", "too large", "too large", MailSourceFolder.Inbox))
+                .ToArray();
+            await mirror.UpsertBatchAsync(tooLarge, new MailMirrorCheckpoint("Inbox", "bad-checkpoint"));
+            Assert(false, "Expected oversized direct write batch rejected.");
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // Expected: callers must supply already bounded batches.
+        }
+
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_messages WHERE entry_id LIKE 'too-large-%'") == 0, "Expected rejected oversized batch not written.");
+        Assert(await mirror.GetCheckpointAsync("Inbox") == "checkpoint-1", "Expected rejected oversized batch not advance checkpoint.");
+
+        try
+        {
+            await mirror.UpsertBatchAsync(new[] { MirrorMessage("store", "entry-fail", "fail", "fail", MailSourceFolder.Inbox) }, new MailMirrorCheckpoint(null!, "bad"));
+            Assert(false, "Expected invalid checkpoint fail before commit.");
+        }
+        catch
+        {
+            // Expected: storage-scoped transaction should roll back inserted row with bad checkpoint.
+        }
+
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_messages WHERE entry_id = 'entry-fail'") == 0, "Expected failed batch rolled back.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorSearchFiltersNormalizeAndShortQueryFallback()
+{
+    var (mirror, _, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        await mirror.UpsertBatchAsync(new[]
+        {
+            MirrorMessage("store", "inbox-1", "검색 대상", "한\0글\r\n본문", MailSourceFolder.Inbox, sender: "Alice", recipients: new[] { "Bob" }, conversationId: "thread-a"),
+            MirrorMessage("store", "sent-1", "다른 메일", "영문 body", MailSourceFolder.Sent, sender: "Me", recipients: new[] { "Carol" }, conversationId: "thread-b")
+        });
+
+        var shortQueryHits = await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "한", Limit: 10));
+        Assert(shortQueryHits.Count == 1 && shortQueryHits[0].Snippet.Contains("한글", StringComparison.Ordinal), "Expected short query bounded LIKE fallback over normalized body.");
+
+        var filtered = await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "메일", Folder: MailSourceFolder.Sent, SenderOrRecipient: "Carol", ConversationId: "thread-b", Limit: 10));
+        Assert(filtered.Count == 1 && filtered[0].Locator.EntryId == "sent-1", "Expected deterministic metadata filters.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorPreservesTaskBoardDatabase()
+{
+    var (store, dbPath, cleanup) = await CreateTempStoreAsync();
+    await using var mirror = new SqliteMailMirrorStore(dbPath);
+    try
+    {
+        var mail = Mail("기존 업무", "내일까지 회신 부탁드립니다.", id: "task-source");
+        await store.SaveTaskAsync(LocalTaskItem.FromAnalysis(mail, await new RuleBasedFollowUpAnalyzer().AnalyzeAsync(mail), DateTimeOffset.UtcNow));
+        await mirror.InitializeAsync();
+        await mirror.UpsertBatchAsync(new[] { MirrorMessage("store", "entry", "mirror", "body", MailSourceFolder.Inbox) });
+
+        var tasks = await store.ListOpenTasksAsync();
+        Assert(tasks.Count == 1 && tasks[0].SourceId == "task-source", "Expected mirror schema preserve existing task-board behavior.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+
+static async Task MailMirrorReconcileDeletesUnseenAndFtsTerms()
+{
+    var (mirror, dbPath, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        await mirror.UpsertBatchAsync(new[] { MirrorMessage("store", "gone", "삭제 대상", "delete-token", MailSourceFolder.Inbox) });
+        var source = new FakeInventorySource(Array.Empty<MailInventoryItem>());
+
+        await new MailMirrorBackfillService(source, mirror).RunAuthoritativeReconcileAsync();
+
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "delete-token", Folder: MailSourceFolder.Inbox))).Count == 0, "Expected unseen row and FTS terms deleted together.");
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_mirror_generations WHERE folder = 'Inbox'") == 1, "Expected completed Inbox generation recorded.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorReconcileHandlesInboxToSentMove()
+{
+    var (mirror, _, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        await mirror.UpsertBatchAsync(new[] { MirrorMessage("store", "old-inbox", "이동", "move-token", MailSourceFolder.Inbox) });
+        var moved = InventoryItem("store", "new-sent", MailSourceFolder.Sent, 1, "이동", "move-token");
+        var source = new FakeInventorySource(new[] { moved });
+
+        await new MailMirrorBackfillService(source, mirror).RunAuthoritativeReconcileAsync();
+
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "move-token", Folder: MailSourceFolder.Inbox))).Count == 0, "Expected old Inbox locator disappeared.");
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "이동", Folder: MailSourceFolder.Sent))).Count == 1, "Expected new Sent locator appeared.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorInterruptedReconcileRetainsUnseen()
+{
+    var (mirror, _, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        await mirror.UpsertBatchAsync(new[] { MirrorMessage("store", "keep", "보존", "keep-token", MailSourceFolder.Inbox) });
+        var source = new FakeInventorySource(Array.Empty<MailInventoryItem>());
+        source.IncompleteFolders.Add(MailSourceFolder.Inbox);
+
+        await new MailMirrorBackfillService(source, mirror).RunAuthoritativeReconcileAsync();
+
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "keep-token", Folder: MailSourceFolder.Inbox))).Count == 1, "Expected incomplete generation retain unseen rows.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorWarningReconcileRetainsUnseen()
+{
+    var (mirror, _, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        await mirror.UpsertBatchAsync(new[] { MirrorMessage("store", "keep-warning", "보존", "warning-token", MailSourceFolder.Inbox) });
+        var source = new FakeInventorySource(Array.Empty<MailInventoryItem>());
+        source.WarningFolders.Add(MailSourceFolder.Inbox);
+
+        var summary = await new MailMirrorBackfillService(source, mirror).RunAuthoritativeReconcileAsync();
+
+        Assert(summary.Warnings.Any(warning => warning.Code == "fake-inventory-warning"), "Expected inventory warning surfaced.");
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "warning-token", Folder: MailSourceFolder.Inbox))).Count == 1, "Expected warning generation retain unseen rows and FTS.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorEventHintOnlyWakesMissedEventRecovery()
+{
+    var (mirror, dbPath, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        var queue = new MailMirrorEventHintQueue();
+        queue.NotifyNewMailHint();
+        Assert(queue.ConsumePendingHint(), "Expected event hint wake one sync.");
+        Assert(!queue.ConsumePendingHint(), "Expected hint consumed without durable side effect.");
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_messages") == 0, "Expected event hint not write mail rows.");
+
+        var missed = InventoryItem("store", "missed", MailSourceFolder.Inbox, 1, "missed", "missed-token");
+        await new MailMirrorBackfillService(new FakeInventorySource(new[] { missed }), mirror).RunAuthoritativeReconcileAsync();
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "missed", Folder: MailSourceFolder.Inbox))).Count == 1, "Expected periodic reconcile recover missed event.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorBackfillHydratesOnlyNewChangedCheckpointsFolders()
+{
+    var (mirror, _, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        var unchanged = InventoryItem("store", "inbox-old", MailSourceFolder.Inbox, 0, "old", "old body");
+        await mirror.UpsertBatchAsync(new[] { MessageFrom(unchanged, "old body") });
+        var changed = unchanged with { EntryId = "inbox-changed", LastModifiedAt = unchanged.LastModifiedAt.AddMinutes(1), Subject = "changed" };
+        await mirror.UpsertBatchAsync(new[] { MessageFrom(changed with { LastModifiedAt = unchanged.LastModifiedAt }, "stale body") });
+        var source = new FakeInventorySource(new[]
+        {
+            unchanged,
+            changed,
+            InventoryItem("store", "sent-new", MailSourceFolder.Sent, 2, "sent", "sent body")
+        });
+        var service = new MailMirrorBackfillService(source, mirror);
+
+        var summary = await service.RunInitialBackfillAsync();
+
+        Assert(summary.SeenCount == 3, "Expected Inbox and Sent all-history inventory.");
+        Assert(summary.HydratedCount == 2, "Expected only new/changed bodies hydrated.");
+        Assert(summary.SkippedUnchangedCount == 1, "Expected unchanged item skip hydration.");
+        Assert(source.HydrateCalls.Count == 2 && !source.HydrateCalls.Contains(unchanged.Locator), "Expected unchanged locator not hydrated.");
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "sent", Folder: MailSourceFolder.Sent))).Count == 1, "Expected sent message searchable.");
+        Assert(await mirror.GetCheckpointAsync("Inbox") is not null, "Expected independent Inbox checkpoint.");
+        Assert(await mirror.GetCheckpointAsync("Sent") is not null, "Expected independent Sent checkpoint.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorBackfillCancelResumeKeepsAtomicBatchesNoDuplicates()
+{
+    var (mirror, dbPath, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        var items = Enumerable.Range(0, 26)
+            .Select(i => InventoryItem("store", $"inbox-{i:00}", MailSourceFolder.Inbox, i, $"subject {i}", $"body {i}"))
+            .ToArray();
+        var firstSource = new FakeInventorySource(items) { CancelHydrationAfter = 25 };
+        var service = new MailMirrorBackfillService(firstSource, mirror);
+
+        try
+        {
+            await service.RunInitialBackfillAsync();
+            Assert(false, "Expected cancellation after first committed batch.");
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected.
+        }
+
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_messages") == 25, "Expected only committed 25-row batch before cancellation.");
+
+        var resumedSource = new FakeInventorySource(items);
+        await new MailMirrorBackfillService(resumedSource, mirror).RunInitialBackfillAsync();
+
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_messages") == 26, "Expected resume complete without duplicate rows.");
+        Assert(resumedSource.HydrateCalls.Count == 1 && resumedSource.HydrateCalls[0].EntryId == "inbox-25", "Expected resume hydrate only post-checkpoint item.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorBackfillIsolatesHydrationFailures()
+{
+    var (mirror, dbPath, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        var failed = InventoryItem("store", "bad", MailSourceFolder.Inbox, 1, "bad", "bad body");
+        var good = InventoryItem("store", "good", MailSourceFolder.Inbox, 2, "good", "good body");
+        var source = new FakeInventorySource(new[] { failed, good });
+        source.FailHydrationFor.Add(failed.Locator);
+
+        var summary = await new MailMirrorBackfillService(source, mirror).RunInitialBackfillAsync();
+
+        Assert(summary.Warnings.Any(warning => warning.Code == "mail-hydration-failed" && warning.SanitizedErrorClass == nameof(InvalidOperationException)), "Expected sanitized per-item failure.");
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_messages") == 1, "Expected later item still stored despite one failure.");
+        Assert(await mirror.GetCheckpointAsync("Inbox") is null, "Expected checkpoint not advance past failed item.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
+static async Task MailMirrorConcurrentSearchesUseSerializedReader()
+{
+    var (mirror, _, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        await mirror.UpsertBatchAsync(new[] { MirrorMessage("store", "entry", "동시 검색", "reader body", MailSourceFolder.Inbox) });
+        var searches = Enumerable.Range(0, 8)
+            .Select(_ => mirror.SearchAsync(new MailMirrorSearchRequest(Query: "reader", Limit: 5)))
+            .ToArray();
+        var results = await Task.WhenAll(searches);
+        Assert(results.All(result => result.Count == 1), "Expected concurrent callers serialized over one reader without failures.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
 static async Task SqliteSchemaAvoidsRawMailColumns()
 {
     var (_, dbPath, cleanup) = await CreateTempStoreAsync();
@@ -3843,6 +4296,102 @@ static async Task SqliteSchemaAvoidsRawMailColumns()
     {
         cleanup();
     }
+}
+
+
+static async Task<(SqliteMailMirrorStore Store, string DbPath, Action Cleanup)> CreateTempMirrorStoreAsync()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "MailWhere.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var dbPath = Path.Combine(directory, "test.db");
+    var store = new SqliteMailMirrorStore(dbPath);
+    await store.InitializeAsync();
+    return (store, dbPath, () =>
+    {
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+        catch
+        {
+            // Test cleanup best-effort.
+        }
+    });
+}
+
+
+static MailInventoryItem InventoryItem(string storeId, string entryId, MailSourceFolder folder, int minutes, string subject, string body) =>
+    new(
+        storeId,
+        entryId,
+        folder,
+        new DateTimeOffset(2026, 7, 26, 9, 0, 0, TimeSpan.Zero).AddMinutes(minutes),
+        folder == MailSourceFolder.Inbox ? new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero).AddMinutes(minutes) : null,
+        folder == MailSourceFolder.Sent ? new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero).AddMinutes(minutes) : null,
+        subject,
+        "sender",
+        "thread",
+        new[] { "recipient" });
+
+static MailMirrorMessage MessageFrom(MailInventoryItem item, string body) => new(
+    item.StoreId,
+    item.EntryId,
+    item.Folder,
+    item.LastModifiedAt,
+    item.Subject,
+    item.SenderDisplay,
+    body,
+    item.ReceivedAt,
+    item.SentAt,
+    item.ConversationId,
+    item.RecipientDisplayNames);
+
+static MailMirrorMessage MirrorMessage(
+    string storeId,
+    string entryId,
+    string subject,
+    string body,
+    MailSourceFolder folder,
+    string sender = "sender",
+    IReadOnlyList<string>? recipients = null,
+    string? conversationId = null) => new(
+        storeId,
+        entryId,
+        folder,
+        new DateTimeOffset(2026, 7, 26, 9, 0, 0, TimeSpan.Zero),
+        subject,
+        sender,
+        body,
+        ReceivedAt: folder == MailSourceFolder.Inbox ? new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero) : null,
+        SentAt: folder == MailSourceFolder.Sent ? new DateTimeOffset(2026, 7, 26, 8, 0, 0, TimeSpan.Zero) : null,
+        ConversationId: conversationId,
+        RecipientDisplayNames: recipients);
+
+static async Task ClearMailMirrorFtsAsync(string dbPath)
+{
+    await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString());
+    await connection.OpenAsync();
+    var command = connection.CreateCommand();
+    command.CommandText = "DELETE FROM mail_messages_fts";
+    await command.ExecuteNonQueryAsync();
+}
+
+static async Task<int> QueryScalarIntAsync(string dbPath, string sql)
+{
+    await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+    await connection.OpenAsync();
+    var command = connection.CreateCommand();
+    command.CommandText = sql;
+    return Convert.ToInt32(await command.ExecuteScalarAsync());
+}
+
+static async Task<string?> QuerySingleStringAsync(string dbPath, string sql)
+{
+    await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+    await connection.OpenAsync();
+    var command = connection.CreateCommand();
+    command.CommandText = sql;
+    return Convert.ToString(await command.ExecuteScalarAsync());
 }
 
 static async Task<(SqliteFollowUpStore Store, string DbPath, Action Cleanup)> CreateTempStoreAsync()
@@ -4836,5 +5385,73 @@ sealed class HydratingSequenceEmailSource : IEmailHydratingSource
         }
 
         return Task.FromResult(sourceId is not null && _hydratedBySourceId.TryGetValue(sourceId, out var snapshot) ? snapshot : null);
+    }
+}
+
+
+sealed class FakeInventorySource : IMailMirrorInventorySource
+{
+    private readonly IReadOnlyList<MailInventoryItem> _items;
+
+    public FakeInventorySource(IReadOnlyList<MailInventoryItem> items)
+    {
+        _items = items;
+    }
+
+    public List<MailMirrorLocator> HydrateCalls { get; } = new();
+    public HashSet<MailMirrorLocator> FailHydrationFor { get; } = new();
+    public HashSet<MailSourceFolder> IncompleteFolders { get; } = new();
+    public HashSet<MailSourceFolder> WarningFolders { get; } = new();
+    public int? CancelHydrationAfter { get; set; }
+
+    public async IAsyncEnumerable<MailInventoryPage> EnumerateAsync(
+        MailInventoryRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var page = _items
+            .Where(item => item.Folder == request.Folder)
+            .Where(item => request.Checkpoint is null || MailMirrorCursor.IsAfter(request.Checkpoint, item))
+            .OrderBy(item => item.LastModifiedAt)
+            .ThenBy(item => item.StoreId, StringComparer.Ordinal)
+            .ThenBy(item => item.EntryId, StringComparer.Ordinal)
+            .Take(request.PageSize)
+            .ToArray();
+        await Task.Yield();
+        var warnings = WarningFolders.Contains(request.Folder)
+            ? new[] { new MailMirrorSyncWarning("fake-inventory-warning", CapabilitySeverity.Degraded, "FakeWarning") }
+            : null;
+        yield return new MailInventoryPage(
+            request.Folder,
+            page,
+            page.Length == 0 ? request.Checkpoint : page[^1].Cursor,
+            Completed: !IncompleteFolders.Contains(request.Folder),
+            Warnings: warnings);
+    }
+
+    public Task<MailMirrorMessage?> HydrateAsync(MailInventoryItem item, CancellationToken cancellationToken = default)
+    {
+        if (CancelHydrationAfter is not null && HydrateCalls.Count >= CancelHydrationAfter.Value)
+        {
+            throw new OperationCanceledException();
+        }
+
+        HydrateCalls.Add(item.Locator);
+        if (FailHydrationFor.Contains(item.Locator))
+        {
+            throw new InvalidOperationException("fake failure");
+        }
+
+        return Task.FromResult<MailMirrorMessage?>(new MailMirrorMessage(
+            item.StoreId,
+            item.EntryId,
+            item.Folder,
+            item.LastModifiedAt,
+            item.Subject,
+            item.SenderDisplay,
+            item.Subject + " body",
+            item.ReceivedAt,
+            item.SentAt,
+            item.ConversationId,
+            item.RecipientDisplayNames));
     }
 }

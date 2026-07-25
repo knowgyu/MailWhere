@@ -33,7 +33,7 @@ It runs on:
 The workflow performs the Windows verification path and uploads:
 
 ```text
-artifacts/MailWhere-v0.10.0-win-x64-portable.zip
+artifacts/MailWhere-v0.11.0-win-x64-portable.zip
 ```
 
 The zip contains the published app, the read-only CLI provider, README, operator docs, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`.

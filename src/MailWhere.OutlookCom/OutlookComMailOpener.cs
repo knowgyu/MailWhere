@@ -9,18 +9,21 @@ public sealed record OutlookOpenResult(bool Success, string StatusCode, string M
 
 public sealed class OutlookComMailOpener
 {
-    public Task<OutlookOpenResult> OpenAsync(string sourceId, CancellationToken cancellationToken = default)
+    public Task<OutlookOpenResult> OpenAsync(string sourceId, CancellationToken cancellationToken = default) =>
+        OpenAsync(null, sourceId, cancellationToken);
+
+    public Task<OutlookOpenResult> OpenAsync(string? storeId, string entryId, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(sourceId))
+        if (string.IsNullOrWhiteSpace(entryId))
         {
             return Task.FromResult(OutlookOpenResult.Failed("missing-source-id", "이 항목은 원본 메일 연결 정보가 없습니다."));
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        return OutlookStaExecutor.RunAsync(() => OpenOnSta(sourceId, cancellationToken), cancellationToken);
+        return OutlookStaExecutor.RunAsync(() => OpenOnSta(storeId, entryId, cancellationToken), cancellationToken);
     }
 
-    private static OutlookOpenResult OpenOnSta(string sourceId, CancellationToken cancellationToken)
+    private static OutlookOpenResult OpenOnSta(string? storeId, string entryId, CancellationToken cancellationToken)
     {
         object? outlook = null;
         object? session = null;
@@ -44,7 +47,9 @@ public sealed class OutlookComMailOpener
             dynamic outlookDynamic = outlook;
             session = outlookDynamic.Session;
             dynamic sessionDynamic = session;
-            item = sessionDynamic.GetItemFromID(sourceId);
+            item = string.IsNullOrWhiteSpace(storeId)
+                ? sessionDynamic.GetItemFromID(entryId)
+                : sessionDynamic.GetItemFromID(entryId, storeId);
             if (item is null)
             {
                 return OutlookOpenResult.Failed("outlook-item-not-found", "Outlook에서 원본 메일을 찾지 못했습니다.");
@@ -60,7 +65,7 @@ public sealed class OutlookComMailOpener
         }
         catch (Exception ex)
         {
-            return OutlookOpenResult.Failed("outlook-open-failed", ex.GetType().Name);
+            return OutlookOpenResult.Failed("outlook-source-stale-or-unavailable", ex.GetType().Name);
         }
         finally
         {

@@ -29,3 +29,10 @@ Runtime safety notes:
 - Windows composition loads `runtime-settings.json` from local app data, defaulting to managed-safe manual mode when missing or unreadable.
 - Outlook COM reads are dispatched through an STA executor before any future background polling or automatic mail-check loop uses the adapter.
 - Diagnostics are exported through safe codes and validated allowlist values only; probe messages are not exported. `MailWhereExportService` similarly omits raw body, source ids/hashes, and evidence snippets.
+
+
+## Mail mirror search boundary
+
+MailWhere owns the local mail corpus in the existing `followups.sqlite` file. `mail_messages` stores normalized plain-text subject/body metadata for Classic Outlook default Inbox and Sent Items, with external-content FTS5 triggers so content rows and search terms update/delete in the same SQLite transaction. Ordinary search uses the prewarmed SQLite reader only; Outlook COM is used by sync or explicit source-open, not by search.
+
+OfficeWhere remains responsible for attachment/document content. contextWhere should receive only selected summaries/locators, not MailWhere full bodies.
