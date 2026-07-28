@@ -20,7 +20,8 @@
 
 ## 제품/기획
 
-- [`releases/v0.11.0.md`](releases/v0.11.0.md): Outlook Inbox/Sent 로컬 mirror, FTS5 검색, 증분 동기화 릴리즈 노트.
+- [`releases/v0.11.1.md`](releases/v0.11.1.md): 기존 메일 확인 경로에 mirror 동기화·취소·재개·일일 reconcile을 연결한 production patch.
+- [`releases/v0.11.0.md`](releases/v0.11.0.md): Outlook Inbox/Sent 로컬 mirror, FTS5 검색, 증분 동기화 기반 릴리즈 노트.
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.
 - [`releases/v0.10.0.md`](releases/v0.10.0.md): where-skills/Codex용 read-only CLI provider 릴리즈 노트.
 - [`releases/v0.9.0.md`](releases/v0.9.0.md): Ollama runner/context/lifetime override 제거와 안정 우선 LLM 동시성 릴리즈 노트.

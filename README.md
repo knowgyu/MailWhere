@@ -20,7 +20,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 ## 지금 되는 것
 
 - Classic Outlook COM 기반 read-only Inbox/Sent Items 메일 읽기
-- **지금 메일 확인**: 기본은 최근 30일, 갯수 제한 없이 날짜 기준으로 확인하며 설정에서는 1/7/30/90일 선택지를 노출
+- **지금 메일 확인**: Inbox/Sent 검색 mirror는 전체 이력을 이어서 동기화하고, 업무 후보 분석은 기본 최근 30일(설정 1/7/30/90일)을 확인
 - **새 메일 자동 확인**: Outlook ItemAdd 이벤트를 감지해 짧게 debounce하고, 놓친 이벤트는 자동 확인 간격의 cursor scan으로 보정
 - 자동 확인은 Inbox/Sent Items cursor를 분리해 한쪽 실패가 다른 쪽 성공 시각을 잘못 앞당기지 않음
 - 자동 delta 확인에서는 중복/이미 처리한 source를 body/LLM 분석 전에 fast filter로 제거하고, 애매한 메일은 계속 분석 대상으로 유지
@@ -36,7 +36,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - `나중에`로 지정 시각까지 active 목록에서 제외하고, 시간이 지나면 다시 표시
 - `보관`으로 active 목록에서 제외하고, 보관함에서 원본 열기/복원
 - 가능한 경우 `열기`로 Outlook 원본 메일 열기
-- 로컬 메일 mirror가 있는 경우 SQLite/FTS5만 읽는 `search-mail` CLI 검색
+- **지금 메일 확인**으로 채워지는 로컬 mail mirror를 SQLite/FTS5만 읽는 `search-mail` CLI 검색
 - 다자 수신자에게 보낸 회신 요청은 Outlook 대화 ID/보낸 사람 기준으로 `n/m명 회신` 현황 표시 및 export
 - 향후 LLM skill이 읽을 수 있는 raw-mail-free export SDK/API (`MailWhereExportService`)
 - Codex/where-skills 같은 외부 자동화가 안전하게 읽을 수 있는 read-only JSON CLI provider (`MailWhere.Cli.exe`)
@@ -83,7 +83,7 @@ portable zip에는 UI 앱 `MailWhere.exe`와 별도로 `MailWhere.Cli.exe`가 �
 
 1. `MailWhere.exe`를 직접 실행하면 오늘 기준 업무 보드가 열리고 앱은 tray에도 상주합니다. Windows 자동 시작은 tray-only로 실행됩니다.
 2. tray 메뉴의 **열기**로 언제든 같은 업무 보드를 다시 엽니다.
-3. **지금 메일 확인**으로 최근 메일을 읽어 로컬 업무 후보를 만듭니다.
+3. **지금 메일 확인**으로 전체 Inbox/Sent 검색 mirror를 이어서 동기화하고, 최근 메일에서는 로컬 업무 후보를 만듭니다.
 4. 지정 시간에 열리는 **오늘 업무 보드**를 훑고, 필요하면 tray의 **오늘 업무 보기**로 다시 엽니다.
 5. 업무 행에서 `열기`, `나중에`, `보관`으로 정리하고, 제목/기한은 더블클릭으로 바로잡습니다. 보관한 항목은 **보관함**에서 다시 열거나 복원합니다.
 
@@ -113,7 +113,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.11.0-win-x64-portable.zip
+artifacts/MailWhere-v0.11.1-win-x64-portable.zip
 ```
 
 ## LLM endpoint
