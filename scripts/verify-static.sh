@@ -61,9 +61,18 @@ if grep -RInE 'InitializeAsync\s*\(|ReadWriteCreate' src/MailWhere.Cli; then
   exit 1
 fi
 
+echo "[static] Checking production mirror wiring and state keys"
+grep -RIn 'new OutlookComMailInventorySource' src/MailWhere.Windows/MainWindow.xaml.cs >/dev/null || { echo "Windows app does not construct OutlookComMailInventorySource" >&2; exit 1; }
+grep -RIn 'new SqliteMailMirrorStore' src/MailWhere.Windows/MainWindow.xaml.cs >/dev/null || { echo "Windows app does not construct SqliteMailMirrorStore" >&2; exit 1; }
+grep -RIn 'new MailMirrorBackfillService' src/MailWhere.Windows/MainWindow.xaml.cs >/dev/null || { echo "Windows app does not construct MailMirrorBackfillService" >&2; exit 1; }
+grep -RIn 'mail-mirror-initial-sync-completed-at' src tests >/dev/null || { echo "missing initial mirror sync state key assertion" >&2; exit 1; }
+grep -RIn 'mail-mirror-last-authoritative-reconcile-at' src tests >/dev/null || { echo "missing authoritative mirror reconcile state key assertion" >&2; exit 1; }
+
 echo "[static] Checking diagnostics privacy language"
-grep -RIn "Diagnostics" docs src/MailWhere.Windows >/dev/null
-grep -RIn "Raw mail body is transient" docs/SECURITY.md >/dev/null
+grep -RIn 'content-free' src/MailWhere.Core src/MailWhere.Windows tests docs >/dev/null
+grep -RInE 'Raw mail body.*transient by default.*SQLite task schema' docs/SECURITY.md >/dev/null
+grep -RIn 'normalized plain-text mail bodies are retained locally in SQLite/FTS5 for search' docs/SECURITY.md >/dev/null
+grep -RIn 'normalized plain-text subject/body metadata' docs/ARCHITECTURE.md >/dev/null
 
 echo "[static] dotnet availability"
 if command -v dotnet >/dev/null 2>&1; then

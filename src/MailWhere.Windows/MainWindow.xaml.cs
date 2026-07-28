@@ -17,6 +17,7 @@ using MailWhere.Core.Pipeline;
 using MailWhere.Core.Reminders;
 using MailWhere.Core.Scheduling;
 using MailWhere.Core.Scanning;
+using MailWhere.Core.Search;
 using MailWhere.Storage;
 using MailWhere.OutlookCom;
 
@@ -138,7 +139,7 @@ public partial class MainWindow : Window
         }
 
         _scanCancellationSource.Cancel();
-        StatusText.Text = "메일 확인 중지를 요청했습니다. 현재 LLM 요청이 정리되면 멈춥니다.";
+        StatusText.Text = "메일 확인 중지를 요청했습니다. 현재 작업이 정리되면 멈춥니다.";
         ScanProgressText.Text = "중지 요청됨…";
     }
 
@@ -382,6 +383,7 @@ public partial class MainWindow : Window
             var beforeCandidateIds = (await store.ListReviewCandidatesAsync())
                 .Select(candidate => candidate.Id)
                 .ToHashSet();
+            var mirrorSummary = await RunMailMirrorSyncAsync(store, showSummaryNotification, scanCancellationToken);
             var analyzer = BuildAnalyzer(_settings);
             var pipeline = new FollowUpPipeline(analyzer, store, waitingClosureJudge: BuildWaitingClosureJudge(_settings));
             var scanner = new MailActionScanner(new OutlookComMailSource(), pipeline);
@@ -429,8 +431,9 @@ public partial class MainWindow : Window
             var newReviewCandidateCount = reviewCandidates.Count(candidate => !beforeCandidateIds.Contains(candidate.Id));
 
             var llmSummary = _lastAnalysisTelemetry.ToKoreanSummary();
+            var mirrorStatus = BuildMirrorSummaryText(mirrorSummary);
             var scanWindowText = BuildScanWindowText(windowPlan);
-            StatusText.Text = $"{scanWindowText} {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 확인 필요 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {llmSummary}"
+            StatusText.Text = $"{scanWindowText} {summary.ReadCount}건 확인 · 할 일 {summary.TaskCreatedCount}건 · 확인 필요 {newReviewCandidateCount}건 · 중복 {summary.DuplicateCount}건 · {mirrorStatus} · {llmSummary}"
                 + (smokeGateRecorded ? " · 자동 확인 준비 완료" : string.Empty);
             if (showSummaryNotification
                 && !ShouldSuppressPopupNotifications()
@@ -464,6 +467,59 @@ public partial class MainWindow : Window
         }
     }
 
+
+    private async Task<MailMirrorSyncSummary> RunMailMirrorSyncAsync(
+        SqliteFollowUpStore store,
+        bool manualRequested,
+        CancellationToken cancellationToken)
+    {
+        var initialSyncCompletedAt = await store.GetAppStateAsync(MailMirrorSyncCadencePolicy.InitialSyncCompletedAtStateKey, cancellationToken);
+        var lastAuthoritativeReconcileAt = await store.GetAppStateAsync(MailMirrorSyncCadencePolicy.LastAuthoritativeReconcileAtStateKey, cancellationToken);
+        var cadence = MailMirrorSyncCadencePolicy.Select(DateTimeOffset.UtcNow, manualRequested, initialSyncCompletedAt, lastAuthoritativeReconcileAt);
+
+        StatusText.Text = cadence switch
+        {
+            MailMirrorSyncCadence.Authoritative => "메일 검색 인덱스를 전체 기준으로 맞추는 중입니다…",
+            MailMirrorSyncCadence.Incremental => "최근 변경 메일을 검색 인덱스에 반영하는 중입니다…",
+            _ => "메일 검색 인덱스를 처음 준비하는 중입니다…"
+        };
+        await Dispatcher.Yield(DispatcherPriority.Background);
+
+        await using var mirrorStore = new SqliteMailMirrorStore(GetDatabasePath());
+        await mirrorStore.InitializeAsync(cancellationToken);
+        var service = new MailMirrorBackfillService(new OutlookComMailInventorySource(), mirrorStore);
+        var progress = new Progress<MailMirrorSyncProgress>(UpdateMailMirrorProgress);
+        var summary = cadence == MailMirrorSyncCadence.Authoritative
+            ? await service.RunAuthoritativeReconcileAsync(progress, cancellationToken)
+            : await service.RunInitialBackfillAsync(progress, cancellationToken);
+
+        if (MailMirrorSyncCadencePolicy.IsWarningFree(summary))
+        {
+            var completedAt = DateTimeOffset.UtcNow.ToString("O");
+            if (cadence == MailMirrorSyncCadence.Initial)
+            {
+                await store.SetAppStateAsync(MailMirrorSyncCadencePolicy.InitialSyncCompletedAtStateKey, completedAt, cancellationToken);
+            }
+
+            if (cadence is MailMirrorSyncCadence.Initial or MailMirrorSyncCadence.Authoritative)
+            {
+                await store.SetAppStateAsync(MailMirrorSyncCadencePolicy.LastAuthoritativeReconcileAtStateKey, completedAt, cancellationToken);
+            }
+        }
+
+        return summary;
+    }
+
+    private void UpdateMailMirrorProgress(MailMirrorSyncProgress progress)
+    {
+        ScanProgressText.Text = $"메일 검색 인덱스: {progress.Folder} {progress.SeenCount}건 확인 · {progress.HydratedCount}건 반영";
+    }
+
+    private static string BuildMirrorSummaryText(MailMirrorSyncSummary summary)
+    {
+        var warningText = summary.Warnings.Count == 0 ? "완료" : $"주의 {summary.Warnings.Count}건";
+        return $"검색 인덱스 {summary.SeenCount}건 확인/{summary.HydratedCount}건 저장 {warningText}";
+    }
 
     private async Task<AutomaticScanWindowPlan> PlanIncrementalScanWindowAsync(SqliteFollowUpStore store, DateTimeOffset now, CancellationToken cancellationToken)
     {
@@ -1584,10 +1640,12 @@ public partial class MainWindow : Window
 
         var directory = WindowsRuntimeDiagnostics.GetAppDataDirectory();
         Directory.CreateDirectory(directory);
-        _store = new SqliteFollowUpStore(Path.Combine(directory, "followups.sqlite"));
+        _store = new SqliteFollowUpStore(GetDatabasePath());
         await _store.InitializeAsync();
         return _store;
     }
+
+    private static string GetDatabasePath() => Path.Combine(WindowsRuntimeDiagnostics.GetAppDataDirectory(), "followups.sqlite");
 
     private void OfferRuleFallbackAfterLlmFailure()
     {

@@ -35,4 +35,6 @@ Runtime safety notes:
 
 MailWhere owns the local mail corpus in the existing `followups.sqlite` file. `mail_messages` stores normalized plain-text subject/body metadata for Classic Outlook default Inbox and Sent Items, with external-content FTS5 triggers so content rows and search terms update/delete in the same SQLite transaction. Ordinary search uses the prewarmed SQLite reader only; Outlook COM is used by sync or explicit source-open, not by search.
 
+The Windows app wires this through the existing serialized mail-check lifecycle: `OutlookComMailInventorySource` feeds `SqliteMailMirrorStore` and `MailMirrorBackfillService` before task analysis, using the same cancellation token and `followups.sqlite` path. Cadence is content-free `app_state`: initial backfill until `mail-mirror-initial-sync-completed-at`, manual or stale 24-hour reconcile via `mail-mirror-last-authoritative-reconcile-at`, otherwise checkpoint incremental catch-up.
+
 OfficeWhere remains responsible for attachment/document content. contextWhere should receive only selected summaries/locators, not MailWhere full bodies.

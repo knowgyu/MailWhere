@@ -27,6 +27,46 @@ public sealed record MailMirrorSyncWarning(string Code, CapabilitySeverity Sever
 public sealed record MailMirrorSyncProgress(string Folder, int SeenCount, int HydratedCount, string Message);
 public sealed record MailMirrorSyncSummary(int SeenCount, int HydratedCount, int SkippedUnchangedCount, IReadOnlyList<MailMirrorSyncWarning> Warnings);
 
+public enum MailMirrorSyncCadence
+{
+    Initial,
+    Incremental,
+    Authoritative
+}
+
+public static class MailMirrorSyncCadencePolicy
+{
+    public const string InitialSyncCompletedAtStateKey = "mail-mirror-initial-sync-completed-at";
+    public const string LastAuthoritativeReconcileAtStateKey = "mail-mirror-last-authoritative-reconcile-at";
+    public static readonly TimeSpan AuthoritativeReconcileInterval = TimeSpan.FromHours(24);
+
+    public static MailMirrorSyncCadence Select(
+        DateTimeOffset now,
+        bool manualRequested,
+        string? initialSyncCompletedAt,
+        string? lastAuthoritativeReconcileAt)
+    {
+        if (!TryParseStateTimestamp(initialSyncCompletedAt, out _))
+        {
+            return MailMirrorSyncCadence.Initial;
+        }
+
+        if (manualRequested || !TryParseStateTimestamp(lastAuthoritativeReconcileAt, out var lastReconcileAt))
+        {
+            return MailMirrorSyncCadence.Authoritative;
+        }
+
+        return lastReconcileAt > now || now - lastReconcileAt >= AuthoritativeReconcileInterval
+            ? MailMirrorSyncCadence.Authoritative
+            : MailMirrorSyncCadence.Incremental;
+    }
+
+    public static bool IsWarningFree(MailMirrorSyncSummary summary) => summary.Warnings.Count == 0;
+
+    private static bool TryParseStateTimestamp(string? value, out DateTimeOffset timestamp) =>
+        DateTimeOffset.TryParse(value, out timestamp);
+}
+
 public interface IMailMirrorInventorySource
 {
     IAsyncEnumerable<MailInventoryPage> EnumerateAsync(MailInventoryRequest request, CancellationToken cancellationToken = default);

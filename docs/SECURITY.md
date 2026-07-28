@@ -14,6 +14,6 @@
 
 ## Mail mirror retention
 
-When the mail mirror is enabled, normalized plain-text mail bodies are retained locally in SQLite/FTS5 for search. This is a mirror, not an archive: completed Outlook folder inventories remove local searchable bodies for deleted or moved-away mail. The SQLite file is visible to the Windows user account and may be inspected by company EDR/security tools.
+When the mail mirror is enabled, normalized plain-text mail bodies are retained locally in SQLite/FTS5 for search. This is a mirror, not an archive: completed warning-free Outlook folder inventories remove local searchable bodies for deleted or moved-away mail. The SQLite file is visible to the Windows user account and may be inspected by company EDR/security tools.
 
-Default exports and contextWhere-oriented machine-readable surfaces remain body-free: no raw body, StoreID, EntryID, source id/hash, prompt payloads, or full recipient lists. Explicit search returns bounded snippets only, and explicit source-open uses the current `(StoreID, EntryID)` internally without exporting that locator. Attachment contents belong in OfficeWhere, not MailWhere.
+Mirror progress and diagnostics stay content-free: folder names, counts, warning codes, and sanitized error classes only; no subject, sender, recipient, StoreID, EntryID, or body text. Default exports and contextWhere-oriented machine-readable surfaces remain body-free: no raw body, StoreID, EntryID, source id/hash, prompt payloads, or full recipient lists. Explicit search returns bounded snippets only, and explicit source-open uses the current `(StoreID, EntryID)` internally without exporting that locator. Attachment contents belong in OfficeWhere, not MailWhere.

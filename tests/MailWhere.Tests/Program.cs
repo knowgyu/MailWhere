@@ -176,7 +176,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Mail mirror reconcile handles Inbox to Sent move", MailMirrorReconcileHandlesInboxToSentMove),
     ("Mail mirror interrupted reconcile retains unseen", MailMirrorInterruptedReconcileRetainsUnseen),
     ("Mail mirror warning reconcile retains unseen", MailMirrorWarningReconcileRetainsUnseen),
-    ("Mail mirror event hint only wakes missed event recovery", MailMirrorEventHintOnlyWakesMissedEventRecovery)
+    ("Mail mirror event hint only wakes missed event recovery", MailMirrorEventHintOnlyWakesMissedEventRecovery),
+    ("Mail mirror cadence policy", MailMirrorCadencePolicySelectsExpectedCadence)
 };
 
 var failures = 0;
@@ -4165,6 +4166,34 @@ static async Task MailMirrorEventHintOnlyWakesMissedEventRecovery()
         await mirror.DisposeAsync();
         cleanup();
     }
+}
+
+static Task MailMirrorCadencePolicySelectsExpectedCadence()
+{
+    var now = new DateTimeOffset(2026, 7, 29, 9, 0, 0, TimeSpan.Zero);
+    var initializedAt = now.AddDays(-2).ToString("O");
+
+    Assert(MailMirrorSyncCadencePolicy.InitialSyncCompletedAtStateKey == "mail-mirror-initial-sync-completed-at", "Expected exact initial mirror sync state key.");
+    Assert(MailMirrorSyncCadencePolicy.LastAuthoritativeReconcileAtStateKey == "mail-mirror-last-authoritative-reconcile-at", "Expected exact authoritative reconcile state key.");
+
+    var cases = new[]
+    {
+        (Name: "missing initialization marker", ManualRequested: true, InitialSyncCompletedAt: (string?)null, LastAuthoritativeReconcileAt: (string?)null, Expected: MailMirrorSyncCadence.Initial),
+        (Name: "manual after initialization", ManualRequested: true, InitialSyncCompletedAt: now.AddHours(-1).ToString("O"), LastAuthoritativeReconcileAt: now.AddHours(-1).ToString("O"), Expected: MailMirrorSyncCadence.Authoritative),
+        (Name: "automatic recent reconcile", ManualRequested: false, InitialSyncCompletedAt: initializedAt, LastAuthoritativeReconcileAt: now.AddHours(-23).ToString("O"), Expected: MailMirrorSyncCadence.Incremental),
+        (Name: "automatic stale reconcile", ManualRequested: false, InitialSyncCompletedAt: initializedAt, LastAuthoritativeReconcileAt: now.AddHours(-25).ToString("O"), Expected: MailMirrorSyncCadence.Authoritative),
+        (Name: "automatic missing reconcile", ManualRequested: false, InitialSyncCompletedAt: initializedAt, LastAuthoritativeReconcileAt: (string?)null, Expected: MailMirrorSyncCadence.Authoritative),
+        (Name: "automatic invalid reconcile timestamp", ManualRequested: false, InitialSyncCompletedAt: initializedAt, LastAuthoritativeReconcileAt: "not-a-date", Expected: MailMirrorSyncCadence.Authoritative),
+        (Name: "automatic future reconcile timestamp", ManualRequested: false, InitialSyncCompletedAt: initializedAt, LastAuthoritativeReconcileAt: now.AddDays(2).ToString("O"), Expected: MailMirrorSyncCadence.Authoritative)
+    };
+
+    foreach (var testCase in cases)
+    {
+        var cadence = MailMirrorSyncCadencePolicy.Select(now, testCase.ManualRequested, testCase.InitialSyncCompletedAt, testCase.LastAuthoritativeReconcileAt);
+        Assert(cadence == testCase.Expected, $"Expected {testCase.Name} select {testCase.Expected}, got {cadence}.");
+    }
+
+    return Task.CompletedTask;
 }
 
 static async Task MailMirrorBackfillHydratesOnlyNewChangedCheckpointsFolders()
