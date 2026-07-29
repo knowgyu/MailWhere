@@ -1,5 +1,7 @@
 # MailWhere product architecture and Agent CLI integration research
 
+> **Historical research (2026-05).** `where-desk`/future CLI statements below are not current architecture. `MailWhere.Cli` shipped, and contextWhere now owns cross-provider orchestration. Use `README.md`, `DESIGN.md`, and `docs/ARCHITECTURE.md` as current sources.
+
 작성일: 2026-05-16 KST  
 범위: `/home/knowgyu/workspace/MailWhere` 현재 repo + imported parent artifacts + official Microsoft/OpenAI docs
 

@@ -49,7 +49,7 @@ MailWhere.exe
 MailWhere.Cli.exe
 ```
 
-`MailWhere.Cli.exe` is for local automation such as where-skills/Codex. It reads the existing MailWhere SQLite database in read-only mode and emits JSON only:
+`MailWhere.Cli.exe` is for local automation such as contextWhere and Codex. It reads the existing MailWhere SQLite database in read-only mode and emits JSON only:
 
 ```powershell
 .\MailWhere.Cli.exe health --json

@@ -22,7 +22,7 @@ Current product surface:
 - Scheduled daily-board time opens or updates the unified board first. Notification is a fallback only when the board cannot be surfaced.
 - `LocalTaskStatus.Archived` is the active-list exit state for the user-facing `보관` action. Archived tasks are recoverable through `ListArchivedTasksAsync`/`RestoreArchivedTaskAsync`; legacy `Done`/`Dismissed` values remain readable but are not primary UI actions.
 - Future-snoozed tasks and archived tasks are excluded from primary active lists by `FollowUpPresentation.IsVisibleInPrimary`.
-- Settings choices, startup launch mode, review-candidate retry, reply-progress snapshots, and safe export are core services/contracts rather than WPF-only logic. This keeps later SDK/skill callers from scraping window controls.
+- Settings choices, startup launch mode, review-candidate retry, reply-progress snapshots, and safe export are core services/contracts rather than WPF-only logic. This keeps external clients from scraping window controls.
 
 Runtime safety notes:
 
@@ -38,3 +38,13 @@ MailWhere owns the local mail corpus in the existing `followups.sqlite` file. `m
 The Windows app wires this through the existing serialized mail-check lifecycle: `OutlookComMailInventorySource` feeds `SqliteMailMirrorStore` and `MailMirrorBackfillService` before task analysis, using the same cancellation token and `followups.sqlite` path. Cadence is content-free `app_state`: initial backfill until `mail-mirror-initial-sync-completed-at`, manual or stale 24-hour reconcile via `mail-mirror-last-authoritative-reconcile-at`, otherwise checkpoint incremental catch-up.
 
 OfficeWhere remains responsible for attachment/document content. contextWhere should receive only selected summaries/locators, not MailWhere full bodies.
+
+## Workspace integration boundary
+
+| Repository | Owns | Stable seam |
+| --- | --- | --- |
+| MailWhere | Outlook read-only mirror, mail/task state, SQLite/FTS5 search | `MailWhere.Cli` JSON and sanitized export models |
+| OfficeWhere | Office/PDF indexing, document search, comparison | Loopback `/api/provider/v1` |
+| contextWhere | Cross-provider evidence ledger, Markdown wiki, context packs | Its CLI and local evidence store |
+
+`where-skills` was an early wrapper around the first two seams. It is not the canonical orchestration layer and must not become a second mail/document store. Full mail bodies stay in MailWhere; full document content stays in OfficeWhere/source files.

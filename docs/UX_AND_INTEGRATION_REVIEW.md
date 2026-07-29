@@ -1,5 +1,7 @@
 # UX / Integration Review
 
+> **Historical review (2026-05).** Shipped event, mirror, search, and UI behavior is documented in `README.md`, `DESIGN.md`, `docs/ARCHITECTURE.md`, and `docs/releases/v0.12.0.md`.
+
 Date: 2026-05-15
 Updated: 2026-05-17, after v0.4.1 compact settings patch
 

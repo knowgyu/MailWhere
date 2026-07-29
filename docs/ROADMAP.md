@@ -257,8 +257,8 @@ Acceptance:
 
 Priority: high after 0.2.
 
-- Outlook event subscription or conservative polling behind readiness checks.
-- Startup automatic mail check when requested and readiness checks pass.
+- Shipped baseline: Outlook `ItemAdd` event handling plus conservative cursor-scan fallback behind readiness checks.
+- Shipped baseline: configured startup mail check degrades to manual mode when readiness checks fail.
 - Quiet hours and notification frequency settings.
 - Toast notification history and quiet hours; native Windows app notification track only if packaging identity is useful.
 - Local reminder history to prevent duplicate notifications across app restarts.
@@ -274,9 +274,9 @@ Priority: medium.
 
 - Extract meeting/calendar candidates into a local shadow calendar table.
 - Optional ICS export instead of direct calendar writes.
-- OfficeWhere search handoff for task-related documents.
-- Read-only task export for OfficeWhere indexing.
-- `where-desk` read-only skill MVP: MailWhere 업무/확인 필요/보관 요약을 안전한 export JSON/Markdown으로 만들고, LLM/Codex skill이 관련 문서/다음 액션 브리프를 붙일 수 있게 한다.
+- contextWhere가 `MailWhere.Cli`의 sanitized 결과와 OfficeWhere의 선택적 검색 결과를 결합하는 업무 컨텍스트 handoff.
+- OfficeWhere에는 메일 본문을 색인하지 않고, 파일 힌트와 명시 query만 전달한다.
+- 기존 `where-skills` wrapper는 새 기능을 추가하지 않고 contextWhere migration 상태에 따라 archive한다.
 
 Acceptance:
 

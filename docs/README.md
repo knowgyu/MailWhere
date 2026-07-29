@@ -24,7 +24,7 @@
 - [`releases/v0.11.1.md`](releases/v0.11.1.md): 기존 메일 확인 경로에 mirror 동기화·취소·재개·일일 reconcile을 연결한 production patch.
 - [`releases/v0.11.0.md`](releases/v0.11.0.md): Outlook Inbox/Sent 로컬 mirror, FTS5 검색, 증분 동기화 기반 릴리즈 노트.
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.
-- [`releases/v0.10.0.md`](releases/v0.10.0.md): where-skills/Codex용 read-only CLI provider 릴리즈 노트.
+- [`releases/v0.10.0.md`](releases/v0.10.0.md): 외부 자동화용 read-only CLI provider 릴리즈 노트.
 - [`releases/v0.9.0.md`](releases/v0.9.0.md): Ollama runner/context/lifetime override 제거와 안정 우선 LLM 동시성 릴리즈 노트.
 - [`releases/v0.8.0.md`](releases/v0.8.0.md): Outlook 이벤트+fallback 자동 확인, fast filter, Inbox/Sent delta, 확인 필요 Y/N 보관 제안 릴리즈 노트.
 - [`releases/v0.7.2.md`](releases/v0.7.2.md): 최근 1일/1분 자동 확인, 로컬 데이터 삭제, 설정 공유 안내 릴리즈 노트.
@@ -36,8 +36,8 @@
 - [`releases/v0.4.2.md`](releases/v0.4.2.md): 화면/확인 필요/LLM payload polish 릴리즈 노트.
 - [`releases/v0.4.1.md`](releases/v0.4.1.md): 설정/보드 compact patch 릴리즈 노트.
 - [`releases/v0.4.0.md`](releases/v0.4.0.md): 통합 업무 보드 릴리즈 노트.
-- [`UX_AND_INTEGRATION_REVIEW.md`](UX_AND_INTEGRATION_REVIEW.md): UX 원칙과 OfficeWhere/Agentic AI 연결 방향.
-- [`PRODUCT_ARCHITECTURE_AND_AGENT_CLI.md`](PRODUCT_ARCHITECTURE_AND_AGENT_CLI.md): 제품 아키텍처 확장과 read-only Agent CLI 통합 연구.
+- [`UX_AND_INTEGRATION_REVIEW.md`](UX_AND_INTEGRATION_REVIEW.md): 2026-05 시점의 historical UX 검토.
+- [`PRODUCT_ARCHITECTURE_AND_AGENT_CLI.md`](PRODUCT_ARCHITECTURE_AND_AGENT_CLI.md): `where-desk` 이전의 historical Agent CLI 통합 연구.
 - [`ASSUMPTIONS.md`](ASSUMPTIONS.md): 아직 검증 중인 가정.
 - [`ADR/`](ADR/): Outlook COM, WPF tray app, read-only-first, portable-first 결정 기록.
 

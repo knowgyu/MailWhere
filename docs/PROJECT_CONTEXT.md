@@ -15,14 +15,11 @@ The import manifest and checksums are in [`docs/history/parent-omx-import/README
 
 Use these artifacts when picking up product or implementation work:
 
-1. [`README.md`](../README.md) and [`docs/README.md`](README.md) — current product model and document map.
-2. [`docs/VISUAL_QA_WORKFLOW_2026-05-16.md`](VISUAL_QA_WORKFLOW_2026-05-16.md) — latest tray-first, scheduled-board, `나중에`/`보관`, edit-dialog decisions.
-3. [`docs/history/parent-omx-import/context/outlook-ai-secretary-20260514T125112Z.md`](history/parent-omx-import/context/outlook-ai-secretary-20260514T125112Z.md) — initial context snapshot and constraints.
-4. [`docs/history/parent-omx-import/specs/deep-interview-outlook-ai-secretary.md`](history/parent-omx-import/specs/deep-interview-outlook-ai-secretary.md) — clarified requirements and phased scope.
-5. [`docs/history/parent-omx-import/plans/prd-outlook-ai-secretary.md`](history/parent-omx-import/plans/prd-outlook-ai-secretary.md) — original product requirements.
-6. [`docs/history/parent-omx-import/plans/prd-mailwhere-board-triage-ux.md`](history/parent-omx-import/plans/prd-mailwhere-board-triage-ux.md) and [`docs/history/parent-omx-import/plans/triage-policy-mailwhere-board-triage-ux.md`](history/parent-omx-import/plans/triage-policy-mailwhere-board-triage-ux.md) — earlier UX/triage refinement.
-7. [`docs/history/parent-omx-import/specs/autoresearch-codex-where-integration/report.md`](history/parent-omx-import/specs/autoresearch-codex-where-integration/report.md) — MailWhere + OfficeWhere Codex CLI integration research.
-8. [`docs/history/parent-omx-import/logs/`](history/parent-omx-import/logs/) — filtered parent-session turn-log excerpts from the relevant dates.
+1. [`README.md`](../README.md), [`DESIGN.md`](../DESIGN.md), and [`docs/README.md`](README.md) — current product, search UX, and document map.
+2. [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/SECURITY.md`](SECURITY.md) — current runtime, provider, retention, and export boundaries.
+3. [`docs/releases/v0.12.0.md`](releases/v0.12.0.md) and [`docs/MANAGED_PC_SMOKE_TEST.md`](MANAGED_PC_SMOKE_TEST.md) — latest shipped behavior and remaining managed-PC validation.
+4. [`docs/VISUAL_QA_WORKFLOW_2026-05-16.md`](VISUAL_QA_WORKFLOW_2026-05-16.md) — historical tray-first UI decisions.
+5. [`docs/history/parent-omx-import/`](history/parent-omx-import/) — historical context, plans, research, and filtered logs. These records do not override current docs.
 
 ## Current implementation anchor
 
@@ -48,4 +45,4 @@ The current codebase already contains the implementation artifacts created from 
 - 업무 보드는 active ledger이고, tray의 `오늘 업무 보기`로 다시 열 수 있다.
 - Low-confidence confirmation candidates are explicit-on-demand, not default noise.
 - Snooze and archive are local MailWhere task-state actions; Outlook 원본은 mutate하지 않는다. `나중에`는 다시 표시되고 `보관`은 active board에서 제외된다.
-- Agent CLI/skill/hook 연계는 sanitized read-only export seam으로 염두에 두되, 현재 제품 코드에는 MCP/full work-agent를 구현하지 않는다.
+- contextWhere/agent 연계는 sanitized read-only CLI/export seam만 사용한다. Cross-provider evidence/wiki/context-pack orchestration과 MCP/full work-agent는 MailWhere에 구현하지 않는다.

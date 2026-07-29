@@ -38,8 +38,8 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - 가능한 경우 `열기`로 Outlook 원본 메일 열기
 - **지금 메일 확인**으로 채워지는 로컬 mail mirror를 SQLite/FTS5만 읽는 WPF **메일 검색** 창과 `search-mail` CLI 검색
 - 다자 수신자에게 보낸 회신 요청은 Outlook 대화 ID/보낸 사람 기준으로 `n/m명 회신` 현황 표시 및 export
-- 향후 LLM skill이 읽을 수 있는 raw-mail-free export SDK/API (`MailWhereExportService`)
-- Codex/where-skills 같은 외부 자동화가 안전하게 읽을 수 있는 read-only JSON CLI provider (`MailWhere.Cli.exe`)
+- contextWhere와 로컬 agent가 읽을 수 있는 raw-mail-free export SDK/API (`MailWhereExportService`)
+- contextWhere 같은 외부 자동화가 안전하게 읽을 수 있는 read-only JSON CLI provider (`MailWhere.Cli.exe`)
 - D-day, D-7/D-1/D-day reminder planning, snooze-due reminder
 - MailWhere 자체 우하단 toast stack과 tray 메뉴
 - 설정 > 개발자 도구 탭의 샘플 데이터/알림/필터 테스트와 `scripts/reset-local-data.ps1`
