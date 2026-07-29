@@ -54,8 +54,6 @@ if (-not $SkipTests) {
     Write-Host "[portable] core tests"
     Invoke-Native { dotnet run --project .\tests\MailWhere.Tests\MailWhere.Tests.csproj -c $Configuration --no-build }
 
-    Write-Host "[portable] test harness"
-    Invoke-Native { dotnet run --project .\tests\MailWhere.TestHarness\MailWhere.TestHarness.csproj -c $Configuration --no-build }
 }
 
 Write-Host "[portable] clean artifact folders"
@@ -86,12 +84,53 @@ Invoke-Native {
 }
 
 Write-Host "[portable] copy operator docs"
-Copy-Item .\README.md (Join-Path $publishDir "README.md") -Force
-Copy-Item .\docs (Join-Path $publishDir "docs") -Recurse -Force
+Copy-Item .\docs\PORTABLE_README.md (Join-Path $publishDir "README.md") -Force
+$operatorDocs = @(
+    "ARCHITECTURE.md",
+    "BASELINE_METRICS.md",
+    "CAPABILITY_PROBES.md",
+    "DEPLOYMENT.md",
+    "FAILURE_MODES.md",
+    "LLM_ENDPOINTS.md",
+    "MANAGED_PC_SMOKE_TEST.md",
+    "PRODUCTION_READINESS.md",
+    "SECURITY.md",
+    "releases\$($versionLabel).md"
+)
+foreach ($relativePath in $operatorDocs) {
+    $source = Join-Path ".\docs" $relativePath
+    $target = Join-Path (Join-Path $publishDir "docs") $relativePath
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+    Copy-Item $source $target -Force
+}
 Copy-Item .\docs\START_HERE.ko.txt (Join-Path $publishDir "START_HERE_시작하기.txt") -Force
-Copy-Item .\assets (Join-Path $publishDir "assets") -Recurse -Force
+New-Item -ItemType Directory -Force -Path (Join-Path $publishDir "assets") | Out-Null
+Copy-Item .\assets\app-icon.svg (Join-Path $publishDir "assets\app-icon.svg") -Force
 Copy-Item .\src\MailWhere.Windows\appsettings.sample.json (Join-Path $publishDir "appsettings.sample.json") -Force
 Copy-Item .\src\MailWhere.Windows\MailWhere.defaults.sample.json (Join-Path $publishDir "MailWhere.defaults.sample.json") -Force
+
+foreach ($relativePath in @(
+    "README.md",
+    "START_HERE_시작하기.txt",
+    "assets\app-icon.svg",
+    "docs\MANAGED_PC_SMOKE_TEST.md",
+    "docs\releases\$($versionLabel).md"
+)) {
+    if (-not (Test-Path (Join-Path $publishDir $relativePath))) {
+        throw "Portable package missing required file: $relativePath"
+    }
+}
+foreach ($relativePath in @(
+    "docs\history",
+    "docs\PROJECT_CONTEXT.md",
+    "docs\PRODUCT_ARCHITECTURE_AND_AGENT_CLI.md",
+    "docs\CODE_REVIEW_0_1.md",
+    "assets\app-icon.png"
+)) {
+    if (Test-Path (Join-Path $publishDir $relativePath)) {
+        throw "Portable package contains internal or redundant file: $relativePath"
+    }
+}
 
 $commit = "unknown"
 try {

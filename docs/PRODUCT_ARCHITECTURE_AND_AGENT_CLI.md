@@ -22,7 +22,7 @@ MailWhere는 이미 PoC치고는 좋은 방향으로 나뉘어 있다. `MailWher
 
 ### 2.1 강점
 
-- **Layering이 이미 있다**: solution은 `Core`, `Storage`, `OutlookCom`, `Windows`, `Tests`, `TestHarness`로 나뉜다 (`MailWhere.sln`, `src/*/*.csproj`).
+- **Layering이 이미 있다**: solution은 `Core`, `Storage`, `OutlookCom`, `Windows`, `CLI`, `Tests`로 나뉜다 (`MailWhere.sln`, `src/*/*.csproj`).
 - **Core가 UI/COM 없이 테스트 가능하다**: `tests/MailWhere.Tests/Program.cs`는 analyzer, pipeline, reminders, settings, SQLite schema/privacy까지 넓게 검증한다.
 - **Ports가 일부 존재한다**: `IFollowUpAnalyzer`, `IFollowUpBatchAnalyzer`, `ILlmClient`, `IEmailSource`, `IFollowUpStore`, `IUserNotificationSink`가 이미 있다.
 - **Safety boundary가 명확하다**: README/SECURITY/ARCHITECTURE는 read-only Outlook, external LLM off by default, raw body non-persistence, diagnostics sanitization을 반복해서 명시한다.

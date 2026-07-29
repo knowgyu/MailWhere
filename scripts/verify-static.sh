@@ -14,6 +14,8 @@ required=(
   docs/ROADMAP.md
   docs/MANAGED_PC_SMOKE_TEST.md
   docs/DEPLOYMENT.md
+  docs/PORTABLE_README.md
+  docs/PRODUCTION_READINESS.md
   docs/ADR/0004-portable-first-packaging.md
   .github/workflows/windows-portable.yml
   scripts/publish-portable.ps1
@@ -31,6 +33,20 @@ required=(
 for f in "${required[@]}"; do
   test -f "$f" || { echo "missing $f" >&2; exit 1; }
 done
+
+echo "[static] Checking repository and portable-package hygiene"
+if grep -RIn 'MailWhere\.TestHarness' MailWhere.sln scripts --exclude=verify-static.sh; then
+  echo "Redundant MailWhere.TestHarness reference found" >&2
+  exit 1
+fi
+if grep -RInE 'Copy-Item \.\\docs .* -Recurse|cp -R \./docs ' scripts/publish-portable.ps1 scripts/publish-portable.sh; then
+  echo "Portable package must not copy the full docs tree" >&2
+  exit 1
+fi
+grep -F 'PORTABLE_README.md' scripts/publish-portable.ps1 scripts/publish-portable.sh >/dev/null || {
+  echo "Portable package missing curated operator README" >&2
+  exit 1
+}
 
 echo "[static] Checking Phase 0/1 Outlook adapter forbidden mutation calls"
 if grep -RInE '\.(Send|Delete|Move|Save|Reply|ReplyAll|Forward)\s*\(|\bUnRead\s*=|\bCategories\s*=|\bFlagStatus\s*=|\bSaveAsFile\s*\(' src/MailWhere.OutlookCom; then

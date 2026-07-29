@@ -27,9 +27,6 @@ Invoke-Native { dotnet build .\MailWhere.sln -c Release --no-restore }
 Write-Host "[windows] core tests"
 Invoke-Native { dotnet run --project .\tests\MailWhere.Tests\MailWhere.Tests.csproj -c Release --no-build }
 
-Write-Host "[windows] test harness"
-Invoke-Native { dotnet run --project .\tests\MailWhere.TestHarness\MailWhere.TestHarness.csproj -c Release --no-build }
-
 Write-Host "[windows] forbidden Outlook mutation scan"
 $forbidden = Select-String -Path .\src\MailWhere.OutlookCom\*.cs, .\src\MailWhere.Windows\*.cs -Pattern '\.(Send|Delete|Move|Save|Reply|ReplyAll|Forward)\s*\(|\bUnRead\s*=|\bCategories\s*=|\bFlagStatus\s*=|\bSaveAsFile\s*\(' |
     Where-Object { $_.Line -notmatch 'WindowsRuntimeSettingsStore\.Save\s*\(' }

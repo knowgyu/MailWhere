@@ -40,8 +40,6 @@ if [[ "$skip_tests" != "1" && "$skip_tests" != "true" ]]; then
   echo "[portable] core tests"
   "$dotnet_cmd" run --project ./tests/MailWhere.Tests/MailWhere.Tests.csproj -c "$configuration" --no-build
 
-  echo "[portable] test harness"
-  "$dotnet_cmd" run --project ./tests/MailWhere.TestHarness/MailWhere.TestHarness.csproj -c "$configuration" --no-build
 fi
 
 echo "[portable] clean artifact folders"
@@ -67,12 +65,53 @@ echo "[portable] publish CLI provider into portable folder"
   -o "$publish_dir"
 
 echo "[portable] copy operator docs"
-cp ./README.md "$publish_dir/README.md"
-cp -R ./docs "$publish_dir/docs"
+cp ./docs/PORTABLE_README.md "$publish_dir/README.md"
+operator_docs=(
+  ARCHITECTURE.md
+  BASELINE_METRICS.md
+  CAPABILITY_PROBES.md
+  DEPLOYMENT.md
+  FAILURE_MODES.md
+  LLM_ENDPOINTS.md
+  MANAGED_PC_SMOKE_TEST.md
+  PRODUCTION_READINESS.md
+  SECURITY.md
+  "releases/$version_label.md"
+)
+for relative_path in "${operator_docs[@]}"; do
+  mkdir -p "$publish_dir/docs/$(dirname "$relative_path")"
+  cp "./docs/$relative_path" "$publish_dir/docs/$relative_path"
+done
 cp ./docs/START_HERE.ko.txt "$publish_dir/START_HERE_시작하기.txt"
-cp -R ./assets "$publish_dir/assets"
+mkdir -p "$publish_dir/assets"
+cp ./assets/app-icon.svg "$publish_dir/assets/app-icon.svg"
 cp ./src/MailWhere.Windows/appsettings.sample.json "$publish_dir/appsettings.sample.json"
 cp ./src/MailWhere.Windows/MailWhere.defaults.sample.json "$publish_dir/MailWhere.defaults.sample.json"
+
+required_package_files=(
+  README.md
+  START_HERE_시작하기.txt
+  assets/app-icon.svg
+  docs/MANAGED_PC_SMOKE_TEST.md
+  "docs/releases/$version_label.md"
+)
+for relative_path in "${required_package_files[@]}"; do
+  test -f "$publish_dir/$relative_path" || {
+    echo "Portable package missing required file: $relative_path" >&2
+    exit 1
+  }
+done
+for relative_path in \
+  docs/history \
+  docs/PROJECT_CONTEXT.md \
+  docs/PRODUCT_ARCHITECTURE_AND_AGENT_CLI.md \
+  docs/CODE_REVIEW_0_1.md \
+  assets/app-icon.png; do
+  test ! -e "$publish_dir/$relative_path" || {
+    echo "Portable package contains internal or redundant file: $relative_path" >&2
+    exit 1
+  }
+done
 
 commit="unknown"
 if git rev-parse --short HEAD >/tmp/mailwhere-commit.txt 2>/dev/null; then

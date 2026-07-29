@@ -12,8 +12,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MailWhere.Windows", "src/Ma
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MailWhere.Tests", "tests/MailWhere.Tests/MailWhere.Tests.csproj", "{8C2C8442-6B1D-45A2-B6AD-7879B47CFB6B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MailWhere.TestHarness", "tests/MailWhere.TestHarness/MailWhere.TestHarness.csproj", "{0B1B0D20-913E-4A0B-8413-C3BA4CFF864C}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MailWhere.Cli", "src/MailWhere.Cli/MailWhere.Cli.csproj", "{428DF578-EB7A-4E61-B87B-79948159FF96}"
 EndProject
 Global
@@ -42,10 +40,6 @@ Global
 		{8C2C8442-6B1D-45A2-B6AD-7879B47CFB6B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8C2C8442-6B1D-45A2-B6AD-7879B47CFB6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8C2C8442-6B1D-45A2-B6AD-7879B47CFB6B}.Release|Any CPU.Build.0 = Release|Any CPU
-		{0B1B0D20-913E-4A0B-8413-C3BA4CFF864C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{0B1B0D20-913E-4A0B-8413-C3BA4CFF864C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{0B1B0D20-913E-4A0B-8413-C3BA4CFF864C}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{0B1B0D20-913E-4A0B-8413-C3BA4CFF864C}.Release|Any CPU.Build.0 = Release|Any CPU
 		{428DF578-EB7A-4E61-B87B-79948159FF96}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{428DF578-EB7A-4E61-B87B-79948159FF96}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{428DF578-EB7A-4E61-B87B-79948159FF96}.Release|Any CPU.ActiveCfg = Release|Any CPU

@@ -20,7 +20,10 @@
 
 ## 제품/기획
 
+- [`releases/v0.12.1.md`](releases/v0.12.1.md): 생성된 agent 표면과 중복 harness, 내부 문서를 portable 배포에서 제거한 유지보수 릴리즈.
 - [`releases/v0.12.0.md`](releases/v0.12.0.md): 결정적 checkpoint 재개와 SQLite-only WPF 메일 검색 창 릴리즈 노트.
+- [`PORTABLE_README.md`](PORTABLE_README.md): portable ZIP에 포함되는 최소 운영자 안내.
+- [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md): 완료된 안전 경계, 관리형 PC 증거, 측정 기반 후속 조건.
 - [`releases/v0.11.1.md`](releases/v0.11.1.md): 기존 메일 확인 경로에 mirror 동기화·취소·재개·일일 reconcile을 연결한 production patch.
 - [`releases/v0.11.0.md`](releases/v0.11.0.md): Outlook Inbox/Sent 로컬 mirror, FTS5 검색, 증분 동기화 기반 릴리즈 노트.
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.

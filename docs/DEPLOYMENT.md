@@ -33,10 +33,10 @@ It runs on:
 The workflow performs the Windows verification path and uploads:
 
 ```text
-artifacts/MailWhere-v0.12.0-win-x64-portable.zip
+artifacts/MailWhere-v0.12.1-win-x64-portable.zip
 ```
 
-The zip contains the published app, the read-only CLI provider, README, operator docs, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`.
+The zip contains the published app, the read-only CLI provider, a portable README, curated operational docs, the README SVG logo, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`. Historical plans, reviews, screenshots, and unused logo variants stay in the repository rather than the package.
 
 Before compression, the publish scripts update only the published `MailWhere.exe` modified time. This makes the executable easier to find when users extract the portable folder and sort by recent modified time. No helper touch script is copied into the release payload.
 

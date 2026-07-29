@@ -24,16 +24,9 @@ logs/
 artifacts/
 *.zip
 
-# local OMX workflow state (contains operator-specific planning context)
+# local Codex/OMX generated state
 .omx/
-.codex/*
-!.codex/agents/
-!.codex/agents/**
-!.codex/skills/
-!.codex/skills/**
-.codex/skills/.system/**
-!.codex/prompts/
-!.codex/prompts/**
+.codex/
 
 # Windows alternate data stream metadata copied through WSL
 *:Zone.Identifier

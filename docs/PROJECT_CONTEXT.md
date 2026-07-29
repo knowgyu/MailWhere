@@ -4,10 +4,7 @@ This repository is the continuation point for the MailWhere / Outlook AI Secreta
 
 ## Imported parent-workspace artifacts
 
-The parent workspace stored the early discussions and planning outputs under `../.omx`. Full-day logs were filtered to MailWhere/Outlook-relevant excerpts before being imported. They have been copied into this repository in two forms:
-
-1. Runtime continuity copy under `.omx/` so local OMX/Ralph/plan workflows can discover the same context from this repo.
-2. Versioned history copy under [`docs/history/parent-omx-import/`](history/parent-omx-import/) so the context travels with the repository.
+The parent workspace stored the early discussions and planning outputs under `../.omx`. Full-day logs were filtered to MailWhere/Outlook-relevant excerpts before being imported. Durable imported context lives in the versioned [`docs/history/parent-omx-import/`](history/parent-omx-import/) copy. Local `.omx/` state is generated, ignored runtime data and is not a source of truth.
 
 The import manifest and checksums are in [`docs/history/parent-omx-import/README.md`](history/parent-omx-import/README.md).
 
@@ -17,7 +14,7 @@ Use these artifacts when picking up product or implementation work:
 
 1. [`README.md`](../README.md), [`DESIGN.md`](../DESIGN.md), and [`docs/README.md`](README.md) — current product, search UX, and document map.
 2. [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/SECURITY.md`](SECURITY.md) — current runtime, provider, retention, and export boundaries.
-3. [`docs/releases/v0.12.0.md`](releases/v0.12.0.md) and [`docs/MANAGED_PC_SMOKE_TEST.md`](MANAGED_PC_SMOKE_TEST.md) — latest shipped behavior and remaining managed-PC validation.
+3. [`docs/releases/v0.12.1.md`](releases/v0.12.1.md) and [`docs/MANAGED_PC_SMOKE_TEST.md`](MANAGED_PC_SMOKE_TEST.md) — latest shipped behavior and remaining managed-PC validation.
 4. [`docs/VISUAL_QA_WORKFLOW_2026-05-16.md`](VISUAL_QA_WORKFLOW_2026-05-16.md) — historical tray-first UI decisions.
 5. [`docs/history/parent-omx-import/`](history/parent-omx-import/) — historical context, plans, research, and filtered logs. These records do not override current docs.
 
