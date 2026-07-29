@@ -14,7 +14,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - **지정 시간 업무 보드**: 기본 08:00에 오늘 업무 보드를 열어 빠르게 훑게 합니다. 보드 열기에 실패한 경우에만 알림으로 fallback합니다.
 - **통합 업무 보드**: tray의 `열기`가 곧 업무 보드입니다. 기본은 `오늘`이고 필터는 `오늘`/`이번 주`/`전체`/`날짜 없음` 순서입니다.
 - **한 줄 업무 행**: 업무는 “제목 · 날짜 · 보낸 사람”만 먼저 보이고, 오른쪽에 `열기`, `나중에`, `보관`만 둡니다. 제목/기한은 더블클릭으로 수정합니다.
-- **분리된 보조 화면**: 확인 필요와 보관함은 별도 창, 설정/개발자 도구는 설정 창 탭으로 열어 업무 목록을 방해하지 않습니다.
+- **분리된 보조 화면**: 확인 필요, 메일 검색, 보관함은 별도 창으로 열고 설정/개발자 도구는 설정 창 탭으로 열어 업무 목록을 방해하지 않습니다.
 - **보관 모델**: 여러 종료/제외 액션을 사용자-facing 개념으로 나누지 않고 `보관`으로 통합합니다. 보관된 항목은 active 목록에서 사라지고 자동으로 다시 뜨지 않지만, 보관함에서 열거나 복원할 수 있습니다.
 
 ## 지금 되는 것
@@ -36,7 +36,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - `나중에`로 지정 시각까지 active 목록에서 제외하고, 시간이 지나면 다시 표시
 - `보관`으로 active 목록에서 제외하고, 보관함에서 원본 열기/복원
 - 가능한 경우 `열기`로 Outlook 원본 메일 열기
-- **지금 메일 확인**으로 채워지는 로컬 mail mirror를 SQLite/FTS5만 읽는 `search-mail` CLI 검색
+- **지금 메일 확인**으로 채워지는 로컬 mail mirror를 SQLite/FTS5만 읽는 WPF **메일 검색** 창과 `search-mail` CLI 검색
 - 다자 수신자에게 보낸 회신 요청은 Outlook 대화 ID/보낸 사람 기준으로 `n/m명 회신` 현황 표시 및 export
 - 향후 LLM skill이 읽을 수 있는 raw-mail-free export SDK/API (`MailWhereExportService`)
 - Codex/where-skills 같은 외부 자동화가 안전하게 읽을 수 있는 read-only JSON CLI provider (`MailWhere.Cli.exe`)
@@ -113,7 +113,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.11.1-win-x64-portable.zip
+artifacts/MailWhere-v0.12.0-win-x64-portable.zip
 ```
 
 ## LLM endpoint

@@ -31,7 +31,6 @@ public sealed class OutlookComMailInventorySource : IMailMirrorInventorySource
         object? session = null;
         object? folder = null;
         object? table = null;
-        var pages = new List<MailInventoryPage>();
         var warnings = new List<MailMirrorSyncWarning>();
 
         try
@@ -56,7 +55,7 @@ public sealed class OutlookComMailInventorySource : IMailMirrorInventorySource
             TryAddTableColumns(table);
             TrySort(table, "LastModificationTime");
 
-            var items = new List<MailInventoryItem>(request.PageSize);
+            var items = new List<MailInventoryItem>();
             while (HasNext(table))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -64,18 +63,7 @@ public sealed class OutlookComMailInventorySource : IMailMirrorInventorySource
                 try
                 {
                     row = Invoke(table, "GetNextRow") ?? throw new InvalidOperationException("OutlookRowUnavailable");
-                    var item = ReadRow(row, storeId, request.Folder);
-                    if (request.Checkpoint is not null && !MailMirrorCursor.IsAfter(request.Checkpoint, item))
-                    {
-                        continue;
-                    }
-
-                    items.Add(item);
-                    if (items.Count == request.PageSize)
-                    {
-                        pages.Add(new MailInventoryPage(request.Folder, items.ToArray(), items[^1].Cursor, Completed: false));
-                        items.Clear();
-                    }
+                    items.Add(ReadRow(row, storeId, request.Folder));
                 }
                 catch (OperationCanceledException)
                 {
@@ -91,8 +79,7 @@ public sealed class OutlookComMailInventorySource : IMailMirrorInventorySource
                 }
             }
 
-            pages.Add(new MailInventoryPage(request.Folder, items.ToArray(), items.Count == 0 ? request.Checkpoint : items[^1].Cursor, Completed: true, warnings));
-            return pages;
+            return MailInventoryOrdering.BuildPages(request, items, warnings);
         }
         catch (OperationCanceledException)
         {

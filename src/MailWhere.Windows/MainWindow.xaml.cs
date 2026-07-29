@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private bool _backgroundStarted;
     private bool _allowExit;
     private ReviewCandidatesWindow? _reviewCandidatesWindow;
+    private MailSearchWindow? _mailSearchWindow;
     private ArchiveWindow? _archiveWindow;
     private SettingsWindow? _settingsWindow;
     private BoardSnapshot? _boardSnapshot;
@@ -334,6 +335,8 @@ public partial class MainWindow : Window
     {
         await OpenReviewCandidatesWindowAsync();
     }
+
+    private void OpenMailSearch_Click(object sender, RoutedEventArgs e) => OpenMailSearchWindow();
 
     private async void OpenArchive_Click(object sender, RoutedEventArgs e)
     {
@@ -1257,6 +1260,24 @@ public partial class MainWindow : Window
             await ShowErrorAsync("직접 추가 실패", ex);
             return null;
         }
+    }
+
+    private void OpenMailSearchWindow()
+    {
+        if (_mailSearchWindow?.IsVisible == true)
+        {
+            BringWindowToFront(_mailSearchWindow);
+            return;
+        }
+
+        _mailSearchWindow = new MailSearchWindow(GetDatabasePath)
+        {
+            Owner = IsVisible ? this : null
+        };
+        _mailSearchWindow.Closed += (_, _) => _mailSearchWindow = null;
+        _mailSearchWindow.Show();
+        BringWindowToFront(_mailSearchWindow);
+        StatusText.Text = "메일 검색을 열었습니다.";
     }
 
     private async Task OpenReviewCandidatesWindowAsync()

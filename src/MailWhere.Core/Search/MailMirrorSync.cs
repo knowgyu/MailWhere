@@ -67,6 +67,45 @@ public static class MailMirrorSyncCadencePolicy
         DateTimeOffset.TryParse(value, out timestamp);
 }
 
+public static class MailInventoryOrdering
+{
+    public static IOrderedEnumerable<MailInventoryItem> ByCheckpointCursor(IEnumerable<MailInventoryItem> items) =>
+        items
+            .OrderBy(item => item.LastModifiedAt)
+            .ThenBy(item => item.StoreId, StringComparer.Ordinal)
+            .ThenBy(item => item.EntryId, StringComparer.Ordinal);
+
+    public static IReadOnlyList<MailInventoryPage> BuildPages(
+        MailInventoryRequest request,
+        IEnumerable<MailInventoryItem> items,
+        IReadOnlyList<MailMirrorSyncWarning>? warnings = null)
+    {
+        var pageSize = Math.Max(1, request.PageSize);
+        var ordered = ByCheckpointCursor(items)
+            .Where(item => request.Checkpoint is null || MailMirrorCursor.IsAfter(request.Checkpoint, item))
+            .ToArray();
+        if (ordered.Length == 0)
+        {
+            return [new MailInventoryPage(request.Folder, Array.Empty<MailInventoryItem>(), request.Checkpoint, Completed: true, warnings)];
+        }
+
+        var pages = new List<MailInventoryPage>((ordered.Length + pageSize - 1) / pageSize);
+        for (var index = 0; index < ordered.Length; index += pageSize)
+        {
+            var pageItems = ordered.Skip(index).Take(pageSize).ToArray();
+            var completed = index + pageItems.Length == ordered.Length;
+            pages.Add(new MailInventoryPage(
+                request.Folder,
+                pageItems,
+                pageItems[^1].Cursor,
+                completed,
+                completed ? warnings : null));
+        }
+
+        return pages;
+    }
+}
+
 public interface IMailMirrorInventorySource
 {
     IAsyncEnumerable<MailInventoryPage> EnumerateAsync(MailInventoryRequest request, CancellationToken cancellationToken = default);
@@ -110,11 +149,7 @@ public sealed class MailMirrorBackfillService
                     warnings.AddRange(page.Warnings);
                 }
 
-                var items = page.Items
-                    .OrderBy(item => item.LastModifiedAt)
-                    .ThenBy(item => item.StoreId, StringComparer.Ordinal)
-                    .ThenBy(item => item.EntryId, StringComparer.Ordinal)
-                    .ToArray();
+                var items = MailInventoryOrdering.ByCheckpointCursor(page.Items).ToArray();
                 currentLocators.AddRange(items.Select(item => item.Locator));
                 seen += items.Length;
                 if (page.Completed)
@@ -196,11 +231,7 @@ public sealed class MailMirrorBackfillService
                     warnings.AddRange(page.Warnings);
                 }
 
-                var items = page.Items
-                    .OrderBy(item => item.LastModifiedAt)
-                    .ThenBy(item => item.StoreId, StringComparer.Ordinal)
-                    .ThenBy(item => item.EntryId, StringComparer.Ordinal)
-                    .ToArray();
+                var items = MailInventoryOrdering.ByCheckpointCursor(page.Items).ToArray();
                 seen += items.Length;
 
                 var known = await _store.GetKnownLastModifiedAsync(items.Select(item => item.Locator).ToArray(), cancellationToken).ConfigureAwait(false);

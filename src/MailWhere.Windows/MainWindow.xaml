@@ -50,6 +50,7 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="12,0,0,0">
                     <Button x:Name="OpenReviewCandidatesButton" Click="OpenReviewCandidates_Click" Style="{StaticResource MwButton.Secondary}">확인 필요</Button>
+                    <Button x:Name="OpenMailSearchButton" Click="OpenMailSearch_Click" Style="{StaticResource MwButton.Secondary}">메일 검색</Button>
                     <Button x:Name="OpenArchiveButton" Click="OpenArchive_Click" Style="{StaticResource MwButton.Secondary}">보관함</Button>
                     <Button x:Name="OpenSettingsButton" Click="OpenSettings_Click" Style="{StaticResource MwButton.Secondary}">설정</Button>
                     <Button x:Name="AddManualHeaderButton" Click="AddManualTaskDialog_Click" Style="{StaticResource MwButton.Secondary}">+ 직접 추가</Button>

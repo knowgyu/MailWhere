@@ -24,6 +24,8 @@ required=(
   src/MailWhere.Cli/CliApp.cs
   src/MailWhere.OutlookCom/MailWhere.OutlookCom.csproj
   src/MailWhere.Windows/MailWhere.Windows.csproj
+  src/MailWhere.Windows/MailSearchWindow.xaml
+  src/MailWhere.Windows/MailSearchWindow.xaml.cs
   tests/MailWhere.Tests/Program.cs
 )
 for f in "${required[@]}"; do
@@ -65,6 +67,13 @@ echo "[static] Checking production mirror wiring and state keys"
 grep -RIn 'new OutlookComMailInventorySource' src/MailWhere.Windows/MainWindow.xaml.cs >/dev/null || { echo "Windows app does not construct OutlookComMailInventorySource" >&2; exit 1; }
 grep -RIn 'new SqliteMailMirrorStore' src/MailWhere.Windows/MainWindow.xaml.cs >/dev/null || { echo "Windows app does not construct SqliteMailMirrorStore" >&2; exit 1; }
 grep -RIn 'new MailMirrorBackfillService' src/MailWhere.Windows/MainWindow.xaml.cs >/dev/null || { echo "Windows app does not construct MailMirrorBackfillService" >&2; exit 1; }
+grep -RIn 'OpenMailSearch_Click' src/MailWhere.Windows/MainWindow.xaml src/MailWhere.Windows/MainWindow.xaml.cs >/dev/null || { echo "MainWindow missing mail search entry point" >&2; exit 1; }
+grep -RIn 'new MailSearchWindow(GetDatabasePath)' src/MailWhere.Windows/MainWindow.xaml.cs >/dev/null || { echo "MainWindow does not open MailSearchWindow with database path" >&2; exit 1; }
+grep -RIn 'new SqliteMailMirrorStore(databasePath)' src/MailWhere.Windows/MailSearchWindow.xaml.cs >/dev/null || { echo "MailSearchWindow missing SQLite mirror store wiring" >&2; exit 1; }
+grep -RIn 'SearchAsync(new MailMirrorSearchRequest' src/MailWhere.Windows/MailSearchWindow.xaml.cs >/dev/null || { echo "MailSearchWindow missing mirror search request" >&2; exit 1; }
+grep -RIn 'OpenAsync(locator.StoreId, locator.EntryId)' src/MailWhere.Windows/MailSearchWindow.xaml.cs >/dev/null || { echo "MailSearchWindow must explicitly open source by StoreId and EntryId" >&2; exit 1; }
+grep -RIn 'MailWhereSmokeBodyOnly20260729' docs/MANAGED_PC_SMOKE_TEST.md >/dev/null || { echo "managed PC smoke doc missing literal body-only search term" >&2; exit 1; }
+grep -RIn 'DefaultPageSize + 1' docs/MANAGED_PC_SMOKE_TEST.md tests/MailWhere.Tests/Program.cs >/dev/null || { echo "missing DefaultPageSize+1 equal-timestamp coverage note/assertion" >&2; exit 1; }
 grep -RIn 'mail-mirror-initial-sync-completed-at' src tests >/dev/null || { echo "missing initial mirror sync state key assertion" >&2; exit 1; }
 grep -RIn 'mail-mirror-last-authoritative-reconcile-at' src tests >/dev/null || { echo "missing authoritative mirror reconcile state key assertion" >&2; exit 1; }
 

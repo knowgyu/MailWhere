@@ -20,6 +20,7 @@
 
 ## 제품/기획
 
+- [`releases/v0.12.0.md`](releases/v0.12.0.md): 결정적 checkpoint 재개와 SQLite-only WPF 메일 검색 창 릴리즈 노트.
 - [`releases/v0.11.1.md`](releases/v0.11.1.md): 기존 메일 확인 경로에 mirror 동기화·취소·재개·일일 reconcile을 연결한 production patch.
 - [`releases/v0.11.0.md`](releases/v0.11.0.md): Outlook Inbox/Sent 로컬 mirror, FTS5 검색, 증분 동기화 기반 릴리즈 노트.
 - [`ROADMAP.md`](ROADMAP.md): 이미 반영된 릴리즈와 다음 단계.

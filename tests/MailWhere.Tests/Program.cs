@@ -171,6 +171,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Mail mirror concurrent searches use serialized reader", MailMirrorConcurrentSearchesUseSerializedReader),
     ("Mail mirror backfill hydrates only new changed checkpoints folders", MailMirrorBackfillHydratesOnlyNewChangedCheckpointsFolders),
     ("Mail mirror backfill cancel resume keeps atomic batches no duplicates", MailMirrorBackfillCancelResumeKeepsAtomicBatchesNoDuplicates),
+    ("Mail mirror equal timestamp checkpoint resumes every locator once", MailMirrorEqualTimestampCheckpointResumesEveryLocatorOnce),
     ("Mail mirror backfill isolates hydration failures", MailMirrorBackfillIsolatesHydrationFailures),
     ("Mail mirror reconcile deletes unseen and FTS terms", MailMirrorReconcileDeletesUnseenAndFtsTerms),
     ("Mail mirror reconcile handles Inbox to Sent move", MailMirrorReconcileHandlesInboxToSentMove),
@@ -4266,6 +4267,68 @@ static async Task MailMirrorBackfillCancelResumeKeepsAtomicBatchesNoDuplicates()
     }
 }
 
+static async Task MailMirrorEqualTimestampCheckpointResumesEveryLocatorOnce()
+{
+    var (mirror, dbPath, cleanup) = await CreateTempMirrorStoreAsync();
+    try
+    {
+        var sameTimeItems = Enumerable.Range(0, MailMirrorBackfillService.DefaultPageSize + 1)
+            .Select(i => InventoryItem("store", $"inbox-{i:000}", MailSourceFolder.Inbox, 0, $"subject {i}", $"body {i}"))
+            .Reverse()
+            .ToArray();
+        var reorderedOnResume = sameTimeItems.Skip(1).Append(sameTimeItems[0]).ToArray();
+
+        var oldFirstPage = MailInventoryOrdering.ByCheckpointCursor(sameTimeItems.Take(MailMirrorBackfillService.DefaultPageSize)).ToArray();
+        var oldResume = reorderedOnResume
+            .Where(item => MailMirrorCursor.IsAfter(oldFirstPage[^1].Cursor, item))
+            .ToArray();
+        Assert(oldResume.Length == 0, "Regression setup must demonstrate the old page-before-sort algorithm skips the unseen tied locator.");
+
+        var firstPages = MailInventoryOrdering.BuildPages(
+            new MailInventoryRequest(MailSourceFolder.Inbox, MailMirrorBackfillService.DefaultPageSize),
+            sameTimeItems);
+        var resumedPages = MailInventoryOrdering.BuildPages(
+            new MailInventoryRequest(MailSourceFolder.Inbox, MailMirrorBackfillService.DefaultPageSize, firstPages[0].NextCheckpoint),
+            reorderedOnResume);
+        Assert(
+            resumedPages.SelectMany(page => page.Items).Single().EntryId == "inbox-200",
+            "Expected global cursor ordering to keep the one tied locator after the first page checkpoint.");
+
+        var firstSource = new FakeInventorySource(sameTimeItems)
+        {
+            CancelHydrationAfter = MailMirrorBackfillService.DefaultPageSize
+        };
+        try
+        {
+            await new MailMirrorBackfillService(firstSource, mirror).RunInitialBackfillAsync();
+            Assert(false, "Expected cancellation after the first full equal-timestamp page.");
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected.
+        }
+
+        Assert(firstSource.HydrateCalls.Count == MailMirrorBackfillService.DefaultPageSize, "Expected first page hydrate exactly DefaultPageSize tied items.");
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_messages") == MailMirrorBackfillService.DefaultPageSize, "Expected the first page committed before cancellation.");
+
+        var resumedSource = new FakeInventorySource(reorderedOnResume);
+        await new MailMirrorBackfillService(resumedSource, mirror).RunInitialBackfillAsync();
+
+        var allHydrated = firstSource.HydrateCalls.Concat(resumedSource.HydrateCalls).ToArray();
+        var expectedLocators = sameTimeItems.Select(item => item.Locator).OrderBy(locator => locator.StoreId, StringComparer.Ordinal).ThenBy(locator => locator.EntryId, StringComparer.Ordinal).ToArray();
+        var actualLocators = allHydrated.OrderBy(locator => locator.StoreId, StringComparer.Ordinal).ThenBy(locator => locator.EntryId, StringComparer.Ordinal).ToArray();
+
+        Assert(allHydrated.Length == sameTimeItems.Length, "Expected resume hydrate the one tied item past the first page checkpoint.");
+        Assert(actualLocators.SequenceEqual(expectedLocators), "Expected every equal-timestamp locator hydrated exactly once across resume.");
+        Assert(await QueryScalarIntAsync(dbPath, "SELECT COUNT(*) FROM mail_messages") == sameTimeItems.Length, "Expected every tied message stored exactly once.");
+    }
+    finally
+    {
+        await mirror.DisposeAsync();
+        cleanup();
+    }
+}
+
 static async Task MailMirrorBackfillIsolatesHydrationFailures()
 {
     var (mirror, dbPath, cleanup) = await CreateTempMirrorStoreAsync();
@@ -5437,24 +5500,17 @@ sealed class FakeInventorySource : IMailMirrorInventorySource
         MailInventoryRequest request,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var page = _items
-            .Where(item => item.Folder == request.Folder)
-            .Where(item => request.Checkpoint is null || MailMirrorCursor.IsAfter(request.Checkpoint, item))
-            .OrderBy(item => item.LastModifiedAt)
-            .ThenBy(item => item.StoreId, StringComparer.Ordinal)
-            .ThenBy(item => item.EntryId, StringComparer.Ordinal)
-            .Take(request.PageSize)
-            .ToArray();
-        await Task.Yield();
         var warnings = WarningFolders.Contains(request.Folder)
             ? new[] { new MailMirrorSyncWarning("fake-inventory-warning", CapabilitySeverity.Degraded, "FakeWarning") }
             : null;
-        yield return new MailInventoryPage(
-            request.Folder,
-            page,
-            page.Length == 0 ? request.Checkpoint : page[^1].Cursor,
-            Completed: !IncompleteFolders.Contains(request.Folder),
-            Warnings: warnings);
+        foreach (var page in MailInventoryOrdering.BuildPages(
+                     request,
+                     _items.Where(item => item.Folder == request.Folder),
+                     warnings))
+        {
+            await Task.Yield();
+            yield return page with { Completed = page.Completed && !IncompleteFolders.Contains(request.Folder) };
+        }
     }
 
     public Task<MailMirrorMessage?> HydrateAsync(MailInventoryItem item, CancellationToken cancellationToken = default)
