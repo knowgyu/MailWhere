@@ -51,6 +51,43 @@ public abstract class HttpJsonLlmClient : ILlmClient
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
+
+    protected static object BuildChatResponseFormat(LlmRequestOptions? requestOptions)
+    {
+        if (requestOptions?.JsonSchema is not { } schema
+            || string.IsNullOrWhiteSpace(requestOptions.JsonSchemaName))
+        {
+            return new { type = "json_object" };
+        }
+
+        return new
+        {
+            type = "json_schema",
+            json_schema = new
+            {
+                name = requestOptions.JsonSchemaName,
+                strict = true,
+                schema
+            }
+        };
+    }
+
+    protected static object BuildResponsesTextFormat(LlmRequestOptions? requestOptions)
+    {
+        if (requestOptions?.JsonSchema is not { } schema
+            || string.IsNullOrWhiteSpace(requestOptions.JsonSchemaName))
+        {
+            return new { type = "json_object" };
+        }
+
+        return new
+        {
+            type = "json_schema",
+            name = requestOptions.JsonSchemaName,
+            strict = true,
+            schema
+        };
+    }
 }
 
 public sealed class OllamaLlmClient : HttpJsonLlmClient
@@ -172,7 +209,7 @@ public sealed class OpenAiChatCompletionsLlmClient : HttpJsonLlmClient
             model = Settings.Model,
             temperature = 0.1,
             max_tokens = requestOptions?.MaxOutputTokens ?? 1280,
-            response_format = new { type = "json_object" },
+            response_format = BuildChatResponseFormat(requestOptions),
             messages = new[]
             {
                 new { role = "system", content = systemPrompt },
@@ -216,10 +253,7 @@ public sealed class OpenAiResponsesLlmClient : HttpJsonLlmClient
             max_output_tokens = requestOptions?.MaxOutputTokens ?? 1280,
             text = new
             {
-                format = new
-                {
-                    type = "json_object"
-                }
+                format = BuildResponsesTextFormat(requestOptions)
             },
             input = new object[]
             {

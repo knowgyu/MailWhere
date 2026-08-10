@@ -200,6 +200,9 @@
                                             </ComboBox>
                                         </StackPanel>
                                     </Grid>
+                                    <CheckBox x:Name="LlmFailureFallbackPromptToggle"
+                                              Content="AI 실패 시 규칙 fallback 제안 알림 표시"
+                                              ToolTip="꺼두면 AI 실패는 선택한 'AI 실패 시' 정책대로 처리하며 팝업을 띄우지 않습니다."/>
                                     <StackPanel Orientation="Horizontal">
                                         <Button x:Name="TestConnectionButton" Click="TestConnection_Click" Style="{StaticResource MwButton.Primary}">연결 테스트</Button>
                                         <TextBlock x:Name="LlmStatusText" Text="연결 테스트 전입니다." VerticalAlignment="Center" Foreground="{StaticResource MwBrush.TextMuted}" TextWrapping="Wrap"/>

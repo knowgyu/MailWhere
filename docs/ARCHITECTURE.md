@@ -39,6 +39,13 @@ The Windows app wires this through the existing serialized mail-check lifecycle:
 
 OfficeWhere remains responsible for attachment/document content. contextWhere should receive only selected summaries/locators, not MailWhere full bodies.
 
+## Maintenance guardrails
+
+- Keep the current dependency direction: Core stays provider/UI-agnostic; Outlook COM stays an adapter; SQLite remains the one local persistence dependency. Do not add a coordinator, cache, or dependency unless a repeated production need proves it necessary.
+- `MainWindow` is the WPF composition root. New domain policy belongs in Core and provider-specific I/O belongs in adapters; do not grow a second global application layer merely to move code around.
+- Local LLM analysis defaults to one in-flight request. Preserve bounded retry and per-item split recovery before considering higher concurrency; use the advanced `LlmInitialConcurrency`/`LlmMaxConcurrency` settings only after measuring the server.
+- The mail mirror is idempotent by `(store_id, entry_id)`, writes in small SQLite transactions with checkpoints, and keeps FTS triggers in the same transaction. Preserve those invariants instead of adding a second indexing retry queue.
+
 ## Workspace integration boundary
 
 | Repository | Owns | Stable seam |

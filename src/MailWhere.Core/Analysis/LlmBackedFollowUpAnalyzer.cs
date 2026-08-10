@@ -16,6 +16,56 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private const int DefaultBatchSize = 4;
     private const int MinOutputTokens = 512;
     private const int MaxOutputTokens = 4096;
+    private const int MaxTransientRetryCount = 1;
+    private static readonly TimeSpan TransientRetryDelay = TimeSpan.FromSeconds(1);
+    private static readonly string[] ResultRequiredFields =
+    [
+        "kind", "disposition", "confidence", "suggestedTitle", "reason", "dueAt",
+        "actionOrigin", "currentSenderRequested", "explicitAssignee", "assignedToMailboxUser"
+    ];
+    private static readonly IReadOnlyDictionary<string, object> ResultProperties = new Dictionary<string, object>
+    {
+        ["kind"] = new { type = "string", @enum = new[] { "none", "replyRequired", "actionRequested", "deadline", "promisedByMe", "waitingForReply", "reviewNeeded", "meeting", "calendarEvent" } },
+        ["disposition"] = new { type = "string", @enum = new[] { "ignore", "review", "autoCreateTask" } },
+        ["confidence"] = new { type = "number", minimum = 0, maximum = 1 },
+        ["suggestedTitle"] = new { type = new[] { "string", "null" }, maxLength = 40 },
+        ["reason"] = new { type = "string", maxLength = 60 },
+        ["dueAt"] = new { type = new[] { "string", "null" } },
+        ["actionOrigin"] = new { type = "string", @enum = new[] { "currentMessage", "forwardedContext", "quotedHistory", "none" } },
+        ["currentSenderRequested"] = new { type = "boolean" },
+        ["explicitAssignee"] = new { type = new[] { "string", "null" } },
+        ["assignedToMailboxUser"] = new { type = "boolean" }
+    };
+    private static readonly JsonElement SingleResponseSchema = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        additionalProperties = false,
+        required = ResultRequiredFields,
+        properties = ResultProperties
+    });
+    private static readonly JsonElement BatchResponseSchema = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        additionalProperties = false,
+        required = new[] { "items" },
+        properties = new Dictionary<string, object>
+        {
+            ["items"] = new
+            {
+                type = "array",
+                items = new
+                {
+                    type = "object",
+                    additionalProperties = false,
+                    required = new[] { "id" }.Concat(ResultRequiredFields).ToArray(),
+                    properties = new Dictionary<string, object>(ResultProperties)
+                    {
+                        ["id"] = new { type = "string" }
+                    }
+                }
+            }
+        }
+    });
     private readonly ILlmClient _llmClient;
     private readonly IFollowUpAnalyzer _fallback;
     private readonly LlmFallbackPolicy _fallbackPolicy;
@@ -46,11 +96,11 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var completion = await _llmClient.CompleteJsonAsync(
+            var completion = await CompleteJsonWithRetryAsync(
                 SystemPrompt,
                 BuildPayload(email),
                 cancellationToken,
-                BuildRequestOptions(itemCount: 1)).ConfigureAwait(false);
+                BuildRequestOptions(itemCount: 1, isBatch: false)).ConfigureAwait(false);
             stopwatch.Stop();
             if (TryParse(completion.Content, email, out var parsed))
             {
@@ -85,19 +135,25 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var completion = await _llmClient.CompleteJsonAsync(
+            var completion = await CompleteJsonWithRetryAsync(
                 BatchSystemPrompt,
                 BuildBatchPayload(emails),
                 cancellationToken,
-                BuildRequestOptions(emails.Count)).ConfigureAwait(false);
+                BuildRequestOptions(emails.Count, isBatch: true)).ConfigureAwait(false);
             stopwatch.Stop();
             if (TryParseBatch(completion.Content, emails, out var parsed))
             {
                 var missingItemCount = parsed.Count(item => item.IsTransientLlmFailureReview);
-                RecordBatchCompletion(stopwatch.Elapsed, completion.Diagnostics, parsed.Count - missingItemCount, missingItemCount, "partial-batch");
+                RecordBatchCompletion(stopwatch.Elapsed, completion.Diagnostics, parsed.Count - missingItemCount, 0, "partial-batch");
                 return missingItemCount > 0
-                    ? await ApplyPartialBatchFallbackAsync(emails, parsed, cancellationToken).ConfigureAwait(false)
+                    ? await RetryMissingBatchItemsAsync(emails, parsed, cancellationToken).ConfigureAwait(false)
                     : parsed;
+            }
+
+            if (emails.Count > 1)
+            {
+                RecordBatchCompletion(stopwatch.Elapsed, completion.Diagnostics, 0, 0, "invalid-json");
+                return await RetryBatchIndividuallyAsync(emails, cancellationToken).ConfigureAwait(false);
             }
 
             RecordFailure("invalid-json", stopwatch.Elapsed, completion.Diagnostics, itemCount: emails.Count);
@@ -107,6 +163,12 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         {
             stopwatch.Stop();
             var failureCode = SanitizeFailureCode(ex);
+            if (emails.Count > 1 && IsTransientFailure(ex, cancellationToken))
+            {
+                RecordBatchCompletion(stopwatch.Elapsed, null, 0, 0, failureCode);
+                return await RetryBatchIndividuallyAsync(emails, cancellationToken).ConfigureAwait(false);
+            }
+
             RecordFailure(failureCode, stopwatch.Elapsed, itemCount: emails.Count);
             return await HandleBatchLlmFailureAsync(emails, failureCode, cancellationToken).ConfigureAwait(false);
         }
@@ -128,10 +190,53 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         }
     }
 
-    private static LlmRequestOptions BuildRequestOptions(int itemCount)
+    private static LlmRequestOptions BuildRequestOptions(int itemCount, bool isBatch)
     {
         var maxOutputTokens = Math.Clamp(256 + Math.Max(1, itemCount) * 160, MinOutputTokens, MaxOutputTokens);
-        return new LlmRequestOptions(MaxOutputTokens: maxOutputTokens);
+        return new LlmRequestOptions(
+            MaxOutputTokens: maxOutputTokens,
+            JsonSchemaName: isBatch ? "mailwhere_follow_up_batch" : "mailwhere_follow_up",
+            JsonSchema: isBatch ? BatchResponseSchema : SingleResponseSchema);
+    }
+
+    private async Task<LlmCompletion> CompleteJsonWithRetryAsync(
+        string systemPrompt,
+        string userPayload,
+        CancellationToken cancellationToken,
+        LlmRequestOptions requestOptions)
+    {
+        for (var retryCount = 0; ; retryCount++)
+        {
+            try
+            {
+                return await _llmClient.CompleteJsonAsync(
+                    systemPrompt,
+                    userPayload,
+                    cancellationToken,
+                    requestOptions).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (retryCount < MaxTransientRetryCount && IsTransientFailure(ex, cancellationToken))
+            {
+                await Task.Delay(TransientRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static bool IsTransientFailure(Exception ex, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        if (ex is TaskCanceledException)
+        {
+            return true;
+        }
+
+        return ex is HttpRequestException { StatusCode: null }
+            || ex is HttpRequestException { StatusCode: { } statusCode }
+                && ((int)statusCode == 429 || (int)statusCode >= 500);
     }
 
     private static string BuildPayload(EmailSnapshot email)
@@ -274,23 +379,17 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         return emails.Select(email => BuildFailureReview(email, failureCode)).ToArray();
     }
 
-    private async Task<IReadOnlyList<FollowUpAnalysis>> ApplyPartialBatchFallbackAsync(
+    private async Task<IReadOnlyList<FollowUpAnalysis>> RetryMissingBatchItemsAsync(
         IReadOnlyList<EmailSnapshot> emails,
         IReadOnlyList<FollowUpAnalysis> parsed,
         CancellationToken cancellationToken)
     {
-        if (_fallbackPolicy != LlmFallbackPolicy.LlmThenRules)
-        {
-            return parsed;
-        }
-
         var merged = new List<FollowUpAnalysis>(parsed.Count);
         for (var i = 0; i < parsed.Count; i++)
         {
             if (parsed[i].IsTransientLlmFailureReview)
             {
-                merged.Add(await _fallback.AnalyzeAsync(emails[i], cancellationToken).ConfigureAwait(false));
-                RecordFallback();
+                merged.Add(await AnalyzeAsync(emails[i], cancellationToken).ConfigureAwait(false));
             }
             else
             {
@@ -299,6 +398,19 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         }
 
         return merged;
+    }
+
+    private async Task<IReadOnlyList<FollowUpAnalysis>> RetryBatchIndividuallyAsync(
+        IReadOnlyList<EmailSnapshot> emails,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<FollowUpAnalysis>(emails.Count);
+        foreach (var email in emails)
+        {
+            results.Add(await AnalyzeAsync(email, cancellationToken).ConfigureAwait(false));
+        }
+
+        return results;
     }
 
     private static FollowUpAnalysis BuildFailureReview(EmailSnapshot email, string failureCode)
@@ -324,6 +436,14 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
 
         try
         {
+            using var document = JsonDocument.Parse(raw);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("kind", out _)
+                || !document.RootElement.TryGetProperty("disposition", out _))
+            {
+                return false;
+            }
+
             var response = JsonSerializer.Deserialize<LlmFollowUpResponse>(raw, new JsonSerializerOptions(JsonSerializerDefaults.Web)
             {
                 Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }

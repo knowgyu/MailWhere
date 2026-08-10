@@ -7,7 +7,7 @@
 | Provider | 용도 | Endpoint 예시 |
 | --- | --- | --- |
 | `OllamaNative` | Ollama native `/api/chat` | `http://localhost:11434` |
-| `OpenAiChatCompletions` | OpenAI-compatible `/v1/chat/completions` | `http://localhost:8000` |
+| `OpenAiChatCompletions` | OpenAI-compatible `/v1/chat/completions`; vLLM 권장 | `http://localhost:8000` |
 | `OpenAiResponses` | OpenAI-compatible `/v1/responses` | `http://localhost:8000` |
 
 설정 파일 내부의 `Disabled`는 LLM OFF 상태를 뜻합니다. 기존 설정 파일의 `Ollama`, `OpenAiCompatible` 문자열은 각각 `OllamaNative`, `OpenAiChatCompletions`로 계속 호환됩니다.
@@ -36,7 +36,7 @@ Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다
 - `temperature=0.1`, `top_p=0.9`: strict JSON 분류 안정성을 유지하면서 너무 경직된 샘플링은 피합니다.
 - 기본적으로 `keep_alive`를 보내지 않습니다. MailWhere가 모델 lifetime을 덮어쓰지 않고 Ollama 서버/OpenWebUI/CLI에서 정한 유지 정책을 그대로 따릅니다.
 
-초기/대량 스캔에서는 기본 최대 12건 batch 단위로 여러 메일을 한 번에 분석하고, 메일 본문 길이에 따라 8/4/2/1건으로 자동 축소합니다. scan loop는 준비/중복 확인과 저장을 직렬로 유지하되, 준비된 LLM batch 분석 요청도 기본 1개씩 보내 VRAM이 부족한 로컬 Ollama runner를 흔들지 않도록 합니다. 고급 설정 파일에서 `LlmInitialConcurrency`와 `LlmMaxConcurrency`를 조정할 수 있으며, 둘 다 1~4로 clamp되고 effective concurrency는 `min(initial,max)`입니다. 기존 v0.5.0 기본값으로 저장된 `2/4` 조합은 안정 기본값 `1/1`로 자동 낮춥니다. 병렬 처리가 확실히 유리한 환경에서는 `2/2`처럼 명시적으로 올릴 수 있습니다. 각 메일 결과는 독립 JSON item으로 매핑하며, 마지막 batch가 작거나 모델이 일부 id를 빠뜨려도 전체 스캔을 실패시키지 않고 누락 item만 다시 시도 가능한 AI 분석 실패 항목으로 남깁니다.
+초기/대량 스캔은 기본 최대 4건 batch로 분석하고, 메일이 길면 2건 또는 1건으로 자동 축소합니다. 준비/중복 확인과 저장은 직렬로 유지하고, LLM batch 요청도 기본 1개씩 보내 로컬 서버를 흔들지 않도록 합니다. 고급 설정 파일의 `LlmInitialConcurrency`와 `LlmMaxConcurrency`는 1~4로 clamp되지만, 측정 근거가 없으면 `1/1`을 유지합니다. transient HTTP/timeout은 한 번 재시도하고, batch JSON이 깨지거나 일부 id가 빠지면 실패한 항목만 1개씩 다시 분석합니다.
 
 프롬프트는 cache locality를 고려해 system prompt에 고정 정책/스키마를 두고, user payload는 짧은 metadata 뒤 긴 본문을 마지막 블록에 둡니다. 단일 분석은 final `content`, batch 분석은 final `contents[]`를 사용하며, batch의 `items[]` metadata와 `contents[]` body는 같은 `id`로 연결합니다. 매 호출마다 크게 바뀌는 `now` timestamp 대신 `analysisDate`, `timezone`, `utcOffset`만 전달합니다.
 
@@ -53,6 +53,10 @@ Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다
   "LlmFallbackPolicy": "LlmOnly"
 }
 ```
+
+vLLM에는 Chat Completions를 권장합니다. MailWhere는 단일 결과와 batch `items[]` 결과 각각에 `response_format: json_schema`를 보내 `kind`, `disposition`, `confidence`, `id` 등 출력 계약을 강제합니다. vLLM이 오래되어 `json_schema`를 지원하지 않으면 연결 테스트 또는 첫 분석에서 HTTP 오류가 나므로, 해당 서버를 업그레이드하거나 Responses provider를 명시적으로 선택합니다.
+
+LLM에 원문 전체를 보내지 않습니다. 현재 메일 본문은 최대 1,300자, 현재 발신자의 명시적 전달/대응 요청이 있을 때만 forwarded context는 최대 900자, reply quoted history는 최대 240자로 제한합니다. 전달 본문만의 요청은 자동 업무로 만들지 않습니다.
 
 ## OpenAI-compatible Responses 예시
 
@@ -85,7 +89,7 @@ Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다
 
 스캔 후 앱 상태에는 `LLM 요청/항목/성공/fallback/실패/요청 평균/항목 환산`과 Ollama 응답 메타(총 시간, load, prompt/eval token·duration, thinking 길이)가 compact하게 표시됩니다. 이 통계에는 메일 제목/본문/prompt가 들어가지 않습니다.
 
-LLM 연결 테스트나 스캔 중 LLM 실패가 발생하고 현재 정책이 `LlmOnly`이면, 앱이 “다음 스캔부터 규칙 기반 fallback을 사용할지”를 한 번 물어봅니다. 동의하지 않으면 계속 AI 분석 실패 항목을 확인 필요에 남깁니다. 이 항목은 같은 source에 중복 생성되지 않으며, LLM 연결이 복구되면 확인 필요 창의 **실패한 AI 분석 다시 시도**로 원본 메일을 다시 읽어 처리할 수 있습니다. 재분석이 성공하면 기존 실패 항목은 자동으로 정리됩니다.
+기본값에서는 fallback 제안 팝업을 띄우지 않습니다. 필요하면 설정의 **AI 실패 시 규칙 fallback 제안 알림 표시**를 켜고, 실제 처리 정책은 `AI 실패 시` 선택값으로 정합니다. `LlmOnly`는 실패를 확인 필요에 보관하며, 이 항목은 같은 source에 중복 생성되지 않습니다. LLM 연결이 복구되면 확인 필요 창의 **실패한 AI 분석 다시 시도**로 원본 메일을 다시 읽어 처리할 수 있고, 성공하면 기존 실패 항목은 정리됩니다.
 
 ## 모델 목록 불러오기
 

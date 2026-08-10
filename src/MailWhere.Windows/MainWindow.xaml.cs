@@ -1671,6 +1671,7 @@ public partial class MainWindow : Window
     private void OfferRuleFallbackAfterLlmFailure()
     {
         if (_fallbackPromptShownThisSession
+            || !_settings.ShowLlmFailureFallbackPrompt
             || _settings.LlmFallbackPolicy != LlmFallbackPolicy.LlmOnly
             || !_settings.ExternalLlmEnabled
             || _settings.LlmProvider == LlmProviderKind.Disabled)

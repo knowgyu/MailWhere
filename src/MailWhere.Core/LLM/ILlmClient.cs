@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace MailWhere.Core.LLM;
 
 public sealed record LlmCallDiagnostics(
@@ -64,7 +66,9 @@ public sealed record LlmCompletion(string Content, LlmCallDiagnostics? Diagnosti
 
 public sealed record LlmRequestOptions(
     int? ContextTokens = null,
-    int? MaxOutputTokens = null);
+    int? MaxOutputTokens = null,
+    string? JsonSchemaName = null,
+    JsonElement? JsonSchema = null);
 
 public interface ILlmClient
 {

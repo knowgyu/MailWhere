@@ -62,6 +62,7 @@ public partial class SettingsWindow : Window
         SelectByTag(LlmAuthModeBox, !string.IsNullOrWhiteSpace(settings.LlmApiKey) ? "Direct" : !string.IsNullOrWhiteSpace(settings.LlmApiKeyEnvironmentVariable) ? "Environment" : "None");
         SelectByTag(LlmTimeoutBox, NormalizeTimeout(settings.LlmTimeoutSeconds).ToString());
         SelectByTag(LlmFallbackPolicyBox, settings.LlmFallbackPolicy.ToString());
+        LlmFailureFallbackPromptToggle.IsChecked = settings.ShowLlmFailureFallbackPrompt;
         UpdateAvailability();
     }
 
@@ -98,6 +99,7 @@ public partial class SettingsWindow : Window
             LlmApiKeyEnvironmentVariable: apiKeyEnv,
             LlmTimeoutSeconds: ParseInt(SelectedTag(LlmTimeoutBox), defaults.LlmTimeoutSeconds),
             LlmFallbackPolicy: ParseFallbackPolicy(SelectedTag(LlmFallbackPolicyBox)),
+            ShowLlmFailureFallbackPrompt: LlmFailureFallbackPromptToggle.IsChecked == true,
             LlmInitialConcurrency: _initialSettings.LlmInitialConcurrency,
             LlmMaxConcurrency: _initialSettings.LlmMaxConcurrency,
             RecentScanDays: ParseInt(SelectedTag(RecentRangeBox), defaults.RecentScanDays),
@@ -196,6 +198,7 @@ public partial class SettingsWindow : Window
         LlmAuthModeBox.IsEnabled = llmEnabled;
         LlmTimeoutBox.IsEnabled = llmEnabled;
         LlmFallbackPolicyBox.IsEnabled = llmEnabled;
+        LlmFailureFallbackPromptToggle.IsEnabled = llmEnabled;
         var authMode = SelectedTag(LlmAuthModeBox);
         LlmApiKeyBox.IsEnabled = llmEnabled && string.Equals(authMode, "Direct", StringComparison.OrdinalIgnoreCase);
         LlmApiKeyEnvText.IsEnabled = llmEnabled && string.Equals(authMode, "Environment", StringComparison.OrdinalIgnoreCase);

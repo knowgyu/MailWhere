@@ -85,6 +85,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM success does not pre-run fallback rules", LlmSuccessDoesNotPreRunFallbackRules),
     ("LLM payload includes thread and owner context", LlmPayloadIncludesThreadAndOwnerContext),
     ("LLM payload keeps long content at the bottom", LlmPayloadKeepsLongContentAtTheBottom),
+    ("LLM payload bounds forwarded context", LlmPayloadBoundsForwardedContext),
     ("LLM prompt contains triage policy and few shots", LlmPromptContainsTriagePolicyAndFewShots),
     ("LLM quoted history auto create downgrades to review", LlmQuotedHistoryAutoCreateDowngradesToReview),
     ("LLM explicit other assignee is ignored despite auto create", LlmExplicitOtherAssigneeIsIgnoredDespiteAutoCreate),
@@ -93,6 +94,7 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM only failure creates review candidate", LlmOnlyFailureCreatesReviewCandidate),
     ("LLM timeout becomes retryable review", LlmTimeoutBecomesRetryableReview),
     ("LLM HTTP failure exposes status code", LlmHttpFailureExposesStatusCode),
+    ("LLM transient failure retries once before fallback", LlmTransientFailureRetriesOnceBeforeFallback),
     ("LLM scanner batch size is conservative", LlmScannerBatchSizeIsConservative),
     ("LLM user cancellation propagates", LlmUserCancellationPropagates),
     ("Batch LLM maps results", BatchLlmMapsResults),
@@ -101,7 +103,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Batch LLM accepts raw array output", BatchLlmAcceptsRawArrayOutput),
     ("Batch LLM tolerates missing final item", BatchLlmToleratesMissingFinalItem),
     ("Batch LLM partial failure uses rule fallback when enabled", BatchLlmPartialFailureUsesRuleFallbackWhenEnabled),
-    ("Batch LLM invalid JSON surfaces failure", BatchLlmInvalidJsonSurfacesFailure),
+    ("Batch LLM invalid JSON retries each mail individually", BatchLlmInvalidJsonRetriesEachMailIndividually),
+    ("Batch LLM invalid JSON split retry recovers", BatchLlmInvalidJsonSplitRetryRecovers),
     ("Batch LLM rejects one-based ids", BatchLlmRejectsOneBasedIds),
     ("Batch LLM rejects duplicate ids", BatchLlmRejectsDuplicateIds),
     ("LLM failure review candidate retries after recovery", LlmFailureReviewCandidateRetriesAfterRecovery),
@@ -847,6 +850,7 @@ static Task RuntimeSettingsDefaultUnlimitedRecentScan()
     Assert(defaults.RecentScanMaxItems == 0, "Expected default scan max to mean unlimited.");
     Assert(defaults.AutomaticScanIntervalMinutes == 15, "Expected automatic scan interval default.");
     Assert(defaults.LlmFallbackPolicy == LlmFallbackPolicy.LlmOnly, "Expected default LLM failure handling to require explicit fallback consent.");
+    Assert(!defaults.ShowLlmFailureFallbackPrompt, "Expected LLM fallback suggestion popups to stay off by default.");
     Assert(defaults.WindowsStartupRequested, "Expected startup tray registration to be requested by default.");
     Assert(defaults.LlmEndpoint.Length == 0, "Expected default LLM endpoint to stay empty until user input.");
     Assert(defaults.LlmModel.Length == 0, "Expected default LLM model to stay empty until model discovery or user input.");
@@ -1359,6 +1363,37 @@ static async Task LlmPayloadKeepsLongContentAtTheBottom()
     Assert(content.GetProperty("currentMessage").GetString()?.Contains("본문 상단 요청", StringComparison.Ordinal) == true, "Expected current message in content block.");
 }
 
+static async Task LlmPayloadBoundsForwardedContext()
+{
+    var llm = new FakeLlmClient("""
+        {
+          "kind": "actionRequested",
+          "disposition": "review",
+          "confidence": 0.7,
+          "suggestedTitle": "고객 요청 검토",
+          "reason": "전달된 고객 요청 검토 필요",
+          "dueAt": null,
+          "actionOrigin": "forwardedContext",
+          "currentSenderRequested": true,
+          "explicitAssignee": null,
+          "assignedToMailboxUser": true
+        }
+        """);
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm);
+    var forwarded = new string('가', 2_000);
+
+    await analyzer.AnalyzeAsync(Mail(
+        "FW: 고객 요청",
+        $"아래 고객 요청을 검토 후 회신 부탁드립니다.\n\n-----Original Message-----\nFrom: customer@example.com\n{forwarded}"));
+
+    using var payload = JsonDocument.Parse(llm.LastUserPayload ?? "{}");
+    var content = payload.RootElement.GetProperty("content");
+    var flags = payload.RootElement.GetProperty("contextFlags");
+    Assert(flags.GetProperty("currentSenderDelegatesForwardedContext").GetBoolean(), "Expected explicit current-sender delegation flag.");
+    Assert(content.GetProperty("forwardedContext").GetString()!.Length <= 901, "Expected forwarded context capped before the LLM call.");
+    Assert(content.GetProperty("quotedHistoryPreview").ValueKind == JsonValueKind.Null, "Forwarded context must not also be sent as quoted history.");
+}
+
 static async Task LlmPromptContainsTriagePolicyAndFewShots()
 {
     var llm = new FakeLlmClient("""
@@ -1534,6 +1569,32 @@ static async Task LlmHttpFailureExposesStatusCode()
     Assert(telemetry.ToKoreanSummary().Contains("요청 한도", StringComparison.Ordinal), "Expected telemetry to explain rate-limit failures.");
 }
 
+static async Task LlmTransientFailureRetriesOnceBeforeFallback()
+{
+    var llm = new FailOnceLlmClient(new LlmCompletion("""
+        {
+          "kind": "actionRequested",
+          "disposition": "autoCreateTask",
+          "confidence": 0.9,
+          "suggestedTitle": "자료 확인",
+          "reason": "확인 요청",
+          "dueAt": null,
+          "actionOrigin": "currentMessage",
+          "currentSenderRequested": true,
+          "explicitAssignee": null,
+          "assignedToMailboxUser": true
+        }
+        """));
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
+
+    var result = await analyzer.AnalyzeAsync(Mail("자료 요청", "자료 확인 부탁드립니다."));
+    var telemetry = analyzer.GetTelemetrySnapshot();
+
+    Assert(result.Disposition == AnalysisDisposition.AutoCreateTask, "Expected the retry to preserve the LLM result.");
+    Assert(llm.CallCount == 2, "Expected exactly one retry after a transient failure.");
+    Assert(telemetry.LlmFailureCount == 0, "Recovered retry should not become a fallback failure.");
+}
+
 static Task LlmScannerBatchSizeIsConservative()
 {
     var analyzer = new LlmBackedFollowUpAnalyzer(new FakeLlmClient("{}"), new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
@@ -1649,6 +1710,9 @@ static async Task BatchLlmPassesAdaptiveRequestOptionsAndPromptLimits()
 
     Assert(llm.LastRequestOptions?.ContextTokens is null, "Batch requests should inherit Ollama/server context by default.");
     Assert(llm.LastRequestOptions?.MaxOutputTokens == 2176, "Expected adaptive batch output token budget.");
+    Assert(llm.LastRequestOptions?.JsonSchemaName == "mailwhere_follow_up_batch", "Expected batch JSON Schema name.");
+    Assert(llm.LastRequestOptions?.JsonSchema is { } batchSchema
+           && batchSchema.GetProperty("properties").TryGetProperty("items", out _), "Expected batch JSON Schema items contract.");
 
     var prompt = llm.LastSystemPrompt ?? string.Empty;
     Assert(prompt.Contains("suggestedTitle", StringComparison.Ordinal), "Expected title schema.");
@@ -1845,7 +1909,7 @@ static async Task BatchLlmPartialFailureUsesRuleFallbackWhenEnabled()
     Assert(telemetry.LlmFallbackCount == 1, "Expected one fallback for the missing batch item.");
 }
 
-static async Task BatchLlmInvalidJsonSurfacesFailure()
+static async Task BatchLlmInvalidJsonRetriesEachMailIndividually()
 {
     var llm = new FakeLlmClient("not-json");
     var analyzer = new LlmBackedFollowUpAnalyzer(llm, new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
@@ -1861,10 +1925,57 @@ static async Task BatchLlmInvalidJsonSurfacesFailure()
 
     Assert(results.Count == 4, "Expected one failure result per input.");
     Assert(results.All(item => item.IsTransientLlmFailureReview), "Invalid batch JSON must surface retryable LLM failure reviews.");
-    Assert(telemetry.LlmRequestCount == 1, "Expected no split retry masking the invalid JSON evidence.");
+    Assert(telemetry.LlmRequestCount == 5, "Expected the failed batch plus one individual retry per mail.");
     Assert(telemetry.LlmAttemptCount == 4, "Expected failed batch item attempts to be counted.");
     Assert(telemetry.LlmFailureCount == 4, "Expected invalid JSON to count each batch item as LLM failure.");
     Assert(telemetry.LastFailureCode == "invalid-json", "Expected invalid-json failure code to remain visible.");
+}
+
+static async Task BatchLlmInvalidJsonSplitRetryRecovers()
+{
+    const string firstResult = """
+        {
+          "kind": "actionRequested",
+          "disposition": "autoCreateTask",
+          "confidence": 0.9,
+          "suggestedTitle": "자료 확인",
+          "reason": "확인 요청",
+          "dueAt": null,
+          "actionOrigin": "currentMessage",
+          "currentSenderRequested": true,
+          "explicitAssignee": null,
+          "assignedToMailboxUser": true
+        }
+        """;
+    const string secondResult = """
+        {
+          "kind": "none",
+          "disposition": "ignore",
+          "confidence": 0.8,
+          "suggestedTitle": "",
+          "reason": "공지",
+          "dueAt": null,
+          "actionOrigin": "none",
+          "currentSenderRequested": false,
+          "explicitAssignee": null,
+          "assignedToMailboxUser": true
+        }
+        """;
+    var llm = new FakeLlmClient(new LlmCompletion("not-json"), new LlmCompletion(firstResult), new LlmCompletion(secondResult));
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, new RuleBasedFollowUpAnalyzer(), LlmFallbackPolicy.LlmOnly);
+
+    var results = await analyzer.AnalyzeBatchAsync(new[]
+    {
+        Mail("자료 요청", "자료 확인 부탁드립니다.", "split-retry-1"),
+        Mail("공지", "참고만 해주세요.", "split-retry-2")
+    });
+    var telemetry = analyzer.GetTelemetrySnapshot();
+
+    Assert(results[0].Disposition == AnalysisDisposition.AutoCreateTask, "Expected the first individual retry to recover.");
+    Assert(results[1].Disposition == AnalysisDisposition.Ignore, "Expected the second individual retry to recover.");
+    Assert(telemetry.LlmFailureCount == 0, "Recovered split retries should not create fallback failures.");
+    Assert(telemetry.LlmFallbackCount == 0, "Recovered split retries must not invoke rule fallback.");
+    Assert(telemetry.LlmRequestCount == 3, "Expected one failed batch and two individual retries.");
 }
 
 static async Task BatchLlmRejectsOneBasedIds()
@@ -2246,6 +2357,18 @@ static async Task OpenAiCompatibleClientsHonorOutputTokenRequestOptions()
     using var chatRequest = JsonDocument.Parse(chatHandler.LastRequestBody ?? "{}");
     Assert(chatRequest.RootElement.GetProperty("max_tokens").GetInt32() == 1536, "Expected Chat Completions max_tokens from request options.");
     Assert(!chatRequest.RootElement.TryGetProperty("num_ctx", out _), "OpenAI-compatible body must not include Ollama context option.");
+
+    await chatClient.CompleteJsonAsync(
+        "system",
+        "user",
+        requestOptions: new LlmRequestOptions(
+            JsonSchemaName: "mailwhere_test",
+            JsonSchema: JsonSerializer.SerializeToElement(new { type = "object", additionalProperties = false, properties = new { ok = new { type = "boolean" } }, required = new[] { "ok" } })));
+
+    using var structuredChatRequest = JsonDocument.Parse(chatHandler.LastRequestBody ?? "{}");
+    var responseFormat = structuredChatRequest.RootElement.GetProperty("response_format");
+    Assert(responseFormat.GetProperty("type").GetString() == "json_schema", "Expected Chat Completions JSON Schema format.");
+    Assert(responseFormat.GetProperty("json_schema").GetProperty("schema").GetProperty("required")[0].GetString() == "ok", "Expected schema sent to the OpenAI-compatible server.");
 
     var responsesSettings = chatSettings with { Provider = LlmProviderKind.OpenAiResponses };
     var responsesHandler = new StubHttpMessageHandler("""
@@ -5241,6 +5364,30 @@ sealed class ThrowingLlmClient : ILlmClient
         CancellationToken cancellationToken = default,
         LlmRequestOptions? requestOptions = null) =>
         Task.FromException<LlmCompletion>(_exception);
+}
+
+sealed class FailOnceLlmClient : ILlmClient
+{
+    private readonly LlmCompletion _success;
+
+    public FailOnceLlmClient(LlmCompletion success)
+    {
+        _success = success;
+    }
+
+    public int CallCount { get; private set; }
+
+    public Task<LlmCompletion> CompleteJsonAsync(
+        string systemPrompt,
+        string userPayload,
+        CancellationToken cancellationToken = default,
+        LlmRequestOptions? requestOptions = null)
+    {
+        CallCount++;
+        return CallCount == 1
+            ? Task.FromException<LlmCompletion>(new HttpRequestException("busy", null, HttpStatusCode.TooManyRequests))
+            : Task.FromResult(_success);
+    }
 }
 
 sealed class ThrowingAnalyzer : IFollowUpAnalyzer
