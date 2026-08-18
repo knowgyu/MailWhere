@@ -11,18 +11,47 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var launchMode = StartupLaunchModeResolver.FromArgs(e.Args);
+        if (launchMode == StartupLaunchMode.OpenSourceToken)
+        {
+            _ = OpenSourceTokenAndShutdownAsync(e.Args);
+            return;
+        }
+
         var mainWindow = new MainWindow();
         MainWindow = mainWindow;
         _trayHost = new TrayHost(mainWindow);
         mainWindow.SetNotificationSink(_trayHost);
         mainWindow.SyncStartupRegistration();
-        var launchMode = StartupLaunchModeResolver.FromArgs(e.Args);
         if (launchMode == StartupLaunchMode.ShowMainWindow)
         {
             mainWindow.ShowShell(refresh: false);
         }
 
         _ = StartBackgroundSafelyAsync(mainWindow);
+    }
+
+    private async Task OpenSourceTokenAndShutdownAsync(string[] args)
+    {
+        try
+        {
+            if (!StartupLaunchModeResolver.TryGetOpenSourceToken(args, out var token))
+            {
+                Environment.ExitCode = 64;
+                return;
+            }
+
+            await OpenSourceTokenLaunchHandler.OpenAsync(token).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            Environment.ExitCode = 2;
+            System.Windows.MessageBox.Show($"MailWhere could not open the original mail: {ex.GetType().Name}", "MailWhere open source token", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            Shutdown(Environment.ExitCode);
+        }
     }
 
     private static async Task StartBackgroundSafelyAsync(MainWindow mainWindow)

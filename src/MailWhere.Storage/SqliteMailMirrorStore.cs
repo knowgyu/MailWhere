@@ -42,6 +42,8 @@ public sealed class SqliteMailMirrorStore : IMailMirrorStore
             await ExecuteAsync(connection, "PRAGMA busy_timeout=5000;", cancellationToken).ConfigureAwait(false);
             _tokenizer = await ChooseTokenizerAsync(connection, cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, MailMirrorSchema.TablesSql, cancellationToken).ConfigureAwait(false);
+            await EnsureOpenSourceTokenColumnAsync(connection, cancellationToken).ConfigureAwait(false);
+            await BackfillOpenSourceTokensAsync(connection, cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, MailMirrorSchema.FtsSql(_tokenizer), cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, MailMirrorSchema.TriggersSql, cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, MailMirrorSchema.IndexesSql, cancellationToken).ConfigureAwait(false);
@@ -230,6 +232,43 @@ public sealed class SqliteMailMirrorStore : IMailMirrorStore
         }
     }
 
+    public async Task<MailMirrorLocator?> ResolveOpenSourceTokenAsync(string openSourceToken, CancellationToken cancellationToken = default)
+    {
+        if (!MailMirrorOpenSourceToken.IsValid(openSourceToken))
+        {
+            return null;
+        }
+
+        await _readerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var connection = await GetReaderConnectionAsync(cancellationToken).ConfigureAwait(false);
+            if (!await ColumnExistsAsync(connection, "mail_messages", "open_source_token", cancellationToken).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            var command = connection.CreateCommand();
+            command.CommandText = "SELECT store_id, entry_id FROM mail_messages WHERE open_source_token = $token LIMIT 2";
+            command.Parameters.AddWithValue("$token", openSourceToken.Trim());
+
+            MailMirrorLocator? match = null;
+            var count = 0;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                match = new MailMirrorLocator(reader.GetString(0), reader.GetString(1));
+                count++;
+            }
+
+            return count == 1 ? match : null;
+        }
+        finally
+        {
+            _readerGate.Release();
+        }
+    }
+
     public async Task<string?> GetCheckpointAsync(string folder, CancellationToken cancellationToken = default)
     {
         await _readerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -326,10 +365,13 @@ public sealed class SqliteMailMirrorStore : IMailMirrorStore
         }
 
         AddFilters(command, request, where);
+        var tokenProjection = await ColumnExistsAsync(connection, "mail_messages", "open_source_token", cancellationToken).ConfigureAwait(false)
+            ? "m.open_source_token"
+            : "NULL";
         var limit = Math.Clamp(request.Limit <= 0 ? 20 : request.Limit, 1, MaxSearchLimit);
         command.Parameters.AddWithValue("$limit", limit);
         command.CommandText = $"""
-            SELECT m.store_id, m.entry_id, m.folder, m.subject, m.sender_display,
+            SELECT m.store_id, m.entry_id, {tokenProjection}, m.folder, m.subject, m.sender_display,
                    m.received_at, m.sent_at, m.conversation_id, substr(m.body_text, 1, 160) AS snippet
             FROM {from}
             {(where.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", where))}
@@ -343,16 +385,33 @@ public sealed class SqliteMailMirrorStore : IMailMirrorStore
         {
             results.Add(new MailMirrorSearchResult(
                 new MailMirrorLocator(reader.GetString(0), reader.GetString(1)),
-                Enum.TryParse<MailSourceFolder>(reader.GetString(2), out var folder) ? folder : MailSourceFolder.Inbox,
-                reader.GetString(3),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                Enum.TryParse<MailSourceFolder>(reader.GetString(3), out var folder) ? folder : MailSourceFolder.Inbox,
                 reader.GetString(4),
-                ReadDate(reader, 5),
+                reader.GetString(5),
                 ReadDate(reader, 6),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
-                reader.IsDBNull(8) ? string.Empty : reader.GetString(8)));
+                ReadDate(reader, 7),
+                reader.IsDBNull(8) ? null : reader.GetString(8),
+                reader.IsDBNull(9) ? string.Empty : reader.GetString(9)));
         }
 
         return results;
+    }
+
+    private static async Task<bool> ColumnExistsAsync(SqliteConnection connection, string tableName, string columnName, CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void AddFilters(SqliteCommand command, MailMirrorSearchRequest request, List<string> where)
@@ -388,6 +447,100 @@ public sealed class SqliteMailMirrorStore : IMailMirrorStore
         }
     }
 
+    private static async Task EnsureOpenSourceTokenColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        if (await ColumnExistsAsync(connection, "mail_messages", "open_source_token", cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        await ExecuteAsync(connection, "ALTER TABLE mail_messages ADD COLUMN open_source_token TEXT NULL;", cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task BackfillOpenSourceTokensAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var rows = new List<(long Id, string StoreId, string EntryId)>();
+        var select = connection.CreateCommand();
+        select.CommandText = "SELECT id, store_id, entry_id FROM mail_messages WHERE open_source_token IS NULL OR open_source_token = '' ORDER BY id";
+        await using (var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                rows.Add((reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
+            }
+        }
+
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        using var transaction = connection.BeginTransaction();
+        foreach (var row in rows)
+        {
+            var token = await CreateUniqueOpenSourceTokenAsync(connection, transaction, row.StoreId, row.EntryId, cancellationToken).ConfigureAwait(false);
+            var update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = "UPDATE mail_messages SET open_source_token = $token WHERE id = $id";
+            update.Parameters.AddWithValue("$token", token);
+            update.Parameters.AddWithValue("$id", row.Id);
+            await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<string> GetOrCreateOpenSourceTokenAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string storeId,
+        string entryId,
+        CancellationToken cancellationToken)
+    {
+        var existing = connection.CreateCommand();
+        existing.Transaction = transaction;
+        existing.CommandText = "SELECT open_source_token FROM mail_messages WHERE store_id = $store AND entry_id = $entry";
+        existing.Parameters.AddWithValue("$store", storeId.Trim());
+        existing.Parameters.AddWithValue("$entry", entryId.Trim());
+        var value = Convert.ToString(await existing.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        if (MailMirrorOpenSourceToken.IsValid(value))
+        {
+            return value!;
+        }
+
+        return await CreateUniqueOpenSourceTokenAsync(connection, transaction, storeId, entryId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<string> CreateUniqueOpenSourceTokenAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string storeId,
+        string entryId,
+        CancellationToken cancellationToken)
+    {
+        for (var nonce = 0; nonce < 16; nonce++)
+        {
+            var token = MailMirrorOpenSourceToken.Create(storeId, entryId, nonce);
+            var owner = connection.CreateCommand();
+            owner.Transaction = transaction;
+            owner.CommandText = "SELECT store_id, entry_id FROM mail_messages WHERE open_source_token = $token LIMIT 1";
+            owner.Parameters.AddWithValue("$token", token);
+            await using var reader = await owner.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                return token;
+            }
+
+            if (string.Equals(reader.GetString(0), storeId.Trim(), StringComparison.Ordinal)
+                && string.Equals(reader.GetString(1), entryId.Trim(), StringComparison.Ordinal))
+            {
+                return token;
+            }
+        }
+
+        throw new InvalidOperationException("Could not allocate a unique mail open token.");
+    }
+
     private static async Task<int> UpsertAsync(SqliteConnection connection, SqliteTransaction transaction, MailMirrorMessage message, CancellationToken cancellationToken)
     {
         if (!message.Locator.IsValid)
@@ -397,16 +550,18 @@ public sealed class SqliteMailMirrorStore : IMailMirrorStore
 
         var now = DateTimeOffset.UtcNow.ToString("O");
         var normalizedBody = MailMirrorText.Normalize(message.BodyText);
+        var openSourceToken = await GetOrCreateOpenSourceTokenAsync(connection, transaction, message.StoreId, message.EntryId, cancellationToken).ConfigureAwait(false);
         var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO mail_messages
-            (store_id, entry_id, folder, received_at, sent_at, last_modified_at, conversation_id,
+            (store_id, entry_id, open_source_token, folder, received_at, sent_at, last_modified_at, conversation_id,
              subject, sender_display, recipients_text, body_text, body_hash, created_at, updated_at)
             VALUES
-            ($store, $entry, $folder, $received, $sent, $modified, $conversation,
+            ($store, $entry, $token, $folder, $received, $sent, $modified, $conversation,
              $subject, $sender, $recipients, $body, $hash, $created, $updated)
             ON CONFLICT(store_id, entry_id) DO UPDATE SET
+                open_source_token = COALESCE(mail_messages.open_source_token, excluded.open_source_token),
                 folder = excluded.folder,
                 received_at = excluded.received_at,
                 sent_at = excluded.sent_at,
@@ -421,6 +576,7 @@ public sealed class SqliteMailMirrorStore : IMailMirrorStore
             """;
         command.Parameters.AddWithValue("$store", message.StoreId.Trim());
         command.Parameters.AddWithValue("$entry", message.EntryId.Trim());
+        command.Parameters.AddWithValue("$token", openSourceToken);
         command.Parameters.AddWithValue("$folder", message.Folder.ToString());
         command.Parameters.AddWithValue("$received", (object?)message.ReceivedAt?.ToString("O") ?? DBNull.Value);
         command.Parameters.AddWithValue("$sent", (object?)message.SentAt?.ToString("O") ?? DBNull.Value);

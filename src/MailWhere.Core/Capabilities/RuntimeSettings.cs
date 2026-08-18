@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MailWhere.Core.Analysis;
@@ -22,6 +25,12 @@ public sealed record RuntimeSettings(
     int LlmTimeoutSeconds,
     LlmFallbackPolicy LlmFallbackPolicy,
     bool ShowLlmFailureFallbackPrompt,
+    LlmThinkingControlMode LlmThinkingControlMode,
+    LlmStructuredOutputMode LlmStructuredOutputMode,
+    double LlmTemperature,
+    int LlmMaxOutputTokens,
+    int LlmBatchSize,
+    LlmProbeProof? LastSuccessfulLlmProbeProof,
     int LlmInitialConcurrency,
     int LlmMaxConcurrency,
     int RecentScanDays,
@@ -46,6 +55,12 @@ public sealed record RuntimeSettings(
         LlmTimeoutSeconds: 90,
         LlmFallbackPolicy: LlmFallbackPolicy.LlmOnly,
         ShowLlmFailureFallbackPrompt: false,
+        LlmThinkingControlMode: LlmThinkingControlMode.Auto,
+        LlmStructuredOutputMode: LlmStructuredOutputMode.JsonSchema,
+        LlmTemperature: 0.1,
+        LlmMaxOutputTokens: 0,
+        LlmBatchSize: 4,
+        LastSuccessfulLlmProbeProof: null,
         LlmInitialConcurrency: 1,
         LlmMaxConcurrency: 1,
         RecentScanDays: 30,
@@ -61,6 +76,44 @@ public sealed record RuntimeSettings(
         LlmModel,
         ResolveApiKey(),
         LlmTimeoutSeconds);
+
+    public LlmAnalysisSettings ToLlmAnalysisSettings() => new(
+        ResolveAnalyzedThinkingControlMode(),
+        LlmStructuredOutputMode,
+        LlmTemperature,
+        LlmMaxOutputTokens,
+        LlmBatchSize);
+
+    public LlmAnalysisSettings ToConfiguredLlmAnalysisSettings() => new(
+        LlmThinkingControlMode,
+        LlmStructuredOutputMode,
+        LlmTemperature,
+        LlmMaxOutputTokens,
+        LlmBatchSize);
+
+    private LlmThinkingControlMode ResolveAnalyzedThinkingControlMode() =>
+        LlmThinkingControlMode == LlmThinkingControlMode.Auto && HasCurrentLlmProbeProof()
+            ? LastSuccessfulLlmProbeProof!.SelectedThinkingControlMode
+            : LlmThinkingControlMode;
+
+    public string CurrentLlmProbeFingerprint() => LlmProbeProof.BuildFingerprint(
+        LlmProvider,
+        LlmEndpoint,
+        LlmModel,
+        LlmThinkingControlMode,
+        LlmStructuredOutputMode,
+        LlmTemperature,
+        LlmMaxOutputTokens,
+        LlmBatchSize);
+
+    public bool HasCurrentLlmProbeProof() =>
+        LastSuccessfulLlmProbeProof?.Fingerprint == CurrentLlmProbeFingerprint()
+        && LastSuccessfulLlmProbeProof.SelectedThinkingControlMode is LlmThinkingControlMode.EnableThinkingFalse or LlmThinkingControlMode.ReasoningEffortNone
+        && (LlmThinkingControlMode == LlmThinkingControlMode.Auto
+            || LastSuccessfulLlmProbeProof.SelectedThinkingControlMode == LlmThinkingControlMode);
+
+    public RuntimeSettings WithSuccessfulLlmProbeProof(DateTimeOffset probedAt, LlmThinkingControlMode selectedThinkingControlMode) =>
+        this with { LastSuccessfulLlmProbeProof = LlmProbeProof.FromSettings(this, probedAt, selectedThinkingControlMode) };
 
     private string? ResolveApiKey()
     {
@@ -79,6 +132,48 @@ public sealed record RuntimeSettings(
     }
 }
 
+public sealed record LlmProbeProof(
+    string Fingerprint,
+    DateTimeOffset ProbedAt,
+    string Provider,
+    string Model,
+    LlmThinkingControlMode SelectedThinkingControlMode)
+{
+    public static LlmProbeProof FromSettings(RuntimeSettings settings, DateTimeOffset probedAt, LlmThinkingControlMode selectedThinkingControlMode) => new(
+        settings.CurrentLlmProbeFingerprint(),
+        probedAt,
+        settings.LlmProvider.ToString(),
+        settings.LlmModel,
+        selectedThinkingControlMode);
+
+    public static string BuildFingerprint(
+        LlmProviderKind provider,
+        string endpoint,
+        string model,
+        LlmThinkingControlMode thinkingControlMode,
+        LlmStructuredOutputMode structuredOutputMode,
+        double temperature,
+        int maxOutputTokens,
+        int batchSize)
+    {
+        var normalized = string.Join("\n", new[]
+        {
+            provider.ToString(),
+            NormalizeEndpoint(endpoint),
+            model.Trim(),
+            thinkingControlMode.ToString(),
+            structuredOutputMode.ToString(),
+            temperature.ToString("0.###", CultureInfo.InvariantCulture),
+            maxOutputTokens.ToString(CultureInfo.InvariantCulture),
+            batchSize.ToString(CultureInfo.InvariantCulture)
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
+    }
+
+    private static string NormalizeEndpoint(string endpoint) =>
+        string.IsNullOrWhiteSpace(endpoint) ? string.Empty : endpoint.Trim().TrimEnd('/').ToLowerInvariant();
+}
+
 public sealed record PartialRuntimeSettings(
     bool? ManagedMode = null,
     bool? ExternalLlmEnabled = null,
@@ -95,6 +190,12 @@ public sealed record PartialRuntimeSettings(
     int? LlmTimeoutSeconds = null,
     LlmFallbackPolicy? LlmFallbackPolicy = null,
     bool? ShowLlmFailureFallbackPrompt = null,
+    LlmThinkingControlMode? LlmThinkingControlMode = null,
+    LlmStructuredOutputMode? LlmStructuredOutputMode = null,
+    double? LlmTemperature = null,
+    int? LlmMaxOutputTokens = null,
+    int? LlmBatchSize = null,
+    LlmProbeProof? LastSuccessfulLlmProbeProof = null,
     int? LlmInitialConcurrency = null,
     int? LlmMaxConcurrency = null,
     int? RecentScanDays = null,
@@ -105,7 +206,7 @@ public sealed record PartialRuntimeSettings(
 
 public static class RuntimeSettingsSerializer
 {
-    private const int MaxLlmConcurrency = 4;
+    private const int MaxLlmConcurrency = 1;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -139,6 +240,11 @@ public static class RuntimeSettingsSerializer
         var defaults = RuntimeSettings.ManagedSafeDefault;
         var llmInitialConcurrency = Clamp(partial?.LlmInitialConcurrency, 1, MaxLlmConcurrency, defaults.LlmInitialConcurrency);
         var llmMaxConcurrency = Clamp(partial?.LlmMaxConcurrency, 1, MaxLlmConcurrency, defaults.LlmMaxConcurrency);
+        var llmThinkingMode = partial?.LlmThinkingControlMode ?? defaults.LlmThinkingControlMode;
+        var llmStructuredMode = partial?.LlmStructuredOutputMode ?? defaults.LlmStructuredOutputMode;
+        var llmTemperature = ClampDouble(partial?.LlmTemperature, 0, 2, defaults.LlmTemperature);
+        var llmMaxOutputTokens = Clamp(partial?.LlmMaxOutputTokens, 0, 8192, defaults.LlmMaxOutputTokens);
+        var llmBatchSize = Clamp(partial?.LlmBatchSize, 1, 16, defaults.LlmBatchSize);
         if (partial?.LlmInitialConcurrency == 2 && partial?.LlmMaxConcurrency == 4)
         {
             // v0.5.0 serialized this pair as the default. Treat it as a
@@ -147,7 +253,7 @@ public static class RuntimeSettingsSerializer
             llmInitialConcurrency = defaults.LlmInitialConcurrency;
             llmMaxConcurrency = defaults.LlmMaxConcurrency;
         }
-        return new RuntimeSettings(
+        var merged = new RuntimeSettings(
             ManagedMode: partial?.ManagedMode ?? defaults.ManagedMode,
             ExternalLlmEnabled: partial?.ExternalLlmEnabled ?? defaults.ExternalLlmEnabled,
             WindowsStartupRequested: partial?.WindowsStartupRequested ?? defaults.WindowsStartupRequested,
@@ -163,6 +269,12 @@ public static class RuntimeSettingsSerializer
             LlmTimeoutSeconds: Clamp(partial?.LlmTimeoutSeconds, 5, 180, defaults.LlmTimeoutSeconds),
             LlmFallbackPolicy: partial?.LlmFallbackPolicy ?? defaults.LlmFallbackPolicy,
             ShowLlmFailureFallbackPrompt: partial?.ShowLlmFailureFallbackPrompt ?? defaults.ShowLlmFailureFallbackPrompt,
+            LlmThinkingControlMode: llmThinkingMode,
+            LlmStructuredOutputMode: llmStructuredMode,
+            LlmTemperature: llmTemperature,
+            LlmMaxOutputTokens: llmMaxOutputTokens,
+            LlmBatchSize: llmBatchSize,
+            LastSuccessfulLlmProbeProof: partial?.LastSuccessfulLlmProbeProof,
             LlmInitialConcurrency: llmInitialConcurrency,
             LlmMaxConcurrency: llmMaxConcurrency,
             RecentScanDays: Clamp(partial?.RecentScanDays, 1, 90, defaults.RecentScanDays),
@@ -170,10 +282,19 @@ public static class RuntimeSettingsSerializer
             ReminderLookAheadHours: Clamp(partial?.ReminderLookAheadHours, 0, 24 * 14, defaults.ReminderLookAheadHours),
             DailyBoardTime: DailyBoardPlanner.NormalizeDailyBoardTime(partial?.DailyBoardTime),
             DailyBoardStartupDelayMinutes: Clamp(partial?.DailyBoardStartupDelayMinutes, 0, 120, defaults.DailyBoardStartupDelayMinutes));
+
+        return merged.HasCurrentLlmProbeProof()
+            ? merged
+            : merged with { LastSuccessfulLlmProbeProof = null };
     }
 
     private static int Clamp(int? value, int min, int max, int fallback) =>
         value is null ? fallback : Math.Clamp(value.Value, min, max);
+
+    private static double ClampDouble(double? value, double min, double max, double fallback) =>
+        value is null || double.IsNaN(value.Value) || double.IsInfinity(value.Value)
+            ? fallback
+            : Math.Clamp(value.Value, min, max);
 }
 
 public sealed record RuntimeGateSnapshot(CapabilityReport CapabilityReport, GateResult AutomaticWatcherGate);

@@ -33,10 +33,10 @@ It runs on:
 The workflow performs the Windows verification path and uploads:
 
 ```text
-artifacts/MailWhere-v0.12.1-win-x64-portable.zip
+artifacts/MailWhere-v0.13.0-win-x64-portable.zip
 ```
 
-The zip contains the published app, the read-only CLI provider, a portable README, curated operational docs, the README SVG logo, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`. Historical plans, reviews, screenshots, and unused logo variants stay in the repository rather than the package.
+The zip contains the published app, the read-only CLI provider, the bundled `skills/mailwhere/**` tree, a portable README, curated operational docs, the README SVG logo, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`. Historical plans, reviews, screenshots, `.omx` runtime files, and unused logo variants stay in the repository rather than the package.
 
 Before compression, the publish scripts update only the published `MailWhere.exe` modified time. This makes the executable easier to find when users extract the portable folder and sort by recent modified time. No helper touch script is copied into the release payload.
 
@@ -66,6 +66,37 @@ Safety boundaries:
 - CLI read commands do not initialize schema and do not create the database.
 - Missing DB returns JSON error code `database-not-found` with exit code `2`.
 - Exported JSON omits raw body, source id/hash, evidence snippet, full recipient lists, prompt logs, and API keys.
+- CLI/skill/exported normal outputs may include `open_source_token` for explicit source-open, but they do not expose StoreID, EntryID, source id, or source hash.
+
+Explicit source-open for automation goes through the Windows app boundary:
+
+```powershell
+.\MailWhere.exe --open-source-token <token>
+```
+
+The token is opaque and must be resolved locally by MailWhere. This Windows-only command is the only supported Skill launch path for original-open and must be smoke-tested with Classic Outlook on the target PC. Internal WPF/Outlook adapter code may keep raw locator values inside the trusted local process/database boundary, but the portable CLI/skill/export surfaces must never emit them.
+
+## Bundled MailWhere skill
+
+Starting with v0.13.0, portable releases include a static read-only skill bundle:
+
+```text
+skills/mailwhere/SKILL.md
+skills/mailwhere/references/...
+skills/mailwhere/manifest.json
+```
+
+Install/repair targets:
+
+- Codex: `%USERPROFILE%\.agents\skills\mailwhere`
+- Claude: `%USERPROFILE%\.claude\skills\mailwhere`
+
+Conflict policy is fixed and intentionally simple:
+
+- **Yes** overwrites the installed bundled content without backup.
+- **No** preserves the current folder and opens it.
+
+Do not merge old installed skill files with the release bundle. See [`SKILL_INSTALL.md`](SKILL_INSTALL.md).
 
 ## Team default settings seed
 
@@ -77,6 +108,11 @@ If a small team should start with the same approved local LLM endpoint/model, co
 - `LlmModel`
 - `LlmTimeoutSeconds`
 - `LlmFallbackPolicy`
+- `LlmThinkingControl`
+- `LlmStructuredOutputMode`
+- `LlmTemperature`
+- `LlmMaxOutputTokens`
+- `LlmMaxBatchSize`
 - `RecentScanDays`
 - `AutomaticScanIntervalMinutes`
 
@@ -116,6 +152,7 @@ Do not commit or package:
 - local SQLite databases;
 - Outlook mailbox exports;
 - runtime readiness approval files from a managed Windows PC;
+- `.omx` runtime files;
 - API keys, endpoint credentials, or prompt logs containing mail bodies.
 
 The portable artifact is allowed to include documentation and sample config only.

@@ -64,11 +64,37 @@ public sealed record LlmCallDiagnostics(
 
 public sealed record LlmCompletion(string Content, LlmCallDiagnostics? Diagnostics = null);
 
+public enum LlmThinkingControlMode
+{
+    Auto = 0,
+    EnableThinkingFalse = 1,
+    ReasoningEffortNone = 2
+}
+
+public enum LlmStructuredOutputMode
+{
+    JsonSchema = 0,
+    JsonObject = 1
+}
+
+public sealed record LlmAnalysisSettings(
+    LlmThinkingControlMode ThinkingControlMode = LlmThinkingControlMode.Auto,
+    LlmStructuredOutputMode StructuredOutputMode = LlmStructuredOutputMode.JsonSchema,
+    double Temperature = 0.1,
+    int MaxOutputTokens = 0,
+    int BatchSize = 4)
+{
+    public static LlmAnalysisSettings Default { get; } = new();
+}
+
 public sealed record LlmRequestOptions(
     int? ContextTokens = null,
     int? MaxOutputTokens = null,
     string? JsonSchemaName = null,
-    JsonElement? JsonSchema = null);
+    JsonElement? JsonSchema = null,
+    LlmStructuredOutputMode StructuredOutputMode = LlmStructuredOutputMode.JsonSchema,
+    LlmThinkingControlMode ThinkingControlMode = LlmThinkingControlMode.Auto,
+    double Temperature = 0.1);
 
 public interface ILlmClient
 {

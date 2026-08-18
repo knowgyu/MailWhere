@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using MailWhere.Core.Analysis;
@@ -19,6 +21,7 @@ public partial class SettingsWindow : Window
 {
     private readonly RuntimeSettings _initialSettings;
     private readonly DeveloperToolActions _developerToolActions;
+    private LlmProbeProof? _lastSuccessfulProbeProof;
 
     public SettingsWindow(RuntimeSettings settings, bool startupEnabled, DeveloperToolActions developerToolActions)
     {
@@ -59,9 +62,25 @@ public partial class SettingsWindow : Window
         LlmModelBox.Text = settings.LlmModel;
         LlmApiKeyBox.Password = settings.LlmApiKey ?? string.Empty;
         LlmApiKeyEnvText.Text = settings.LlmApiKeyEnvironmentVariable ?? string.Empty;
-        SelectByTag(LlmAuthModeBox, !string.IsNullOrWhiteSpace(settings.LlmApiKey) ? "Direct" : !string.IsNullOrWhiteSpace(settings.LlmApiKeyEnvironmentVariable) ? "Environment" : "None");
+        var authModeTag = "None";
+        if (!string.IsNullOrWhiteSpace(settings.LlmApiKey))
+        {
+            authModeTag = "Direct";
+        }
+        else if (!string.IsNullOrWhiteSpace(settings.LlmApiKeyEnvironmentVariable))
+        {
+            authModeTag = "Environment";
+        }
+
+        SelectByTag(LlmAuthModeBox, authModeTag);
         SelectByTag(LlmTimeoutBox, NormalizeTimeout(settings.LlmTimeoutSeconds).ToString());
         SelectByTag(LlmFallbackPolicyBox, settings.LlmFallbackPolicy.ToString());
+        SelectByTag(LlmThinkingModeBox, settings.LlmThinkingControlMode.ToString());
+        SelectByTag(LlmStructuredOutputBox, settings.LlmStructuredOutputMode.ToString());
+        SelectByTag(LlmTemperatureBox, settings.LlmTemperature.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+        SelectByTag(LlmMaxOutputTokensBox, settings.LlmMaxOutputTokens.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        SelectByTag(LlmBatchSizeBox, settings.LlmBatchSize.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        _lastSuccessfulProbeProof = settings.LastSuccessfulLlmProbeProof;
         LlmFailureFallbackPromptToggle.IsChecked = settings.ShowLlmFailureFallbackPrompt;
         UpdateAvailability();
     }
@@ -100,6 +119,12 @@ public partial class SettingsWindow : Window
             LlmTimeoutSeconds: ParseInt(SelectedTag(LlmTimeoutBox), defaults.LlmTimeoutSeconds),
             LlmFallbackPolicy: ParseFallbackPolicy(SelectedTag(LlmFallbackPolicyBox)),
             ShowLlmFailureFallbackPrompt: LlmFailureFallbackPromptToggle.IsChecked == true,
+            LlmThinkingControlMode: ParseThinkingMode(SelectedTag(LlmThinkingModeBox)),
+            LlmStructuredOutputMode: ParseStructuredOutputMode(SelectedTag(LlmStructuredOutputBox)),
+            LlmTemperature: ParseDouble(SelectedTag(LlmTemperatureBox), defaults.LlmTemperature),
+            LlmMaxOutputTokens: ParseInt(SelectedTag(LlmMaxOutputTokensBox), defaults.LlmMaxOutputTokens),
+            LlmBatchSize: ParseInt(SelectedTag(LlmBatchSizeBox), defaults.LlmBatchSize),
+            LastSuccessfulLlmProbeProof: _lastSuccessfulProbeProof,
             LlmInitialConcurrency: _initialSettings.LlmInitialConcurrency,
             LlmMaxConcurrency: _initialSettings.LlmMaxConcurrency,
             RecentScanDays: ParseInt(SelectedTag(RecentRangeBox), defaults.RecentScanDays),
@@ -117,7 +142,8 @@ public partial class SettingsWindow : Window
             LlmStatusText.Text = "연결 테스트 중입니다…";
             TestConnectionButton.IsEnabled = false;
             LoadModelsButton.IsEnabled = false;
-            var result = await LlmEndpointProbe.ProbeAsync(settings.ToLlmEndpointSettings());
+            var result = await LlmEndpointProbe.ProbeAsync(settings);
+            _lastSuccessfulProbeProof = result.Success ? result.Proof : null;
             LlmStatusText.Text = result.ToKoreanStatus();
         }
         catch (Exception ex)
@@ -198,10 +224,75 @@ public partial class SettingsWindow : Window
         LlmAuthModeBox.IsEnabled = llmEnabled;
         LlmTimeoutBox.IsEnabled = llmEnabled;
         LlmFallbackPolicyBox.IsEnabled = llmEnabled;
+        LlmThinkingModeBox.IsEnabled = llmEnabled;
+        LlmStructuredOutputBox.IsEnabled = llmEnabled;
+        LlmTemperatureBox.IsEnabled = llmEnabled;
+        LlmMaxOutputTokensBox.IsEnabled = llmEnabled;
+        LlmBatchSizeBox.IsEnabled = llmEnabled;
         LlmFailureFallbackPromptToggle.IsEnabled = llmEnabled;
         var authMode = SelectedTag(LlmAuthModeBox);
         LlmApiKeyBox.IsEnabled = llmEnabled && string.Equals(authMode, "Direct", StringComparison.OrdinalIgnoreCase);
         LlmApiKeyEnvText.IsEnabled = llmEnabled && string.Equals(authMode, "Environment", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void InstallCodexSkill_Click(object sender, RoutedEventArgs e) => InstallSkill(SkillInstallTarget.Codex);
+    private void InstallClaudeSkill_Click(object sender, RoutedEventArgs e) => InstallSkill(SkillInstallTarget.Claude);
+
+    private void InstallSkill(SkillInstallTarget target)
+    {
+        try
+        {
+            var plan = MailWhereSkillInstaller.PlanInstall(AppContext.BaseDirectory, target);
+            if (!plan.CanInstall)
+            {
+                SkillStatusText.Text = $"bundled 스킬을 찾지 못했습니다: {plan.SourcePath}";
+                return;
+            }
+
+            var overwrite = false;
+            if (plan.RequiresOverwritePrompt)
+            {
+                var answer = System.Windows.MessageBox.Show(
+                    this,
+                    $"이미 설치된 MailWhere 스킬에 사용자가 수정한 내용이 있습니다.\n\n덮어쓸까요?\n예: bundled v0.13.0으로 교체\n아니요: 유지하고 폴더 열기",
+                    ToSkillLabel(target),
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (answer != MessageBoxResult.Yes)
+                {
+                    OpenFolder(plan.TargetPath);
+                    SkillStatusText.Text = $"기존 스킬을 유지했습니다: {plan.TargetPath}";
+                    return;
+                }
+
+                overwrite = true;
+            }
+
+            var result = MailWhereSkillInstaller.InstallBundledSkill(AppContext.BaseDirectory, target, overwrite);
+            SkillStatusText.Text = result.StatusCode switch
+            {
+                "installed" => $"설치했습니다: {result.TargetPath}",
+                "repaired" => $"같은 bundled 버전으로 복구했습니다: {result.TargetPath}",
+                _ => $"처리했습니다: {result.TargetPath} ({result.StatusCode})"
+            };
+        }
+        catch (Exception ex)
+        {
+            SkillStatusText.Text = $"스킬 설치를 처리하지 못했습니다: {ex.GetType().Name}";
+        }
+    }
+
+    private static string ToSkillLabel(SkillInstallTarget target) =>
+        target == SkillInstallTarget.Codex ? "Codex MailWhere 스킬" : "Claude MailWhere 스킬";
+
+    private static void OpenFolder(string path)
+    {
+        Directory.CreateDirectory(path);
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true
+        });
     }
 
     private async void OpenToday_Click(object sender, RoutedEventArgs e) => await RunDeveloperActionAsync(() => _developerToolActions.OpenFilterAsync(BoardRouteFilter.Today), "오늘 화면을 열었습니다.");
@@ -273,8 +364,17 @@ public partial class SettingsWindow : Window
     private static LlmFallbackPolicy ParseFallbackPolicy(string? value) =>
         Enum.TryParse<LlmFallbackPolicy>(value, ignoreCase: true, out var parsed) ? parsed : LlmFallbackPolicy.LlmOnly;
 
+    private static LlmThinkingControlMode ParseThinkingMode(string? value) =>
+        Enum.TryParse<LlmThinkingControlMode>(value, ignoreCase: true, out var parsed) ? parsed : LlmThinkingControlMode.Auto;
+
+    private static LlmStructuredOutputMode ParseStructuredOutputMode(string? value) =>
+        Enum.TryParse<LlmStructuredOutputMode>(value, ignoreCase: true, out var parsed) ? parsed : LlmStructuredOutputMode.JsonSchema;
+
     private static int ParseInt(string? value, int fallback) =>
         int.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static double ParseDouble(string? value, double fallback) =>
+        double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
 
     private static string? NullIfBlank(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

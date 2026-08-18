@@ -382,6 +382,12 @@ public partial class MainWindow : Window
             StatusText.Text = $"최근 {_settings.RecentScanDays}일 메일을 읽고 업무를 찾는 중입니다…";
             await Dispatcher.Yield(DispatcherPriority.Background);
 
+            if (LlmAnalysisEnabled(_settings) && !_settings.HasCurrentLlmProbeProof())
+            {
+                StatusText.Text = "AI 분석 연결 테스트를 먼저 통과해야 메일 확인을 시작합니다.";
+                return new MailScanSummary(0, 0, 0, 0, 0, 0, new[] { new MailReadWarning("llm-probe-required", CapabilitySeverity.Blocked, "LlmProbeRequired") });
+            }
+
             var store = await GetStoreAsync();
             var beforeCandidateIds = (await store.ListReviewCandidatesAsync())
                 .Select(candidate => candidate.Id)
@@ -426,7 +432,11 @@ public partial class MainWindow : Window
 
             await RefreshTasksAsync();
             var reviewCandidates = _boardSnapshot?.Candidates ?? Array.Empty<ReviewCandidate>();
-            _reviewCandidatesWindow?.Refresh(reviewCandidates, _boardSnapshot?.ClosureSuggestions ?? Array.Empty<WaitingClosureSuggestion>(), CanRetryLlmFailures);
+            _reviewCandidatesWindow?.Refresh(
+                reviewCandidates,
+                _boardSnapshot?.ClosureSuggestions ?? Array.Empty<WaitingClosureSuggestion>(),
+                CanRetryLlmFailures,
+                _boardSnapshot?.ReviewCounts ?? new ReviewCandidateBacklogCounts(reviewCandidates.Count, reviewCandidates.Count, reviewCandidates.Count(candidate => candidate.Analysis.IsTransientLlmFailureReview)));
             if (!showSummaryNotification)
             {
                 await NotifyDueRemindersAsync();
@@ -781,9 +791,10 @@ public partial class MainWindow : Window
         var store = await GetStoreAsync();
         var tasks = await store.ListOpenTasksAsync();
         var candidates = await store.ListReviewCandidatesAsync();
+        var reviewCounts = await store.CountReviewCandidateBacklogAsync(candidates.Count);
         var replyProgress = (await store.ListReplyProgressAsync()).ToDictionary(progress => progress.TaskId);
         var closureSuggestions = await store.ListWaitingClosureSuggestionsAsync();
-        return new BoardSnapshot(tasks, candidates, replyProgress, closureSuggestions);
+        return new BoardSnapshot(tasks, candidates, reviewCounts, replyProgress, closureSuggestions);
     }
 
     private void RenderTasks(BoardSnapshot snapshot)
@@ -807,19 +818,18 @@ public partial class MainWindow : Window
             TasksList.Items.Add(TaskListItem.FromTask(task, now, progress));
         }
 
-        UpdateReviewCandidatesButton(snapshot.Candidates.Count, snapshot.ClosureSuggestions.Count);
+        UpdateReviewCandidatesButton(snapshot.ReviewCounts, snapshot.ClosureSuggestions.Count);
         UpdateMainFilterHighlight();
     }
 
-    private void UpdateReviewCandidatesButton(int reviewCandidateCount, int closureSuggestionCount)
+    private void UpdateReviewCandidatesButton(ReviewCandidateBacklogCounts reviewCounts, int closureSuggestionCount)
     {
-        var total = reviewCandidateCount + closureSuggestionCount;
+        var total = reviewCounts.TotalUnresolved + closureSuggestionCount;
         OpenReviewCandidatesButton.Content = total == 0
             ? "확인 필요"
             : $"확인 필요 {total}";
-        OpenReviewCandidatesButton.ToolTip = closureSuggestionCount == 0
-            ? null
-            : $"보관 제안 {closureSuggestionCount}개 포함";
+        OpenReviewCandidatesButton.ToolTip = $"전체 미해결 {reviewCounts.TotalUnresolved}개 · 현재 표시 {reviewCounts.VisiblePageCount}개(최대 100개) · 재시도 가능 AI 실패 {reviewCounts.RetryableLlmFailures}개"
+            + (closureSuggestionCount > 0 ? $" · 보관 제안 {closureSuggestionCount}개" : string.Empty);
     }
 
     private static DateTimeOffset SortKey(LocalTaskItem task) =>
@@ -843,20 +853,27 @@ public partial class MainWindow : Window
             : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xD8, 0xE2, 0xFF));
     }
 
+    private async Task<ReviewCandidateBacklogCounts> CountReviewCandidateBacklogAsync(int visiblePageCount)
+    {
+        var store = await GetStoreAsync();
+        return await store.CountReviewCandidateBacklogAsync(visiblePageCount);
+    }
+
     private async Task<IReadOnlyList<ReviewCandidate>> RefreshReviewCandidatesAsync()
     {
         var store = await GetStoreAsync();
         var candidates = await store.ListReviewCandidatesAsync();
+        var counts = await store.CountReviewCandidateBacklogAsync(candidates.Count);
         var suggestions = await store.ListWaitingClosureSuggestionsAsync();
-        _reviewCandidatesWindow?.Refresh(candidates, suggestions, CanRetryLlmFailures);
+        _reviewCandidatesWindow?.Refresh(candidates, suggestions, CanRetryLlmFailures, counts);
         if (_boardSnapshot is not null)
         {
-            _boardSnapshot = _boardSnapshot with { Candidates = candidates, ClosureSuggestions = suggestions };
-            UpdateReviewCandidatesButton(_boardSnapshot.Candidates.Count, _boardSnapshot.ClosureSuggestions.Count);
+            _boardSnapshot = _boardSnapshot with { Candidates = candidates, ReviewCounts = counts, ClosureSuggestions = suggestions };
+            UpdateReviewCandidatesButton(_boardSnapshot.ReviewCounts, _boardSnapshot.ClosureSuggestions.Count);
         }
         else
         {
-            UpdateReviewCandidatesButton(candidates.Count, suggestions.Count);
+            UpdateReviewCandidatesButton(counts, suggestions.Count);
         }
         return candidates;
     }
@@ -868,17 +885,18 @@ public partial class MainWindow : Window
         if (_boardSnapshot is not null)
         {
             _boardSnapshot = _boardSnapshot with { ClosureSuggestions = suggestions };
-            UpdateReviewCandidatesButton(_boardSnapshot.Candidates.Count, _boardSnapshot.ClosureSuggestions.Count);
+            UpdateReviewCandidatesButton(_boardSnapshot.ReviewCounts, _boardSnapshot.ClosureSuggestions.Count);
         }
         else
         {
-            UpdateReviewCandidatesButton(0, suggestions.Count);
+            var counts = await store.CountReviewCandidateBacklogAsync(0);
+            UpdateReviewCandidatesButton(counts, suggestions.Count);
         }
 
         if (_reviewCandidatesWindow?.IsVisible == true)
         {
             var candidates = _boardSnapshot?.Candidates ?? await store.ListReviewCandidatesAsync();
-            _reviewCandidatesWindow.Refresh(candidates, suggestions, CanRetryLlmFailures);
+            _reviewCandidatesWindow.Refresh(candidates, suggestions, CanRetryLlmFailures, await CountReviewCandidateBacklogAsync(candidates.Count));
         }
 
         return suggestions;
@@ -1038,7 +1056,7 @@ public partial class MainWindow : Window
             await RefreshTasksAsync();
             if (_boardSnapshot is not null)
             {
-                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, _boardSnapshot.ClosureSuggestions, CanRetryLlmFailures);
+                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, _boardSnapshot.ClosureSuggestions, CanRetryLlmFailures, _boardSnapshot.ReviewCounts);
             }
             StatusText.Text = task is null
                 ? "이미 처리된 항목입니다."
@@ -1284,9 +1302,10 @@ public partial class MainWindow : Window
     {
         var candidates = await RefreshReviewCandidatesAsync();
         var closureSuggestions = _boardSnapshot?.ClosureSuggestions ?? await RefreshClosureSuggestionsAsync();
+        var reviewCounts = _boardSnapshot?.ReviewCounts ?? await CountReviewCandidateBacklogAsync(candidates.Count);
         if (_reviewCandidatesWindow?.IsVisible == true)
         {
-            _reviewCandidatesWindow.Refresh(candidates, closureSuggestions, CanRetryLlmFailures);
+            _reviewCandidatesWindow.Refresh(candidates, closureSuggestions, CanRetryLlmFailures, reviewCounts);
             BringWindowToFront(_reviewCandidatesWindow);
             return;
         }
@@ -1300,7 +1319,8 @@ public partial class MainWindow : Window
             IgnoreReviewCandidateAsync,
             ResolveClosureSuggestionAsync,
             RetryLlmFailureReviewCandidatesAsync,
-            CanRetryLlmFailures)
+            CanRetryLlmFailures,
+            reviewCounts)
         {
             Owner = IsVisible ? this : null
         };
@@ -1367,7 +1387,7 @@ public partial class MainWindow : Window
         await RefreshTasksAsync();
         if (_boardSnapshot is not null)
         {
-            _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, _boardSnapshot.ClosureSuggestions, CanRetryLlmFailures);
+            _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, _boardSnapshot.ClosureSuggestions, CanRetryLlmFailures, _boardSnapshot.ReviewCounts);
         }
 
         StatusText.Text = resolved
@@ -1381,7 +1401,9 @@ public partial class MainWindow : Window
     {
         if (!CanRetryLlmFailures)
         {
-            StatusText.Text = "AI 분석 설정이 꺼져 있어 실패 항목을 다시 시도할 수 없습니다.";
+            StatusText.Text = LlmAnalysisEnabled(_settings)
+                ? "AI 분석 연결 테스트를 먼저 통과해야 실패 항목을 다시 시도할 수 있습니다."
+                : "AI 분석 설정이 꺼져 있어 실패 항목을 다시 시도할 수 없습니다.";
             return new ReviewCandidateRetrySummary(0, 0, 0, 0, 0, 0, 0, 0);
         }
 
@@ -1408,7 +1430,7 @@ public partial class MainWindow : Window
             await RefreshTasksAsync();
             if (_boardSnapshot is not null)
             {
-                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, _boardSnapshot.ClosureSuggestions, CanRetryLlmFailures);
+                _reviewCandidatesWindow?.Refresh(_boardSnapshot.Candidates, _boardSnapshot.ClosureSuggestions, CanRetryLlmFailures, _boardSnapshot.ReviewCounts);
             }
             StatusText.Text = ToRetryStatus(summary);
             return summary;
@@ -1529,10 +1551,11 @@ public partial class MainWindow : Window
         _boardSnapshot = new BoardSnapshot(
             Array.Empty<LocalTaskItem>(),
             Array.Empty<ReviewCandidate>(),
+            new ReviewCandidateBacklogCounts(0, 0, 0),
             new Dictionary<Guid, ReplyProgressItem>(),
             Array.Empty<WaitingClosureSuggestion>());
         RenderTasks(_boardSnapshot);
-        _reviewCandidatesWindow?.Refresh(Array.Empty<ReviewCandidate>(), Array.Empty<WaitingClosureSuggestion>(), CanRetryLlmFailures);
+        _reviewCandidatesWindow?.Refresh(Array.Empty<ReviewCandidate>(), Array.Empty<WaitingClosureSuggestion>(), CanRetryLlmFailures, new ReviewCandidateBacklogCounts(0, 0, 0));
         _archiveWindow?.Refresh(Array.Empty<LocalTaskItem>());
         StatusText.Text = deleted == 0
             ? "삭제할 로컬 업무 데이터가 없습니다. 설정은 유지됩니다."
@@ -1626,30 +1649,33 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private bool CanRetryLlmFailures => _settings.ExternalLlmEnabled && _settings.LlmProvider != LlmProviderKind.Disabled;
+    private bool CanRetryLlmFailures => LlmAnalysisEnabled(_settings) && _settings.HasCurrentLlmProbeProof();
+
+    private static bool LlmAnalysisEnabled(RuntimeSettings settings) =>
+        settings.ExternalLlmEnabled && settings.LlmProvider != LlmProviderKind.Disabled;
 
     private IFollowUpAnalyzer BuildAnalyzer(RuntimeSettings settings)
     {
         var rule = new RuleBasedFollowUpAnalyzer();
-        if (!settings.ExternalLlmEnabled || settings.LlmProvider == LlmProviderKind.Disabled)
+        if (!LlmAnalysisEnabled(settings) || !settings.HasCurrentLlmProbeProof())
         {
             return rule;
         }
 
         var client = LlmClientFactory.Create(settings.ToLlmEndpointSettings());
-        return new LlmBackedFollowUpAnalyzer(client, rule, settings.LlmFallbackPolicy);
+        return new LlmBackedFollowUpAnalyzer(client, rule, settings.LlmFallbackPolicy, settings.ToLlmAnalysisSettings());
     }
 
     private IWaitingClosureJudge BuildWaitingClosureJudge(RuntimeSettings settings)
     {
         var rule = new RuleBasedWaitingClosureJudge();
-        if (!settings.ExternalLlmEnabled || settings.LlmProvider == LlmProviderKind.Disabled)
+        if (!LlmAnalysisEnabled(settings) || !settings.HasCurrentLlmProbeProof())
         {
             return rule;
         }
 
         var client = LlmClientFactory.Create(settings.ToLlmEndpointSettings());
-        return new LlmBackedWaitingClosureJudge(client, rule);
+        return new LlmBackedWaitingClosureJudge(client, rule, settings.ToLlmAnalysisSettings());
     }
 
     private async Task<SqliteFollowUpStore> GetStoreAsync()
@@ -1775,6 +1801,7 @@ public partial class MainWindow : Window
     private sealed record BoardSnapshot(
         IReadOnlyList<LocalTaskItem> Tasks,
         IReadOnlyList<ReviewCandidate> Candidates,
+        ReviewCandidateBacklogCounts ReviewCounts,
         IReadOnlyDictionary<Guid, ReplyProgressItem> ReplyProgress,
         IReadOnlyList<WaitingClosureSuggestion> ClosureSuggestions);
 

@@ -26,8 +26,10 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - 자동 delta 확인에서는 중복/이미 처리한 source를 body/LLM 분석 전에 fast filter로 제거하고, 애매한 메일은 계속 분석 대상으로 유지
 - 규칙 기반 업무 후보 탐지와 선택형 LLM 분석
 - Ollama native `/api/chat`, OpenAI-compatible `/v1/chat/completions`, `/v1/responses` endpoint 지원
-- endpoint 모델 목록 불러오기와 LLM 연결 테스트
+- endpoint 모델 목록 불러오기와 analysis-shaped LLM capability probe
+- `Qwen/Qwen3.8-27B`용 vLLM thinking control, structured-output, temperature, output-token, batch-size 설정
 - LLM 시도/성공/fallback/실패 요약과 확인 필요 창의 **실패한 AI 분석 다시 시도**
+- 확인 필요 backlog는 전체 미해결 수, 표시 중인 100개 page cap, retryable LLM 실패 수를 구분
 - 답장/전달 메일, To/CC 수신 여부, 담당자 표현을 보수적으로 판단
 - 같은 스레드의 동일 업무 후보 중복 생성 억제
 - 낮은 확신/LLM 실패 후보는 기본 업무 보드에 섞지 않고 별도 검토 후보 창에서 처리
@@ -36,10 +38,12 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - `나중에`로 지정 시각까지 active 목록에서 제외하고, 시간이 지나면 다시 표시
 - `보관`으로 active 목록에서 제외하고, 보관함에서 원본 열기/복원
 - 가능한 경우 `열기`로 Outlook 원본 메일 열기
+- CLI/skill/export 같은 normal output의 원본 열기 단서는 body-free `open_source_token`만 사용하고 raw StoreID/EntryID는 내보내지 않음
 - **지금 메일 확인**으로 채워지는 로컬 mail mirror를 SQLite/FTS5만 읽는 WPF **메일 검색** 창과 `search-mail` CLI 검색
 - 다자 수신자에게 보낸 회신 요청은 Outlook 대화 ID/보낸 사람 기준으로 `n/m명 회신` 현황 표시 및 export
 - contextWhere와 로컬 agent가 읽을 수 있는 raw-mail-free export SDK/API (`MailWhereExportService`)
 - contextWhere 같은 외부 자동화가 안전하게 읽을 수 있는 read-only JSON CLI provider (`MailWhere.Cli.exe`)
+- portable zip에 포함되는 offline read-only MailWhere skill bundle과 Codex/Claude install/repair 안내
 - D-day, D-7/D-1/D-day reminder planning, snooze-due reminder
 - MailWhere 자체 우하단 toast stack과 tray 메뉴
 - 설정 > 개발자 도구 탭의 샘플 데이터/알림/필터 테스트와 `scripts/reset-local-data.ps1`
@@ -77,7 +81,7 @@ portable zip에는 UI 앱 `MailWhere.exe`와 별도로 `MailWhere.Cli.exe`가 �
 .\MailWhere.Cli.exe list-review-candidates --json --limit 25
 ```
 
-모든 응답은 `provider: "MailWhere"`, `contract_version: "v1"`, `app_version`, `generated_at`, `ok`를 포함하는 JSON envelope입니다. 성공은 exit code `0`, 예상 가능한 사용 불가 상태는 `2`, 사용법 오류는 `64`, 예기치 못한 실패는 `70`입니다. CLI JSON은 raw body, source id/hash, evidence snippet, 전체 수신자 목록, prompt logs, API keys를 내보내지 않습니다. `search-mail`은 일반 export와 별도의 명시적 검색 명령이며 Outlook을 열지 않고 SQLite FTS5 mirror만 읽어 160자 이하 snippet과 `can_open_source` flag만 반환합니다. StoreID/EntryID는 출력하지 않습니다.
+모든 응답은 `provider: "MailWhere"`, `contract_version: "v1"`, `app_version`, `generated_at`, `ok`를 포함하는 JSON envelope입니다. 성공은 exit code `0`, 예상 가능한 사용 불가 상태는 `2`, 사용법 오류는 `64`, 예기치 못한 실패는 `70`입니다. CLI JSON은 raw body, source id/hash, evidence snippet, 전체 수신자 목록, prompt logs, API keys를 내보내지 않습니다. `search-mail`은 일반 export와 별도의 명시적 검색 명령이며 Outlook을 열지 않고 SQLite FTS5 mirror만 읽어 160자 이하 snippet과 `open_source_token`만 반환합니다. StoreID/EntryID는 출력하지 않습니다. 원본 열기는 사용자가 명시적으로 요청할 때 `MailWhere.exe --open-source-token <token>`으로 로컬 앱 경계 안에서만 처리합니다.
 
 ## 기본 사용 흐름
 
@@ -113,7 +117,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.12.1-win-x64-portable.zip
+artifacts/MailWhere-v0.13.0-win-x64-portable.zip
 ```
 
 ## LLM endpoint
@@ -136,7 +140,7 @@ artifacts/MailWhere-v0.12.1-win-x64-portable.zip
 }
 ```
 
-vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 기본 모델명은 비워두고, 앱의 설정 창에서 **모델 불러오기** 버튼으로 `/api/tags` 또는 `/v1/models`에서 목록을 가져와 선택하는 흐름을 권장합니다. **연결 테스트**는 메일 내용이 아닌 작은 JSON probe만 보냅니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
+vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 기본 모델명은 비워두고, 앱의 설정 창에서 **모델 불러오기** 버튼으로 `/api/tags` 또는 `/v1/models`에서 목록을 가져와 선택하는 흐름을 권장합니다. `Qwen/Qwen3.8-27B`는 vLLM `>=0.17.0`과 `--reasoning-parser qwen3`를 기준으로 두고, thinking off는 template-native `enable_thinking=false`를 우선합니다. vLLM `0.25+`의 `reasoning_effort=none` convenience mapping은 probe가 같은 request shape에서 통과할 때만 사용합니다. **연결 테스트**는 메일 내용이 아닌 synthetic single/batch/대기 종료 판단 요청으로 fail-closed probe를 수행합니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
 
 ## 팀 기본 설정 seed
 
@@ -153,6 +157,7 @@ portable 폴더에 `MailWhere.defaults.json`을 같이 두면, 사용자별 설�
 - 프로젝트 맥락: [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md)
 - Visual QA 결정: [`docs/VISUAL_QA_WORKFLOW_2026-05-16.md`](docs/VISUAL_QA_WORKFLOW_2026-05-16.md)
 - 배포: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
+- skill 설치: [`docs/SKILL_INSTALL.md`](docs/SKILL_INSTALL.md)
 - 보안: [`docs/SECURITY.md`](docs/SECURITY.md)
 - 로드맵: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 

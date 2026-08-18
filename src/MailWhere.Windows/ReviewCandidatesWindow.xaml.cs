@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Input;
 using MailWhere.Core.Domain;
 using MailWhere.Core.Pipeline;
+using MailWhere.Storage;
 
 namespace MailWhere.Windows;
 
@@ -17,6 +18,7 @@ public partial class ReviewCandidatesWindow : Window
     private readonly Func<Task<ReviewCandidateRetrySummary>> _retryLlmFailuresAsync;
     private readonly HashSet<Guid> _busyRowIds = new();
     private bool _canRetryLlmFailures;
+    private ReviewCandidateBacklogCounts _backlogCounts;
 
     public ReviewCandidatesWindow(
         IReadOnlyList<ReviewCandidate> candidates,
@@ -27,7 +29,8 @@ public partial class ReviewCandidatesWindow : Window
         Func<ReviewCandidate, Task> ignoreAsync,
         Func<WaitingClosureSuggestion, bool, Task> resolveClosureAsync,
         Func<Task<ReviewCandidateRetrySummary>> retryLlmFailuresAsync,
-        bool canRetryLlmFailures)
+        bool canRetryLlmFailures,
+        ReviewCandidateBacklogCounts backlogCounts)
     {
         InitializeComponent();
         _candidates = candidates;
@@ -39,13 +42,15 @@ public partial class ReviewCandidatesWindow : Window
         _resolveClosureAsync = resolveClosureAsync;
         _retryLlmFailuresAsync = retryLlmFailuresAsync;
         _canRetryLlmFailures = canRetryLlmFailures;
+        _backlogCounts = backlogCounts;
         Render();
     }
 
     public void Refresh(
         IReadOnlyList<ReviewCandidate> candidates,
         IReadOnlyList<WaitingClosureSuggestion>? closureSuggestions = null,
-        bool? canRetryLlmFailures = null)
+        bool? canRetryLlmFailures = null,
+        ReviewCandidateBacklogCounts? backlogCounts = null)
     {
         _candidates = candidates;
         if (closureSuggestions is not null)
@@ -56,6 +61,11 @@ public partial class ReviewCandidatesWindow : Window
         if (canRetryLlmFailures is not null)
         {
             _canRetryLlmFailures = canRetryLlmFailures.Value;
+        }
+
+        if (backlogCounts is not null)
+        {
+            _backlogCounts = backlogCounts;
         }
 
         Render();
@@ -76,9 +86,11 @@ public partial class ReviewCandidatesWindow : Window
             CandidatesList.SelectedIndex = 0;
         }
 
-        var hasRetryableFailure = _candidates.Any(candidate => candidate.Analysis.IsTransientLlmFailureReview);
+        var hasRetryableFailure = _backlogCounts.RetryableLlmFailures > 0 || _candidates.Any(candidate => candidate.Analysis.IsTransientLlmFailureReview);
         RetryLlmFailuresButton.IsEnabled = hasRetryableFailure && _canRetryLlmFailures;
+        RetryLlmFailuresButton.ToolTip = $"재시도 가능 AI 실패 {_backlogCounts.RetryableLlmFailures}개. AI 연결 테스트가 통과되어야 실행됩니다.";
         StatusText.Text = BuildStatus(rows.Length, _candidates.Count, _closureSuggestions.Count, hasRetryableFailure);
+        StatusText.ToolTip = $"전체 미해결 확인 필요 {_backlogCounts.TotalUnresolved}개 · 현재 표시 {_backlogCounts.VisiblePageCount}개(최대 100개) · 재시도 가능 AI 실패 {_backlogCounts.RetryableLlmFailures}개";
     }
 
     private string BuildStatus(int totalRows, int candidateCount, int closureCount, bool hasRetryableFailure)
@@ -88,7 +100,12 @@ public partial class ReviewCandidatesWindow : Window
             return "표시할 확인 필요 항목이 없습니다.";
         }
 
-        var parts = new List<string> { $"확인 필요 {totalRows}개" };
+        var parts = new List<string>
+        {
+            $"전체 미해결 {_backlogCounts.TotalUnresolved}개",
+            $"현재 표시 {_backlogCounts.VisiblePageCount}개(최대 100개)",
+            $"재시도 가능 AI 실패 {_backlogCounts.RetryableLlmFailures}개"
+        };
         if (closureCount > 0)
         {
             parts.Add($"보관 제안 {closureCount}개");
@@ -105,7 +122,7 @@ public partial class ReviewCandidatesWindow : Window
         }
         else if (hasRetryableFailure)
         {
-            parts.Add("AI 설정이 꺼져 다시 시도 비활성화");
+            parts.Add("AI 연결 테스트 필요");
         }
 
         return string.Join(" · ", parts);

@@ -1,0 +1,19 @@
+{
+  "name": "mailwhere",
+  "version": "0.13.0",
+  "readOnly": true,
+  "offline": true,
+  "requires": {
+    "windows": true,
+    "powershell": ">=7.6",
+    "executables": ["MailWhere.Cli.exe", "MailWhere.exe"]
+  },
+  "installTargets": {
+    "codex": "%USERPROFILE%\\.agents\\skills\\mailwhere",
+    "claude": "%USERPROFILE%\\.claude\\skills\\mailwhere"
+  },
+  "privacy": {
+    "normalOutputExcludes": ["raw_body", "store_id", "entry_id", "source_id", "api_keys"],
+    "normalOutputMayInclude": ["bounded_snippet", "open_source_token"]
+  }
+}

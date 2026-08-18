@@ -42,3 +42,22 @@ Do not enable 새 메일 자동 확인 if any probe causes unacceptable policy w
 14. Confirm exported diagnostics remain content-free and contain no source locator, StoreId, EntryId, subject body, or body snippet.
 
 Automated coverage includes the mirror checkpoint case where `DefaultPageSize + 1` messages share equal timestamps. The real managed Outlook/EDR run remains external and must be recorded as managed-PC evidence.
+
+## v0.13.0 skill and LLM smoke
+
+Run these only if local policy allows the target LLM endpoint and local agent skill installation.
+
+1. Confirm the portable folder contains `skills\mailwhere\SKILL.md`, references, and manifest-style files.
+2. Run the install/repair flow for Codex and Claude roots:
+   - `%USERPROFILE%\.agents\skills\mailwhere`
+   - `%USERPROFILE%\.claude\skills\mailwhere`
+3. If a target folder already exists, choose **No** once and confirm the folder is preserved and opened.
+4. Repeat repair and choose **Yes** only for the bundled test copy; confirm the bundled content overwrites without creating a backup.
+5. Configure `Qwen/Qwen3.8-27B` through the model list returned by the vLLM endpoint.
+6. Confirm the endpoint is served with vLLM `>=0.17.0` and `--reasoning-parser qwen3`.
+7. Run the MailWhere LLM probe and confirm it exercises synthetic single-item, batch, and waiting-closure shapes, not real mail content.
+8. Change one LLM setting such as structured-output mode or temperature and confirm the saved probe proof becomes stale until the probe passes again.
+9. Confirm the review backlog label separates total unresolved items, visible page count capped at 100, and retryable LLM failures.
+10. Search/list through the skill or CLI and confirm normal output has no body, StoreID, EntryID, source id, or source hash. The only source-open handle allowed there is `open_source_token`.
+11. Explicitly open one synthetic result through `MailWhere.exe --open-source-token <token>` and confirm it opens the intended Outlook item.
+12. Try an invalid token and confirm the failure is sanitized and does not display a raw locator.

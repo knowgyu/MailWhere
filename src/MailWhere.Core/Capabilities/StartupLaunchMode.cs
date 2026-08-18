@@ -3,17 +3,42 @@ namespace MailWhere.Core.Capabilities;
 public enum StartupLaunchMode
 {
     ShowMainWindow,
-    TrayOnly
+    TrayOnly,
+    OpenSourceToken
 }
 
 public static class StartupLaunchModeResolver
 {
-    public static StartupLaunchMode FromArgs(IEnumerable<string> args) =>
-        args.Any(arg => string.Equals(arg, "--tray", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(arg, "/tray", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(arg, "-tray", StringComparison.OrdinalIgnoreCase))
+    public static StartupLaunchMode FromArgs(IEnumerable<string> args)
+    {
+        var values = args.ToArray();
+        if (TryGetOpenSourceToken(values, out _))
+        {
+            return StartupLaunchMode.OpenSourceToken;
+        }
+
+        return values.Any(arg => string.Equals(arg, "--tray", StringComparison.OrdinalIgnoreCase)
+                                 || string.Equals(arg, "/tray", StringComparison.OrdinalIgnoreCase)
+                                 || string.Equals(arg, "-tray", StringComparison.OrdinalIgnoreCase))
             ? StartupLaunchMode.TrayOnly
             : StartupLaunchMode.ShowMainWindow;
+    }
+
+    public static bool TryGetOpenSourceToken(IEnumerable<string> args, out string token)
+    {
+        var values = args.ToArray();
+        for (var i = 0; i < values.Length - 1; i++)
+        {
+            if (string.Equals(values[i], "--open-source-token", StringComparison.OrdinalIgnoreCase))
+            {
+                token = values[i + 1];
+                return true;
+            }
+        }
+
+        token = string.Empty;
+        return false;
+    }
 
     public static string? BuildTrayStartupCommand(string? exePath)
     {

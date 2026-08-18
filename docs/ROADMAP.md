@@ -1,5 +1,25 @@
 # Roadmap
 
+## Release 0.13.0 — Qwen3.8 endpoint hardening and bundled skill
+
+Goal: correct the local Qwen target to `Qwen/Qwen3.8-27B`, make LLM analysis fail closed on the real request shape, clarify review backlog counts, and ship a read-only bundled MailWhere skill for local agents.
+
+Included:
+
+- Analysis-shaped capability probe for synthetic single-item and batch requests.
+- vLLM Qwen3.8 guidance: `vLLM 0.17.0+`, `--reasoning-parser qwen3`, template-native `enable_thinking=false`, and probe-validated vLLM `0.25+` `reasoning_effort=none` compatibility.
+- JSON Schema default with JSON Object as explicit compatibility mode.
+- LLM concurrency preserved at `1/1`; partial batches recover one item at a time.
+- Review backlog wording separates total unresolved, visible 100-row cap, and retryable LLM failures.
+- Portable `skills/mailwhere/**` bundle with Codex/Claude install/repair instructions.
+- Body-free opaque-token source-open flow for explicit original-open.
+
+Not included:
+
+- TEI, embeddings, vector search, MCP integration, contextWhere orchestration, or mailbox mutation.
+- Automatic mail-body file materialization or attachment saving.
+- Full-body exports.
+
 ## Release 0.1.0 — portable read-only secretary
 
 Goal: 집에서 빌드한 portable zip을 Windows 11에서 실행해 Outlook read-only scan, LLM/규칙 기반 분석, local task, tray reminder를 검증한다.

@@ -69,6 +69,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     private readonly ILlmClient _llmClient;
     private readonly IFollowUpAnalyzer _fallback;
     private readonly LlmFallbackPolicy _fallbackPolicy;
+    private readonly LlmAnalysisSettings _settings;
     private readonly object _telemetryLock = new();
     private int _llmAttemptCount;
     private int _llmSuccessCount;
@@ -82,14 +83,16 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
     public LlmBackedFollowUpAnalyzer(
         ILlmClient llmClient,
         IFollowUpAnalyzer? fallback = null,
-        LlmFallbackPolicy fallbackPolicy = LlmFallbackPolicy.LlmThenRules)
+        LlmFallbackPolicy fallbackPolicy = LlmFallbackPolicy.LlmThenRules,
+        LlmAnalysisSettings? settings = null)
     {
         _llmClient = llmClient;
         _fallback = fallback ?? new RuleBasedFollowUpAnalyzer();
         _fallbackPolicy = fallbackPolicy;
+        _settings = settings ?? LlmAnalysisSettings.Default;
     }
 
-    public int PreferredBatchSize => DefaultBatchSize;
+    public int PreferredBatchSize => Math.Clamp(_settings.BatchSize, 1, 16);
 
     public async Task<FollowUpAnalysis> AnalyzeAsync(EmailSnapshot email, CancellationToken cancellationToken = default)
     {
@@ -190,14 +193,115 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         }
     }
 
-    private static LlmRequestOptions BuildRequestOptions(int itemCount, bool isBatch)
+    private LlmRequestOptions BuildRequestOptions(int itemCount, bool isBatch) =>
+        BuildRequestOptions(itemCount, isBatch, _settings);
+
+    internal static LlmRequestOptions BuildRequestOptions(int itemCount, bool isBatch, LlmAnalysisSettings settings)
     {
-        var maxOutputTokens = Math.Clamp(256 + Math.Max(1, itemCount) * 160, MinOutputTokens, MaxOutputTokens);
+        var maxOutputTokens = settings.MaxOutputTokens <= 0
+            ? Math.Clamp(256 + Math.Max(1, itemCount) * 160, MinOutputTokens, MaxOutputTokens)
+            : Math.Clamp(settings.MaxOutputTokens, MinOutputTokens, 8192);
         return new LlmRequestOptions(
             MaxOutputTokens: maxOutputTokens,
             JsonSchemaName: isBatch ? "mailwhere_follow_up_batch" : "mailwhere_follow_up",
-            JsonSchema: isBatch ? BatchResponseSchema : SingleResponseSchema);
+            JsonSchema: isBatch ? BatchResponseSchema : SingleResponseSchema,
+            StructuredOutputMode: settings.StructuredOutputMode,
+            ThinkingControlMode: settings.ThinkingControlMode,
+            Temperature: settings.Temperature);
     }
+
+    internal static string BuildProbeSinglePayload() => BuildPayload(ProbeEmails[0]);
+
+    internal static string BuildProbeBatchPayload() => BuildBatchPayload(ProbeEmails);
+
+    internal static bool AcceptsProbeSingleResponse(string raw) =>
+        !ContainsThinkingLeakage(raw)
+        && ProbeObjectHasRequiredFields(raw)
+        && TryParse(raw, ProbeEmails[0], out var parsed)
+        && parsed.Disposition != AnalysisDisposition.Review;
+
+    internal static bool AcceptsProbeBatchResponse(string raw)
+    {
+        if (ContainsThinkingLeakage(raw)
+            || !ProbeBatchHasExactIds(raw)
+            || !TryParseBatch(raw, ProbeEmails, out var parsed)
+            || parsed.Count != ProbeEmails.Length)
+        {
+            return false;
+        }
+
+        return parsed.All(item => !item.IsTransientLlmFailureReview);
+    }
+
+    private static bool ContainsThinkingLeakage(string raw) =>
+        raw.Contains("<think>", StringComparison.OrdinalIgnoreCase)
+        || raw.Contains("</think>", StringComparison.OrdinalIgnoreCase);
+
+    private static bool ProbeObjectHasRequiredFields(string raw)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && ResultRequiredFields.All(field => document.RootElement.TryGetProperty(field, out _));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool ProbeBatchHasExactIds(string raw)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("items", out var items)
+                || items.ValueKind != JsonValueKind.Array
+                || items.GetArrayLength() != ProbeEmails.Length)
+            {
+                return false;
+            }
+
+            var batchItems = items.EnumerateArray().ToArray();
+            return batchItems.All(ProbeItemHasRequiredFields)
+                && batchItems
+                    .Select(item => item.TryGetProperty("id", out var id) ? id.GetString() : null)
+                    .SequenceEqual(Enumerable.Range(0, ProbeEmails.Length).Select(index => index.ToString(CultureInfo.InvariantCulture)));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool ProbeItemHasRequiredFields(JsonElement item) =>
+        item.ValueKind == JsonValueKind.Object
+        && item.TryGetProperty("id", out _)
+        && ResultRequiredFields.All(field => item.TryGetProperty(field, out _));
+
+    private static readonly EmailSnapshot[] ProbeEmails =
+    [
+        new(
+            "mailwhere-probe-single",
+            new DateTimeOffset(2026, 1, 2, 9, 0, 0, TimeSpan.Zero),
+            "Project Manager",
+            "비용 자료 확인 요청",
+            "영희님, 내일까지 비용 자료 확인 후 회신 부탁드립니다.",
+            MailboxOwnerDisplayName: "영희",
+            RecipientDisplayNames: new[] { "영희" },
+            MailboxRecipientRole: MailboxRecipientRole.Direct),
+        new(
+            "mailwhere-probe-batch",
+            new DateTimeOffset(2026, 1, 2, 10, 0, 0, TimeSpan.Zero),
+            "Design Lead",
+            "회의 참석 확인",
+            "오늘 15시 회의 참석 가능 여부만 확인 부탁드립니다.",
+            MailboxOwnerDisplayName: "영희",
+            RecipientDisplayNames: new[] { "영희" },
+            MailboxRecipientRole: MailboxRecipientRole.Direct)
+    ];
 
     private async Task<LlmCompletion> CompleteJsonWithRetryAsync(
         string systemPrompt,
@@ -329,7 +433,7 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
                 analysisDate = analysisNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 timezone = TimeZoneInfo.Local.Id,
                 utcOffset = analysisNow.ToString("zzz", CultureInfo.InvariantCulture),
-                instruction = "각 items[] metadata와 contents[] body를 id로 연결해 독립 분석하고 입력과 같은 개수, 같은 id로 짧은 JSON 결과를 반환하세요. /no_think",
+                instruction = "각 items[] metadata와 contents[] body를 id로 연결해 독립 분석하고 입력과 같은 개수, 같은 id로 짧은 JSON 결과를 반환하세요.",
                 items = projected.Select(item => item.Item).ToArray(),
                 contents = projected.Select(item => item.Content).ToArray()
             },
@@ -793,7 +897,6 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         """;
 
     private static readonly string SystemPrompt = """
-        /no_think
         한국어 업무 메일 triage 전용 로컬 비서입니다. 추론 설명 없이 짧은 JSON object 하나만 반환하세요.
         목표: 메일 제목을 요약하지 말고 "사용자가 실제로 해야 할 일"만 40자 이내 suggestedTitle로 만드세요.
 
@@ -815,7 +918,6 @@ public sealed class LlmBackedFollowUpAnalyzer : IFollowUpBatchAnalyzer, IAnalysi
         """;
 
     private static readonly string BatchSystemPrompt = """
-        /no_think
         한국어 업무 메일 triage 전용 로컬 비서입니다. items[] metadata와 contents[] body를 id로 연결해 각각 독립 분석하고 짧은 JSON object 하나만 반환하세요.
         출력은 {"items":[...]} 하나뿐입니다. 각 결과는 입력 id를 그대로 포함하세요. 제목보다 "사용자가 실제로 해야 할 일"을 40자 이내로 쓰세요.
 

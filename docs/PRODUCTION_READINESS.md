@@ -8,6 +8,8 @@
 - SQLite-only CLI and WPF search; Outlook COM is reached only after an explicit
   source-open action.
 - Read-only mailbox behavior and sanitized diagnostics/export contracts.
+- v0.13.0 documentation defines fail-closed Qwen3.8 endpoint probing, skill
+  install/repair boundaries, and opaque-token original-open behavior.
 
 ## Remaining required evidence
 
@@ -20,6 +22,11 @@ Classic Outlook and company EDR. Record only content-free evidence:
 - repeated SQLite-only search during sync;
 - cancel/resume, event update, reconciliation, privacy, and mailbox-unchanged
   pass/fail.
+- live `Qwen/Qwen3.8-27B` analysis-shaped probe result, if external LLM is
+  approved;
+- Codex/Claude skill install/repair result, if local agent skill installation is
+  approved;
+- opaque-token source-open pass/fail on a synthetic message.
 
 Do not call the product environment-validated until this evidence exists.
 

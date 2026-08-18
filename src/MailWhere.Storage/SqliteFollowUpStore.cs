@@ -5,6 +5,8 @@ using MailWhere.Core.Storage;
 
 namespace MailWhere.Storage;
 
+public sealed record ReviewCandidateBacklogCounts(int TotalUnresolved, int VisiblePageCount, int RetryableLlmFailures);
+
 public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 {
     private const string TaskColumns = "id, title, due_at, source_id_hash, source_id, confidence, reason, evidence_snippet, status, snooze_until, created_at, updated_at, source_derived_data_deleted, source_sender_display, source_received_at, source_recipient_role, kind, source_conversation_id, source_recipient_display_names";
@@ -426,6 +428,30 @@ public sealed class SqliteFollowUpStore : IFollowUpStore, IAppStateStore
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return true;
+    }
+
+    public async Task<ReviewCandidateBacklogCounts> CountReviewCandidateBacklogAsync(int visiblePageCount, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN reason LIKE 'LLM 분석 실패(%' THEN 1 ELSE 0 END), 0)
+            FROM review_candidates
+            WHERE suppressed = 0
+              AND resolved_at IS NULL
+              AND (snooze_until IS NULL OR snooze_until <= $now)
+            """;
+        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return new ReviewCandidateBacklogCounts(0, visiblePageCount, 0);
+        }
+
+        return new ReviewCandidateBacklogCounts(Convert.ToInt32(reader.GetInt64(0)), visiblePageCount, Convert.ToInt32(reader.GetInt64(1)));
     }
 
     public async Task<IReadOnlyList<ReviewCandidate>> ListReviewCandidatesAsync(CancellationToken cancellationToken = default)

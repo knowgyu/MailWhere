@@ -88,12 +88,18 @@ cp ./assets/app-icon.svg "$publish_dir/assets/app-icon.svg"
 cp ./src/MailWhere.Windows/appsettings.sample.json "$publish_dir/appsettings.sample.json"
 cp ./src/MailWhere.Windows/MailWhere.defaults.sample.json "$publish_dir/MailWhere.defaults.sample.json"
 
+echo "[portable] copy bundled skill"
+mkdir -p "$publish_dir/skills"
+cp -R ./skills/mailwhere "$publish_dir/skills/mailwhere"
+
 required_package_files=(
   README.md
   START_HERE_시작하기.txt
   assets/app-icon.svg
   docs/MANAGED_PC_SMOKE_TEST.md
   "docs/releases/$version_label.md"
+  skills/mailwhere/SKILL.md
+  skills/mailwhere/manifest.json
 )
 for relative_path in "${required_package_files[@]}"; do
   test -f "$publish_dir/$relative_path" || {
@@ -142,7 +148,14 @@ manifest = {
         "list-tasks --json [--status open|archived|all] [--due-window today|overdue|7d|30d|none|all] [--limit N] [--db PATH]",
         "list-review-candidates --json [--limit N] [--db PATH]",
         "search-mail --json --query TEXT [--folder inbox|sent|all] [--sender-recipient TEXT] [--conversation ID] [--limit N] [--db PATH]",
+    "MailWhere.exe --open-source-token TOKEN",
     ],
+    "bundledSkill": {
+        "source": "skills/mailwhere",
+        "codexTarget": "%USERPROFILE%\\.agents\\skills\\mailwhere",
+        "claudeTarget": "%USERPROFILE%\\.claude\\skills\\mailwhere",
+        "conflictPolicy": "Yes overwrites without backup; No preserves and opens folder"
+    },
     "safetyDefaults": [
         "Phase 0/1 Outlook access is read-only",
         "MailWhere.Cli is read-only and does not load Outlook COM",

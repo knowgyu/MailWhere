@@ -54,7 +54,8 @@ public abstract class HttpJsonLlmClient : ILlmClient
 
     protected static object BuildChatResponseFormat(LlmRequestOptions? requestOptions)
     {
-        if (requestOptions?.JsonSchema is not { } schema
+        if (requestOptions?.StructuredOutputMode == LlmStructuredOutputMode.JsonObject
+            || requestOptions?.JsonSchema is not { } schema
             || string.IsNullOrWhiteSpace(requestOptions.JsonSchemaName))
         {
             return new { type = "json_object" };
@@ -74,7 +75,8 @@ public abstract class HttpJsonLlmClient : ILlmClient
 
     protected static object BuildResponsesTextFormat(LlmRequestOptions? requestOptions)
     {
-        if (requestOptions?.JsonSchema is not { } schema
+        if (requestOptions?.StructuredOutputMode == LlmStructuredOutputMode.JsonObject
+            || requestOptions?.JsonSchema is not { } schema
             || string.IsNullOrWhiteSpace(requestOptions.JsonSchemaName))
         {
             return new { type = "json_object" };
@@ -88,6 +90,15 @@ public abstract class HttpJsonLlmClient : ILlmClient
             schema
         };
     }
+
+    protected static bool ShouldDisableThinkingWithTemplate(LlmRequestOptions? requestOptions) =>
+        requestOptions?.ThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse;
+
+    protected static bool ShouldDisableThinkingWithReasoningEffort(LlmRequestOptions? requestOptions) =>
+        requestOptions?.ThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone;
+
+    protected static double TemperatureOrDefault(LlmRequestOptions? requestOptions) =>
+        requestOptions?.Temperature is { } temperature ? temperature : 0.1;
 }
 
 public sealed class OllamaLlmClient : HttpJsonLlmClient
@@ -115,7 +126,7 @@ public sealed class OllamaLlmClient : HttpJsonLlmClient
             format = "json",
             options = new
             {
-                temperature = 0.1,
+                temperature = TemperatureOrDefault(requestOptions),
                 num_ctx = requestOptions?.ContextTokens,
                 num_predict = requestOptions?.MaxOutputTokens ?? 1280,
                 top_p = 0.9
@@ -204,23 +215,40 @@ public sealed class OpenAiChatCompletionsLlmClient : HttpJsonLlmClient
             throw new InvalidOperationException("LLM 설정이 비활성화되어 있습니다.");
         }
 
-        var body = new
+        var body = new Dictionary<string, object?>
         {
-            model = Settings.Model,
-            temperature = 0.1,
-            max_tokens = requestOptions?.MaxOutputTokens ?? 1280,
-            response_format = BuildChatResponseFormat(requestOptions),
-            messages = new[]
+            ["model"] = Settings.Model,
+            ["temperature"] = TemperatureOrDefault(requestOptions),
+            ["max_tokens"] = requestOptions?.MaxOutputTokens ?? 1280,
+            ["response_format"] = BuildChatResponseFormat(requestOptions),
+            ["messages"] = new[]
             {
                 new { role = "system", content = systemPrompt },
                 new { role = "user", content = userPayload }
             }
         };
+        if (ShouldDisableThinkingWithReasoningEffort(requestOptions))
+        {
+            body["reasoning_effort"] = "none";
+        }
+        if (ShouldDisableThinkingWithTemplate(requestOptions))
+        {
+            body["chat_template_kwargs"] = new { enable_thinking = false };
+        }
 
         using var response = await HttpClient.PostAsJsonAsync(BuildUri(Settings.Endpoint, "/v1/chat/completions"), body, JsonOptions, cancellationToken).ConfigureAwait(false);
         using var json = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
+        var choice = json.RootElement.GetProperty("choices")[0];
+        if (choice.TryGetProperty("finish_reason", out var finishReason)
+            && finishReason.ValueKind == JsonValueKind.String
+            && string.Equals(finishReason.GetString(), "length", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new JsonException("LLM response was truncated.");
+        }
+
         return new LlmCompletion(
-            json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? string.Empty);
+            choice.GetProperty("message").GetProperty("content").GetString() ?? string.Empty,
+            OpenAiDiagnosticsExtractor.Extract(json.RootElement, Settings.Provider.ToString(), Settings.Model));
     }
 }
 
@@ -245,26 +273,77 @@ public sealed class OpenAiResponsesLlmClient : HttpJsonLlmClient
             throw new InvalidOperationException("LLM 설정이 비활성화되어 있습니다.");
         }
 
-        var body = new
+        var body = new Dictionary<string, object?>
         {
-            model = Settings.Model,
-            store = false,
-            temperature = 0.1,
-            max_output_tokens = requestOptions?.MaxOutputTokens ?? 1280,
-            text = new
-            {
-                format = BuildResponsesTextFormat(requestOptions)
-            },
-            input = new object[]
+            ["model"] = Settings.Model,
+            ["store"] = false,
+            ["temperature"] = TemperatureOrDefault(requestOptions),
+            ["max_output_tokens"] = requestOptions?.MaxOutputTokens ?? 1280,
+            ["text"] = new { format = BuildResponsesTextFormat(requestOptions) },
+            ["input"] = new object[]
             {
                 new { role = "system", content = systemPrompt },
                 new { role = "user", content = userPayload }
             }
         };
+        if (ShouldDisableThinkingWithReasoningEffort(requestOptions))
+        {
+            body["reasoning"] = new { effort = "none" };
+        }
+        if (ShouldDisableThinkingWithTemplate(requestOptions))
+        {
+            body["chat_template_kwargs"] = new { enable_thinking = false };
+        }
 
         using var response = await HttpClient.PostAsJsonAsync(BuildUri(Settings.Endpoint, "/v1/responses"), body, JsonOptions, cancellationToken).ConfigureAwait(false);
         using var json = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
-        return new LlmCompletion(ExtractOutputText(json.RootElement));
+        ThrowIfIncomplete(json.RootElement);
+        return new LlmCompletion(
+            ExtractOutputText(json.RootElement),
+            OpenAiDiagnosticsExtractor.Extract(json.RootElement, Settings.Provider.ToString(), Settings.Model));
+    }
+
+    private static void ThrowIfIncomplete(JsonElement root)
+    {
+        if (HasStringValue(root, "status", "incomplete")
+            || HasStringValue(root, "finish_reason", "length")
+            || HasStringValue(root, "reason", "max_output_tokens"))
+        {
+            throw new JsonException("LLM response was truncated.");
+        }
+    }
+
+    private static bool HasStringValue(JsonElement element, string propertyName, string value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.String
+                    && string.Equals(property.Value.GetString(), value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (HasStringValue(property.Value, propertyName, value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (HasStringValue(item, propertyName, value))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static string ExtractOutputText(JsonElement root)
@@ -296,6 +375,42 @@ public sealed class OpenAiResponsesLlmClient : HttpJsonLlmClient
         }
 
         return string.Empty;
+    }
+}
+
+internal static class OpenAiDiagnosticsExtractor
+{
+    public static LlmCallDiagnostics Extract(JsonElement root, string provider, string model) =>
+        new(provider, model, ThinkingCharCount: CountReasoningChars(root));
+
+    private static int CountReasoningChars(JsonElement element, string? propertyName = null, bool reasoningContext = false)
+    {
+        var isReasoningField = propertyName is not null
+            && (propertyName.Contains("reasoning", StringComparison.OrdinalIgnoreCase)
+                || propertyName.Contains("thinking", StringComparison.OrdinalIgnoreCase));
+        var inReasoning = reasoningContext || isReasoningField || IsReasoningBlock(element);
+
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => inReasoning ? element.GetString()?.Length ?? 0 : 0,
+            JsonValueKind.Object => element.EnumerateObject().Sum(property => CountReasoningChars(property.Value, property.Name, inReasoning)),
+            JsonValueKind.Array => element.EnumerateArray().Sum(item => CountReasoningChars(item, propertyName, inReasoning)),
+            _ => 0
+        };
+    }
+
+    private static bool IsReasoningBlock(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty("type", out var type)
+            || type.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var typeName = type.GetString();
+        return typeName?.Contains("reasoning", StringComparison.OrdinalIgnoreCase) == true
+            || typeName?.Contains("thinking", StringComparison.OrdinalIgnoreCase) == true;
     }
 }
 

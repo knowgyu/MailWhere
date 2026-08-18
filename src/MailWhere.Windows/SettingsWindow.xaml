@@ -200,6 +200,67 @@
                                             </ComboBox>
                                         </StackPanel>
                                     </Grid>
+
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1*"/>
+                                            <ColumnDefinition Width="1*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Thinking 제어" FontWeight="SemiBold"/>
+                                            <ComboBox x:Name="LlmThinkingModeBox" ToolTip="Auto는 Qwen3.8-native enable_thinking=false를 먼저 검증하고, 실패하면 vLLM 0.25+ 호환 reasoning_effort=none을 검증합니다. 실제 분석은 연결 테스트가 통과한 hard control만 사용합니다.">
+                                                <ComboBoxItem Tag="Auto" Content="Auto (추천)"/>
+                                                <ComboBoxItem Tag="EnableThinkingFalse" Content="enable_thinking=false"/>
+                                                <ComboBoxItem Tag="ReasoningEffortNone" Content="reasoning_effort=none"/>
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="JSON 출력" FontWeight="SemiBold"/>
+                                            <ComboBox x:Name="LlmStructuredOutputBox" ToolTip="JSON Schema가 기본입니다. 호환이 안 되는 서버만 JSON Object를 사용하세요.">
+                                                <ComboBoxItem Tag="JsonSchema" Content="JSON Schema"/>
+                                                <ComboBoxItem Tag="JsonObject" Content="JSON Object 호환"/>
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1*"/>
+                                            <ColumnDefinition Width="1*"/>
+                                            <ColumnDefinition Width="1*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Temperature" FontWeight="SemiBold"/>
+                                            <ComboBox x:Name="LlmTemperatureBox" ToolTip="낮을수록 반복 가능한 업무 분류에 유리합니다.">
+                                                <ComboBoxItem Tag="0" Content="0"/>
+                                                <ComboBoxItem Tag="0.1" Content="0.1"/>
+                                                <ComboBoxItem Tag="0.2" Content="0.2"/>
+                                                <ComboBoxItem Tag="0.5" Content="0.5"/>
+                                                <ComboBoxItem Tag="0.7" Content="0.7"/>
+                                                <ComboBoxItem Tag="1.0" Content="1.0"/>
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="최대 출력 토큰" FontWeight="SemiBold"/>
+                                            <ComboBox x:Name="LlmMaxOutputTokensBox" ToolTip="Auto는 메일 수에 맞춰 512~4096 토큰으로 계산합니다. 응답이 잘리면 고정값을 늘리세요.">
+                                                <ComboBoxItem Tag="0" Content="Auto"/>
+                                                <ComboBoxItem Tag="768" Content="768"/>
+                                                <ComboBoxItem Tag="1280" Content="1280"/>
+                                                <ComboBoxItem Tag="2048" Content="2048"/>
+                                                <ComboBoxItem Tag="4096" Content="4096"/>
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="배치 크기" FontWeight="SemiBold"/>
+                                            <ComboBox x:Name="LlmBatchSizeBox" ToolTip="요청은 항상 1개씩 순차 실행합니다. 이 값은 한 요청에 담는 메일 수만 정합니다.">
+                                                <ComboBoxItem Tag="1" Content="1개"/>
+                                                <ComboBoxItem Tag="2" Content="2개"/>
+                                                <ComboBoxItem Tag="4" Content="4개"/>
+                                                <ComboBoxItem Tag="8" Content="8개"/>
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </Grid>
                                     <CheckBox x:Name="LlmFailureFallbackPromptToggle"
                                               Content="AI 실패 시 규칙 fallback 제안 알림 표시"
                                               ToolTip="꺼두면 AI 실패는 선택한 'AI 실패 시' 정책대로 처리하며 팝업을 띄우지 않습니다."/>
@@ -207,6 +268,35 @@
                                         <Button x:Name="TestConnectionButton" Click="TestConnection_Click" Style="{StaticResource MwButton.Primary}">연결 테스트</Button>
                                         <TextBlock x:Name="LlmStatusText" Text="연결 테스트 전입니다." VerticalAlignment="Center" Foreground="{StaticResource MwBrush.TextMuted}" TextWrapping="Wrap"/>
                                     </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+
+                <TabItem Header="Agent 스킬">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="12">
+                            <Border Style="{StaticResource SectionCard}">
+                                <StackPanel>
+                                    <TextBlock Text="MailWhere 스킬 설치" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+                                    <TextBlock Style="{StaticResource HintText}" Text="portable에 포함된 read-only MailWhere 스킬을 Codex 또는 Claude 사용자 폴더에 설치/복구합니다. 대상에 직접 수정한 파일이 있으면 덮어쓰기 전에 한 번만 물어봅니다."/>
+                                    <WrapPanel Margin="0,2,0,8">
+                                        <Button Click="InstallCodexSkill_Click"
+                                                Style="{StaticResource MwButton.Primary}"
+                                                ToolTip="%USERPROFILE%\.agents\skills\mailwhere 에 설치하거나 같은 bundled 버전으로 복구합니다.">Codex 스킬 설치/복구</Button>
+                                        <Button Click="InstallClaudeSkill_Click"
+                                                ToolTip="%USERPROFILE%\.claude\skills\mailwhere 에 설치하거나 같은 bundled 버전으로 복구합니다.">Claude 스킬 설치/복구</Button>
+                                    </WrapPanel>
+                                    <TextBlock Text="호출 예시" FontWeight="SemiBold"/>
+                                    <TextBox IsReadOnly="True"
+                                             Text="mailwhere 스킬로 health를 확인한 뒤 열린 업무를 20개만 보여줘"
+                                             ToolTip="복사해서 Codex에 붙여넣을 수 있는 명시적 호출 예시입니다."/>
+                                    <TextBox IsReadOnly="True"
+                                             Text="Use the mailwhere skill to search-mail --json for &quot;계약서&quot;, limit 10, and show only sanitized results."
+                                             ToolTip="복사해서 Claude에 붙여넣을 수 있는 명시적 호출 예시입니다."/>
+                                    <TextBlock x:Name="SkillStatusText" Style="{StaticResource HintText}" Text="설치 버튼을 누르면 대상 폴더와 결과가 여기에 표시됩니다." Margin="0,0,0,0"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>

@@ -63,6 +63,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Runtime settings default unlimited recent scan", RuntimeSettingsDefaultUnlimitedRecentScan),
     ("Runtime settings default LLM concurrency", RuntimeSettingsDefaultLlmConcurrency),
     ("Runtime settings clamps LLM concurrency", RuntimeSettingsClampsLlmConcurrency),
+    ("Runtime settings persist and invalidate LLM probe proof", RuntimeSettingsPersistAndInvalidateLlmProbeProof),
+    ("Runtime settings loads selected Auto probe thinking mode for analyzer", RuntimeSettingsLoadsSelectedAutoProbeThinkingModeForAnalyzer),
     ("Runtime settings simple setting choices map", RuntimeSettingsSimpleSettingChoicesMap),
     ("Startup launch mode maps tray argument", StartupLaunchModeMapsTrayArgument),
     ("Runtime settings default daily board time", RuntimeSettingsDefaultDailyBoardTime),
@@ -99,12 +101,14 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM user cancellation propagates", LlmUserCancellationPropagates),
     ("Batch LLM maps results", BatchLlmMapsResults),
     ("Batch LLM passes adaptive request options and prompt limits", BatchLlmPassesAdaptiveRequestOptionsAndPromptLimits),
+    ("LLM output tokens use Auto formula and fixed presets", LlmOutputTokensUseAutoFormulaAndFixedPresets),
     ("Batch LLM payload keeps content list last", BatchLlmPayloadKeepsContentListLast),
     ("Batch LLM accepts raw array output", BatchLlmAcceptsRawArrayOutput),
     ("Batch LLM tolerates missing final item", BatchLlmToleratesMissingFinalItem),
     ("Batch LLM partial failure uses rule fallback when enabled", BatchLlmPartialFailureUsesRuleFallbackWhenEnabled),
     ("Batch LLM invalid JSON retries each mail individually", BatchLlmInvalidJsonRetriesEachMailIndividually),
     ("Batch LLM invalid JSON split retry recovers", BatchLlmInvalidJsonSplitRetryRecovers),
+    ("Batch LLM partial result retries missing items sequentially", BatchLlmPartialResultRetriesMissingItemsSequentially),
     ("Batch LLM rejects one-based ids", BatchLlmRejectsOneBasedIds),
     ("Batch LLM rejects duplicate ids", BatchLlmRejectsDuplicateIds),
     ("LLM failure review candidate retries after recovery", LlmFailureReviewCandidateRetriesAfterRecovery),
@@ -113,9 +117,19 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("LLM failure retry service reports source lookup failure", LlmFailureRetryServiceReportsSourceLookupFailure),
     ("Repeated LLM failure does not duplicate review candidate", RepeatedLlmFailureDoesNotDuplicateReviewCandidate),
     ("LLM endpoint probe validates JSON object", LlmEndpointProbeValidatesJsonObject),
+    ("LLM endpoint probe validates analysis shaped responses", LlmEndpointProbeValidatesAnalysisShapedResponses),
+    ("LLM endpoint probe Auto prefers enable thinking false", LlmEndpointProbeAutoPrefersEnableThinkingFalse),
+    ("LLM endpoint probe Auto falls back to reasoning effort none", LlmEndpointProbeAutoFallsBackToReasoningEffortNone),
+    ("LLM endpoint probe Auto fails closed when hard modes fail", LlmEndpointProbeAutoFailsClosedWhenHardModesFail),
+    ("LLM endpoint probe requires closure judge success", LlmEndpointProbeRequiresClosureJudgeSuccess),
+    ("LLM endpoint probe rejects thinking diagnostics", LlmEndpointProbeRejectsThinkingDiagnostics),
+    ("LLM endpoint probe rejects leakage count and truncation failures", LlmEndpointProbeRejectsLeakageCountAndTruncationFailures),
     ("Ollama client records diagnostics and temperature", OllamaClientRecordsDiagnosticsAndTemperature),
     ("Ollama client does not override runner lifetime or context by default", OllamaClientDoesNotOverrideRunnerLifetimeOrContextByDefault),
     ("OpenAI compatible clients honor output token request options", OpenAiCompatibleClientsHonorOutputTokenRequestOptions),
+    ("OpenAI compatible clients honor thinking and structured output modes", OpenAiCompatibleClientsHonorThinkingAndStructuredOutputModes),
+    ("OpenAI compatible clients count reasoning diagnostics", OpenAiCompatibleClientsCountReasoningDiagnostics),
+    ("OpenAI Responses truncation statuses throw", OpenAiResponsesTruncationStatusesThrow),
     ("OpenAI Responses client extracts output text", OpenAiResponsesClientExtractsOutputText),
     ("LLM model catalog loads Ollama models", LlmModelCatalogLoadsOllamaModels),
     ("LLM model catalog loads OpenAI-compatible models", LlmModelCatalogLoadsOpenAiCompatibleModels),
@@ -130,15 +144,16 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Recent mail scan supports unlimited count", RecentMailScanSupportsUnlimitedCount),
     ("Mail scan reports progress", MailScanReportsProgress),
     ("Mail scan adapts batch size by content length", MailScanAdaptsBatchSizeByContentLength),
-    ("Mail scan runs prepared LLM batches concurrently", MailScanRunsPreparedLlmBatchesConcurrently),
+    ("Mail scan runs prepared LLM batches sequentially", MailScanRunsPreparedLlmBatchesConcurrently),
     ("Mail scan preserves duplicate sources across concurrent batches", MailScanPreservesDuplicateSourcesAcrossConcurrentBatches),
-    ("Mail scan cancellation stops concurrent scheduling", MailScanCancellationStopsConcurrentScheduling),
+    ("Mail scan cancellation stops sequential scheduling", MailScanCancellationStopsConcurrentScheduling),
     ("Reminder planner emits lookahead notifications", ReminderPlannerEmitsLookaheadNotifications),
     ("Reminder planner suppresses future snooze and emits due snooze", ReminderPlannerSuppressesFutureSnoozeAndEmitsDueSnooze),
     ("SQLite store truncates source-derived fields", SqliteStoreTruncatesSourceDerivedFields),
     ("SQLite guarded task save is atomic", SqliteGuardedTaskSaveIsAtomic),
     ("SQLite guarded review candidate save is atomic", SqliteGuardedReviewCandidateSaveIsAtomic),
     ("SQLite review candidates can be listed", SqliteReviewCandidatesCanBeListed),
+    ("SQLite review candidate backlog counts separate total visible and retryable", SqliteReviewCandidateBacklogCountsSeparateTotalVisibleAndRetryable),
     ("SQLite review candidate can be resolved as task", SqliteReviewCandidateCanBeResolvedAsTask),
     ("SQLite review final actions mark source processed", SqliteReviewFinalActionsMarkSourceProcessed),
     ("SQLite review candidate not-task redacts source metadata", SqliteReviewCandidateNotTaskRedactsSourceMetadata),
@@ -160,6 +175,10 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("MailWhere CLI missing database returns JSON error without creating files", MailWhereCliMissingDatabaseReturnsJsonErrorWithoutCreatingFiles),
     ("MailWhere CLI read commands emit sanitized schemas", MailWhereCliReadCommandsEmitSanitizedSchemas),
     ("MailWhere CLI search mail is SQLite only and sanitized", MailWhereCliSearchMailIsSqliteOnlyAndSanitized),
+    ("MailWhere CLI searches legacy mirror without open token", MailWhereCliSearchesLegacyMirrorWithoutOpenToken),
+    ("Open source token resolves locally and rejects invalid tokens", OpenSourceTokenResolvesLocallyAndRejectsInvalidTokens),
+    ("MailWhere skill bundle has expected offline package shape", MailWhereSkillBundleHasExpectedOfflinePackageShape),
+    ("MailWhere skill installer source rejects reparse targets", MailWhereSkillInstallerSourceRejectsReparseTargets),
     ("MailWhere CLI project references only Core and Storage", MailWhereCliProjectReferencesOnlyCoreAndStorage),
     ("SQLite task details edit persists", SqliteTaskDetailsEditPersists),
     ("SQLite task complete and snooze persist", SqliteTaskCompleteAndSnoozePersist),
@@ -888,15 +907,84 @@ static Task RuntimeSettingsClampsLlmConcurrency()
     Assert(low.LlmMaxConcurrency == 1, "Expected low max concurrency clamp.");
 
     var high = RuntimeSettingsSerializer.ParseOrDefault("""{"LlmInitialConcurrency":99,"LlmMaxConcurrency":99}""");
-    Assert(high.LlmInitialConcurrency == 4, "Expected high initial concurrency clamp to the v0.5.0 ceiling.");
-    Assert(high.LlmMaxConcurrency == 4, "Expected high max concurrency clamp to the v0.5.0 ceiling.");
-    Assert(new MailScanRequest(0, true, DateTimeOffset.UtcNow, high.LlmInitialConcurrency, high.LlmMaxConcurrency).EffectiveLlmConcurrency == 4, "Expected effective concurrency to respect ceiling.");
+    Assert(high.LlmInitialConcurrency == 1, "Expected high initial concurrency to clamp to sequential 1/1.");
+    Assert(high.LlmMaxConcurrency == 1, "Expected high max concurrency to clamp to sequential 1/1.");
+    Assert(new MailScanRequest(0, true, DateTimeOffset.UtcNow, high.LlmInitialConcurrency, high.LlmMaxConcurrency).EffectiveLlmConcurrency == 1, "Expected effective concurrency to stay sequential.");
 
     var inverted = RuntimeSettingsSerializer.ParseOrDefault("""{"LlmInitialConcurrency":4,"LlmMaxConcurrency":2}""");
-    Assert(inverted.LlmInitialConcurrency == 4, "Expected explicit initial concurrency.");
-    Assert(inverted.LlmMaxConcurrency == 2, "Max concurrency should preserve the configured lower ceiling.");
-    Assert(new MailScanRequest(0, true, DateTimeOffset.UtcNow, inverted.LlmInitialConcurrency, inverted.LlmMaxConcurrency).EffectiveLlmConcurrency == 2, "Effective concurrency must never exceed configured max.");
+    Assert(inverted.LlmInitialConcurrency == 1, "Expected explicit initial concurrency to clamp to sequential 1/1.");
+    Assert(inverted.LlmMaxConcurrency == 1, "Expected explicit max concurrency to clamp to sequential 1/1.");
+    Assert(new MailScanRequest(0, true, DateTimeOffset.UtcNow, inverted.LlmInitialConcurrency, inverted.LlmMaxConcurrency).EffectiveLlmConcurrency == 1, "Effective concurrency must stay sequential.");
     return Task.CompletedTask;
+}
+
+
+static Task RuntimeSettingsPersistAndInvalidateLlmProbeProof()
+{
+    var probedAt = new DateTimeOffset(2026, 8, 19, 0, 0, 0, TimeSpan.Zero);
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "HTTP://LOCALHOST:8000/v1/",
+        LlmModel = "Qwen/Qwen3.8-27B",
+        LlmThinkingControlMode = LlmThinkingControlMode.Auto,
+        LlmStructuredOutputMode = LlmStructuredOutputMode.JsonSchema,
+        LlmTemperature = 0.1,
+        LlmMaxOutputTokens = 1280,
+        LlmBatchSize = 4
+    };
+
+    var withProof = settings.WithSuccessfulLlmProbeProof(probedAt, LlmThinkingControlMode.EnableThinkingFalse);
+    var reloaded = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof));
+    var normalizedEndpoint = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmEndpoint = "http://localhost:8000/v1" }));
+    var changedModel = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmModel = "other-model" }));
+    var changedControl = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmThinkingControlMode = LlmThinkingControlMode.ReasoningEffortNone }));
+    var changedOutput = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmStructuredOutputMode = LlmStructuredOutputMode.JsonObject }));
+    var changedTemp = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmTemperature = 0.2 }));
+    var changedTokens = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmMaxOutputTokens = 2048 }));
+    var changedBatch = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmBatchSize = 8 }));
+
+    Assert(reloaded.HasCurrentLlmProbeProof(), "Expected matching proof fingerprint to survive serialization.");
+    Assert(reloaded.LastSuccessfulLlmProbeProof?.SelectedThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse, "Expected proof to persist selected hard thinking mode.");
+    Assert(reloaded.ToLlmAnalysisSettings().ThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse, "Expected configured Auto to resolve to selected proof mode for analysis.");
+    Assert(normalizedEndpoint.HasCurrentLlmProbeProof(), "Expected endpoint normalization to preserve proof.");
+    Assert(!changedModel.HasCurrentLlmProbeProof(), "Expected model changes to invalidate proof.");
+    Assert(!changedControl.HasCurrentLlmProbeProof(), "Expected thinking-control changes to invalidate proof.");
+    Assert(!changedOutput.HasCurrentLlmProbeProof(), "Expected structured-output changes to invalidate proof.");
+    Assert(!changedTemp.HasCurrentLlmProbeProof(), "Expected temperature changes to invalidate proof.");
+    Assert(!changedTokens.HasCurrentLlmProbeProof(), "Expected token-budget changes to invalidate proof.");
+    Assert(!changedBatch.HasCurrentLlmProbeProof(), "Expected batch-size changes to invalidate proof.");
+    return Task.CompletedTask;
+}
+
+
+static async Task RuntimeSettingsLoadsSelectedAutoProbeThinkingModeForAnalyzer()
+{
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "http://localhost:8000/v1",
+        LlmModel = "Qwen/Qwen3.8-27B",
+        LlmThinkingControlMode = LlmThinkingControlMode.Auto
+    };
+    var probe = await LlmEndpointProbe.ProbeAsync(settings, new FakeLlmClient(
+        new LlmCompletion("{}"),
+        new LlmCompletion(ProbeSingleSuccessJson()),
+        new LlmCompletion(ProbeBatchSuccessJson()),
+        new LlmCompletion(ClosureProbeSuccessJson())));
+    var reloaded = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(settings with { LastSuccessfulLlmProbeProof = probe.Proof }));
+    var llm = new FakeLlmClient(ProbeSingleSuccessJson());
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, settings: reloaded.ToLlmAnalysisSettings());
+
+    await analyzer.AnalyzeAsync(Mail("자료 요청", "내일까지 회신 부탁드립니다."));
+
+    Assert(probe.Success, "Expected Auto probe fallback to succeed.");
+    Assert(probe.Proof?.SelectedThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone, "Expected proof to store selected reasoning_effort hard mode.");
+    Assert(reloaded.HasCurrentLlmProbeProof(), "Expected selected proof to survive settings load.");
+    Assert(reloaded.ToLlmAnalysisSettings().ThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone, "Expected Auto analysis settings to resolve to selected proof mode.");
+    Assert(llm.LastRequestOptions?.ThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone, "Expected analyzer to serialize selected proof mode after settings load.");
 }
 
 static Task RuntimeSettingsSimpleSettingChoicesMap()
@@ -1675,7 +1763,8 @@ static async Task BatchLlmMapsResults()
     Assert(results[0].DueAt == dueAt, "Expected due date from batch result.");
     Assert(results[1].Disposition == AnalysisDisposition.Ignore, "Expected second batch result to ignore.");
     var prompt = llm.LastSystemPrompt ?? string.Empty;
-    Assert(prompt.Contains("/no_think", StringComparison.Ordinal), "Expected no-think instruction for batch prompt.");
+    Assert(llm.LastRequestOptions?.ThinkingControlMode == LlmThinkingControlMode.Auto, "Expected unresolved analyzer settings to keep Auto until probe proof selects a hard mode.");
+    Assert(!prompt.Contains("/no_think", StringComparison.Ordinal), "Expected soft /no_think prompt hint to stay out of the batch prompt.");
     Assert(prompt.Contains("판단 정책", StringComparison.Ordinal), "Expected explicit triage policy in batch prompt.");
     Assert(prompt.Contains("Few-shot", StringComparison.Ordinal), "Expected few-shot examples in batch prompt.");
     Assert(prompt.Contains("quotedHistoryPreview만 있는 과거 요청", StringComparison.Ordinal), "Expected stale quoted history policy in batch prompt.");
@@ -1709,7 +1798,7 @@ static async Task BatchLlmPassesAdaptiveRequestOptionsAndPromptLimits()
         .ToArray());
 
     Assert(llm.LastRequestOptions?.ContextTokens is null, "Batch requests should inherit Ollama/server context by default.");
-    Assert(llm.LastRequestOptions?.MaxOutputTokens == 2176, "Expected adaptive batch output token budget.");
+    Assert(llm.LastRequestOptions?.MaxOutputTokens == 2176, "Expected Auto token formula: clamp(256 + count * 160, 512, 4096).");
     Assert(llm.LastRequestOptions?.JsonSchemaName == "mailwhere_follow_up_batch", "Expected batch JSON Schema name.");
     Assert(llm.LastRequestOptions?.JsonSchema is { } batchSchema
            && batchSchema.GetProperty("properties").TryGetProperty("items", out _), "Expected batch JSON Schema items contract.");
@@ -1722,6 +1811,31 @@ static async Task BatchLlmPassesAdaptiveRequestOptionsAndPromptLimits()
     Assert(prompt.Contains("markdown", StringComparison.OrdinalIgnoreCase), "Expected markdown prohibition.");
     Assert(!prompt.Contains("summary", StringComparison.Ordinal), "Expected redundant summary output to stay removed.");
     Assert(!prompt.Contains("evidenceSnippet", StringComparison.Ordinal), "Expected evidenceSnippet output to stay removed.");
+}
+
+
+static async Task LlmOutputTokensUseAutoFormulaAndFixedPresets()
+{
+    var singleLlm = new FakeLlmClient(ProbeSingleSuccessJson());
+    var singleAnalyzer = new LlmBackedFollowUpAnalyzer(singleLlm, settings: new LlmAnalysisSettings(MaxOutputTokens: 0));
+    await singleAnalyzer.AnalyzeAsync(Mail("자료 요청", "내일까지 회신 부탁드립니다.", "token-single"));
+
+    var largeLlm = new FakeLlmClient(BatchIgnoreJson(30));
+    var largeAnalyzer = new LlmBackedFollowUpAnalyzer(largeLlm, settings: new LlmAnalysisSettings(MaxOutputTokens: 0, BatchSize: 30));
+    await largeAnalyzer.AnalyzeBatchAsync(Enumerable.Range(0, 30).Select(index => Mail($"공지 {index}", "참고만 해주세요.", $"token-large-{index}")).ToArray());
+
+    var fixedLowLlm = new FakeLlmClient(ProbeSingleSuccessJson());
+    var fixedLowAnalyzer = new LlmBackedFollowUpAnalyzer(fixedLowLlm, settings: new LlmAnalysisSettings(MaxOutputTokens: 384));
+    await fixedLowAnalyzer.AnalyzeAsync(Mail("자료 요청", "내일까지 회신 부탁드립니다.", "token-fixed-low"));
+
+    var fixedHighLlm = new FakeLlmClient(ProbeSingleSuccessJson());
+    var fixedHighAnalyzer = new LlmBackedFollowUpAnalyzer(fixedHighLlm, settings: new LlmAnalysisSettings(MaxOutputTokens: 9000));
+    await fixedHighAnalyzer.AnalyzeAsync(Mail("자료 요청", "내일까지 회신 부탁드립니다.", "token-fixed-high"));
+
+    Assert(singleLlm.LastRequestOptions?.MaxOutputTokens == 512, "Expected Auto token formula minimum clamp for one item.");
+    Assert(largeLlm.LastRequestOptions?.MaxOutputTokens == 4096, "Expected Auto token formula maximum clamp for large batch.");
+    Assert(fixedLowLlm.LastRequestOptions?.MaxOutputTokens == 512, "Expected fixed preset low clamp to still work.");
+    Assert(fixedHighLlm.LastRequestOptions?.MaxOutputTokens == 8192, "Expected fixed preset high clamp to still work.");
 }
 
 static async Task BatchLlmPayloadKeepsContentListLast()
@@ -1978,6 +2092,60 @@ static async Task BatchLlmInvalidJsonSplitRetryRecovers()
     Assert(telemetry.LlmRequestCount == 3, "Expected one failed batch and two individual retries.");
 }
 
+
+static async Task BatchLlmPartialResultRetriesMissingItemsSequentially()
+{
+    var dueAt = new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.FromHours(9));
+    var llm = new FakeLlmClient(
+        new LlmCompletion($$"""
+            {
+              "items": [
+                {
+                  "id": "0",
+                  "kind": "actionRequested",
+                  "disposition": "autoCreateTask",
+                  "confidence": 0.91,
+                  "suggestedTitle": "자료 회신",
+                  "reason": "요청",
+                  "dueAt": "{{dueAt:O}}",
+                  "actionOrigin": "currentMessage",
+                  "currentSenderRequested": true,
+                  "explicitAssignee": null,
+                  "assignedToMailboxUser": true
+                }
+              ]
+            }
+            """),
+        new LlmCompletion("""
+            {
+              "kind": "none",
+              "disposition": "ignore",
+              "confidence": 0.8,
+              "suggestedTitle": "",
+              "reason": "공지",
+              "dueAt": null,
+              "actionOrigin": "none",
+              "currentSenderRequested": false,
+              "explicitAssignee": null,
+              "assignedToMailboxUser": true
+            }
+            """));
+    var analyzer = new LlmBackedFollowUpAnalyzer(llm, settings: new LlmAnalysisSettings(BatchSize: 2));
+
+    var results = await analyzer.AnalyzeBatchAsync(new[]
+    {
+        Mail("자료 요청", "내일까지 회신 부탁드립니다.", "batch-partial-1"),
+        Mail("공지", "FYI 참고만 해주세요.", "batch-partial-2")
+    });
+
+    Assert(results.Count == 2, "Expected missing batch item to recover as a single-item retry.");
+    Assert(results[0].Disposition == AnalysisDisposition.AutoCreateTask, "Expected first batch result preserved.");
+    Assert(results[1].Disposition == AnalysisDisposition.Ignore, "Expected missing item recovered individually.");
+    Assert(llm.RequestOptionsLog.Count == 2, "Expected one batch call plus one sequential single retry.");
+    Assert(llm.RequestOptionsLog[0]?.JsonSchemaName == "mailwhere_follow_up_batch", "Expected first call to be batch-shaped.");
+    Assert(llm.RequestOptionsLog[1]?.JsonSchemaName == "mailwhere_follow_up", "Expected recovery call to be single-shaped.");
+}
+
 static async Task BatchLlmRejectsOneBasedIds()
 {
     var llm = new FakeLlmClient("""
@@ -2218,6 +2386,91 @@ static async Task RepeatedLlmFailureDoesNotDuplicateReviewCandidate()
     Assert(!store.Processed.Contains(mail.SourceHash), "Expected source to remain retryable while only LLM failure exists.");
 }
 
+
+static string ProbeSingleSuccessJson() => """
+    {
+      "kind": "actionRequested",
+      "disposition": "autoCreateTask",
+      "confidence": 0.93,
+      "suggestedTitle": "비용 자료 확인",
+      "reason": "내일까지 회신 요청",
+      "dueAt": "2026-01-03T09:00:00+00:00",
+      "actionOrigin": "currentMessage",
+      "currentSenderRequested": true,
+      "explicitAssignee": "영희",
+      "assignedToMailboxUser": true
+    }
+    """;
+
+static string ProbeBatchSuccessJson(bool oneItemOnly = false)
+{
+    var second = oneItemOnly ? string.Empty : """
+        ,
+        {
+          "id": "1",
+          "kind": "meeting",
+          "disposition": "autoCreateTask",
+          "confidence": 0.88,
+          "suggestedTitle": "회의 참석 확인",
+          "reason": "참석 가능 여부 확인",
+          "dueAt": "2026-01-02T15:00:00+00:00",
+          "actionOrigin": "currentMessage",
+          "currentSenderRequested": true,
+          "explicitAssignee": "영희",
+          "assignedToMailboxUser": true
+        }
+        """;
+    return $$"""
+        {
+          "items": [
+            {
+              "id": "0",
+              "kind": "actionRequested",
+              "disposition": "autoCreateTask",
+              "confidence": 0.93,
+              "suggestedTitle": "비용 자료 확인",
+              "reason": "내일까지 회신 요청",
+              "dueAt": "2026-01-03T09:00:00+00:00",
+              "actionOrigin": "currentMessage",
+              "currentSenderRequested": true,
+              "explicitAssignee": "영희",
+              "assignedToMailboxUser": true
+            }{{second}}
+          ]
+        }
+        """;
+}
+
+
+
+static string ClosureProbeSuccessJson() => """
+    {
+      "shouldSuggest": true,
+      "confidence": 0.82,
+      "reason": "상대 회신으로 대기 종료 가능"
+    }
+    """;
+
+static string BatchIgnoreJson(int count)
+{
+    var items = Enumerable.Range(0, count).Select(index => $$"""
+        {
+          "id": "{{index}}",
+          "kind": "none",
+          "disposition": "ignore",
+          "confidence": 0.8,
+          "suggestedTitle": "",
+          "reason": "공지",
+          "dueAt": null,
+          "actionOrigin": "none",
+          "currentSenderRequested": false,
+          "explicitAssignee": null,
+          "assignedToMailboxUser": true
+        }
+        """);
+    return "{\"items\":[" + string.Join(",", items) + "]}";
+}
+
 static FollowUpAnalysis LlmFailureAnalysis(EmailSnapshot mail) => new(
     FollowUpKind.ReviewNeeded,
     AnalysisDisposition.Review,
@@ -2230,20 +2483,196 @@ static FollowUpAnalysis LlmFailureAnalysis(EmailSnapshot mail) => new(
 
 static async Task LlmEndpointProbeValidatesJsonObject()
 {
-    var settings = new LlmEndpointSettings(
-        LlmProviderKind.OllamaNative,
-        Enabled: true,
-        Endpoint: "http://localhost:11434",
-        Model: "probe-model",
-        ApiKey: null,
-        TimeoutSeconds: 5);
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OllamaNative,
+        LlmEndpoint = "http://localhost:11434",
+        LlmModel = "probe-model",
+        LlmStructuredOutputMode = LlmStructuredOutputMode.JsonObject
+    };
+    var llm = new FakeLlmClient(new LlmCompletion(ProbeSingleSuccessJson()), new LlmCompletion(ProbeBatchSuccessJson()), new LlmCompletion(ClosureProbeSuccessJson()));
 
-    var success = await LlmEndpointProbe.ProbeAsync(settings, new FakeLlmClient("""{"ok":true}"""));
+    var success = await LlmEndpointProbe.ProbeAsync(settings, llm);
     var invalid = await LlmEndpointProbe.ProbeAsync(settings, new FakeLlmClient("not-json"));
 
-    Assert(success.Success, "Expected valid JSON probe success.");
+    Assert(success.Success, "Expected analysis-shaped JSON Object probe success.");
     Assert(success.Code == "ok", "Expected ok code.");
-    Assert(!invalid.Success && invalid.Code == "invalid-json", "Expected invalid JSON probe failure.");
+    Assert(llm.RequestOptionsLog.All(options => options?.StructuredOutputMode == LlmStructuredOutputMode.JsonObject), "Expected JSON Object compatibility request mode.");
+    Assert(!invalid.Success && invalid.Code == "single-analysis-shape", "Expected invalid JSON probe failure.");
+}
+
+
+static async Task LlmEndpointProbeValidatesAnalysisShapedResponses()
+{
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "http://localhost:8000/v1",
+        LlmModel = "Qwen/Qwen3.8-27B",
+        LlmThinkingControlMode = LlmThinkingControlMode.EnableThinkingFalse,
+        LlmStructuredOutputMode = LlmStructuredOutputMode.JsonSchema,
+        LlmMaxOutputTokens = 1536,
+        LlmBatchSize = 2
+    };
+    var llm = new FakeLlmClient(new LlmCompletion(ProbeSingleSuccessJson()), new LlmCompletion(ProbeBatchSuccessJson()), new LlmCompletion(ClosureProbeSuccessJson()));
+
+    var result = await LlmEndpointProbe.ProbeAsync(settings, llm);
+
+    Assert(result.Success, "Expected analysis-shaped single and batch probe success.");
+    Assert(result.Proof is not null, "Expected successful probe proof.");
+    Assert(result.Proof!.Fingerprint == settings.CurrentLlmProbeFingerprint(), "Expected proof fingerprint for current settings.");
+    Assert(llm.RequestOptionsLog.Count == 3, "Expected single, batch, and closure probe calls.");
+    Assert(llm.RequestOptionsLog[0]?.JsonSchemaName == "mailwhere_follow_up", "Expected single analysis JSON Schema.");
+    Assert(llm.RequestOptionsLog[1]?.JsonSchemaName == "mailwhere_follow_up_batch", "Expected batch analysis JSON Schema.");
+    Assert(llm.RequestOptionsLog[2]?.JsonSchemaName == "mailwhere_waiting_closure", "Expected closure judge JSON Schema.");
+    Assert(llm.RequestOptionsLog.All(options => options?.ThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse), "Expected Qwen3.8 template thinking control on both probe calls.");
+    Assert(llm.RequestOptionsLog.All(options => options?.StructuredOutputMode == LlmStructuredOutputMode.JsonSchema), "Expected JSON Schema probe mode.");
+}
+
+static async Task LlmEndpointProbeAutoPrefersEnableThinkingFalse()
+{
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "http://localhost:8000/v1",
+        LlmModel = "Qwen/Qwen3.8-27B",
+        LlmThinkingControlMode = LlmThinkingControlMode.Auto
+    };
+    var llm = new FakeLlmClient(new LlmCompletion(ProbeSingleSuccessJson()), new LlmCompletion(ProbeBatchSuccessJson()), new LlmCompletion(ClosureProbeSuccessJson()));
+
+    var result = await LlmEndpointProbe.ProbeAsync(settings, llm);
+
+    Assert(result.Success, "Expected Auto probe to accept first hard mode.");
+    Assert(result.Proof?.SelectedThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse, "Expected Auto to prefer enable_thinking=false.");
+    Assert(llm.RequestOptionsLog.Count == 3, "Expected Auto preference to stop after first successful closure probe.");
+    Assert(llm.RequestOptionsLog.All(options => options?.ThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse), "Expected first Auto candidate to use enable_thinking=false.");
+}
+
+static async Task LlmEndpointProbeAutoFallsBackToReasoningEffortNone()
+{
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "http://localhost:8000/v1",
+        LlmModel = "Qwen/Qwen3.8-27B",
+        LlmThinkingControlMode = LlmThinkingControlMode.Auto
+    };
+    var llm = new FakeLlmClient(new LlmCompletion("{}"), new LlmCompletion(ProbeSingleSuccessJson()), new LlmCompletion(ProbeBatchSuccessJson()), new LlmCompletion(ClosureProbeSuccessJson()));
+
+    var result = await LlmEndpointProbe.ProbeAsync(settings, llm);
+
+    Assert(result.Success, "Expected Auto probe to fall back to reasoning_effort=none.");
+    Assert(result.Proof?.SelectedThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone, "Expected fallback proof selected mode.");
+    Assert(llm.RequestOptionsLog.Count == 4, "Expected failed single probe then successful single, batch, and closure fallback.");
+    Assert(llm.RequestOptionsLog[0]?.ThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse, "Expected first Auto candidate enable_thinking=false.");
+    Assert(llm.RequestOptionsLog[1]?.ThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone, "Expected fallback single candidate reasoning_effort=none.");
+    Assert(llm.RequestOptionsLog[2]?.ThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone, "Expected fallback batch candidate reasoning_effort=none.");
+    Assert(llm.RequestOptionsLog[3]?.ThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone, "Expected fallback closure candidate reasoning_effort=none.");
+}
+
+static async Task LlmEndpointProbeAutoFailsClosedWhenHardModesFail()
+{
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "http://localhost:8000/v1",
+        LlmModel = "Qwen/Qwen3.8-27B",
+        LlmThinkingControlMode = LlmThinkingControlMode.Auto
+    };
+    var llm = new FakeLlmClient("{}");
+
+    var result = await LlmEndpointProbe.ProbeAsync(settings, llm);
+
+    Assert(!result.Success, "Expected Auto probe to fail closed when both hard modes fail.");
+    Assert(result.Code == "single-analysis-shape", "Expected final Auto failure code from analysis-shaped validation.");
+    Assert(result.Proof is null, "Expected no proof when Auto hard modes fail.");
+    Assert(llm.RequestOptionsLog.Count == 2, "Expected both hard modes to be attempted once.");
+    Assert(llm.RequestOptionsLog[0]?.ThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse, "Expected first hard mode attempted.");
+    Assert(llm.RequestOptionsLog[1]?.ThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone, "Expected second hard mode attempted.");
+}
+
+
+static async Task LlmEndpointProbeRequiresClosureJudgeSuccess()
+{
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "http://localhost:8000/v1",
+        LlmModel = "Qwen/Qwen3.8-27B",
+        LlmThinkingControlMode = LlmThinkingControlMode.EnableThinkingFalse
+    };
+    var llm = new FakeLlmClient(
+        new LlmCompletion(ProbeSingleSuccessJson()),
+        new LlmCompletion(ProbeBatchSuccessJson()),
+        new LlmCompletion("{\"shouldSuggest\":false,\"confidence\":0.8,\"reason\":\"not closed\"}"));
+
+    var result = await LlmEndpointProbe.ProbeAsync(settings, llm);
+
+    Assert(!result.Success, "Expected proof to fail without synthetic closure-judge success.");
+    Assert(result.Code == "closure-analysis-shape", "Expected closure probe failure code.");
+    Assert(result.Proof is null, "Expected failed closure probe not to persist proof.");
+}
+
+static async Task LlmEndpointProbeRejectsThinkingDiagnostics()
+{
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "http://localhost:8000/v1",
+        LlmModel = "Qwen/Qwen3.8-27B",
+        LlmThinkingControlMode = LlmThinkingControlMode.EnableThinkingFalse
+    };
+    var diagnosticLeak = new LlmCompletion(
+        ProbeSingleSuccessJson(),
+        new LlmCallDiagnostics("OpenAiChatCompletions", "Qwen/Qwen3.8-27B", ThinkingCharCount: 12));
+
+    var result = await LlmEndpointProbe.ProbeAsync(settings, new FakeLlmClient(diagnosticLeak));
+
+    Assert(!result.Success, "Expected probe to reject response with reasoning diagnostics.");
+    Assert(result.Code == "single-analysis-shape", "Expected reasoning diagnostics to fail the current analysis shape.");
+    Assert(result.Proof is null, "Expected no proof when thinking diagnostics leak.");
+}
+
+static async Task LlmEndpointProbeRejectsLeakageCountAndTruncationFailures()
+{
+    var settings = RuntimeSettings.ManagedSafeDefault with
+    {
+        ExternalLlmEnabled = true,
+        LlmProvider = LlmProviderKind.OpenAiChatCompletions,
+        LlmEndpoint = "http://localhost:8000/v1",
+        LlmModel = "Qwen/Qwen3.8-27B",
+        LlmThinkingControlMode = LlmThinkingControlMode.EnableThinkingFalse
+    };
+
+    var leakage = await LlmEndpointProbe.ProbeAsync(settings, new FakeLlmClient("<think>reasoning</think>" + ProbeSingleSuccessJson()));
+    var countMismatch = await LlmEndpointProbe.ProbeAsync(settings, new FakeLlmClient(new LlmCompletion(ProbeSingleSuccessJson()), new LlmCompletion(ProbeBatchSuccessJson(oneItemOnly: true))));
+    var invalid = await LlmEndpointProbe.ProbeAsync(settings, new FakeLlmClient("{\"ok\":true}"));
+
+    var truncatingHandler = new StubHttpMessageHandler("""
+        {
+          "choices": [
+            {
+              "finish_reason": "length",
+              "message": { "content": "{}" }
+            }
+          ]
+        }
+        """);
+    var truncatingClient = new OpenAiChatCompletionsLlmClient(new HttpClient(truncatingHandler), settings.ToLlmEndpointSettings());
+    var truncation = await LlmEndpointProbe.ProbeAsync(settings, truncatingClient);
+
+    Assert(!leakage.Success && leakage.Code == "single-analysis-shape", "Expected thinking leakage to fail closed.");
+    Assert(!countMismatch.Success && countMismatch.Code == "batch-analysis-shape", "Expected batch item count mismatch to fail closed.");
+    Assert(!invalid.Success && invalid.Code == "single-analysis-shape", "Expected shallow JSON object to fail analysis-shaped probe.");
+    Assert(!truncation.Success && truncation.Code == "invalid-json", "Expected finish_reason=length truncation to fail closed.");
+    Assert(leakage.Proof is null && countMismatch.Proof is null && invalid.Proof is null && truncation.Proof is null, "Failed probes must not persist proof.");
 }
 
 static async Task OllamaClientRecordsDiagnosticsAndTemperature()
@@ -2386,6 +2815,114 @@ static async Task OpenAiCompatibleClientsHonorOutputTokenRequestOptions()
     using var responsesRequest = JsonDocument.Parse(responsesHandler.LastRequestBody ?? "{}");
     Assert(responsesRequest.RootElement.GetProperty("max_output_tokens").GetInt32() == 1792, "Expected Responses max_output_tokens from request options.");
     Assert(!responsesRequest.RootElement.TryGetProperty("num_ctx", out _), "Responses body must not include Ollama context option.");
+}
+
+static async Task OpenAiCompatibleClientsHonorThinkingAndStructuredOutputModes()
+{
+    var chatSettings = new LlmEndpointSettings(
+        LlmProviderKind.OpenAiChatCompletions,
+        Enabled: true,
+        Endpoint: "http://localhost:8000/v1",
+        Model: "Qwen/Qwen3.8-27B",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+    var chatHandler = new StubHttpMessageHandler("""
+        {
+          "choices": [
+            { "message": { "content": "{\"ok\":true}" } }
+          ]
+        }
+        """);
+    var chatClient = new OpenAiChatCompletionsLlmClient(new HttpClient(chatHandler), chatSettings);
+
+    await chatClient.CompleteJsonAsync("system", "user", requestOptions: new LlmRequestOptions(
+        MaxOutputTokens: 1536,
+        StructuredOutputMode: LlmStructuredOutputMode.JsonObject,
+        ThinkingControlMode: LlmThinkingControlMode.EnableThinkingFalse,
+        Temperature: 0.2));
+    using var chatTemplateRequest = JsonDocument.Parse(chatHandler.LastRequestBody ?? "{}");
+    Assert(Math.Abs(chatTemplateRequest.RootElement.GetProperty("temperature").GetDouble() - 0.2) < 0.0001, "Expected Chat temperature from request options.");
+    Assert(chatTemplateRequest.RootElement.GetProperty("response_format").GetProperty("type").GetString() == "json_object", "Expected Chat JSON Object compatibility mode.");
+    Assert(chatTemplateRequest.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean() == false, "Expected Chat enable_thinking=false.");
+    Assert(!chatTemplateRequest.RootElement.TryGetProperty("reasoning_effort", out _), "Template thinking mode must not also send reasoning_effort.");
+
+    await chatClient.CompleteJsonAsync("system", "user", requestOptions: new LlmRequestOptions(ThinkingControlMode: LlmThinkingControlMode.ReasoningEffortNone));
+    using var chatReasoningRequest = JsonDocument.Parse(chatHandler.LastRequestBody ?? "{}");
+    Assert(chatReasoningRequest.RootElement.GetProperty("reasoning_effort").GetString() == "none", "Expected Chat reasoning_effort=none.");
+    Assert(!chatReasoningRequest.RootElement.TryGetProperty("chat_template_kwargs", out _), "Reasoning mode must not also send template kwargs.");
+
+    var responsesSettings = chatSettings with { Provider = LlmProviderKind.OpenAiResponses };
+    var responsesHandler = new StubHttpMessageHandler("""{ "output_text": "{\"ok\":true}" }""");
+    var responsesClient = new OpenAiResponsesLlmClient(new HttpClient(responsesHandler), responsesSettings);
+
+    await responsesClient.CompleteJsonAsync("system", "user", requestOptions: new LlmRequestOptions(ThinkingControlMode: LlmThinkingControlMode.ReasoningEffortNone));
+    using var responsesReasoningRequest = JsonDocument.Parse(responsesHandler.LastRequestBody ?? "{}");
+    Assert(responsesReasoningRequest.RootElement.GetProperty("reasoning").GetProperty("effort").GetString() == "none", "Expected Responses nested reasoning.effort=none.");
+    Assert(!responsesReasoningRequest.RootElement.TryGetProperty("chat_template_kwargs", out _), "Responses reasoning mode must not also send template kwargs.");
+
+    await responsesClient.CompleteJsonAsync("system", "user", requestOptions: new LlmRequestOptions(ThinkingControlMode: LlmThinkingControlMode.EnableThinkingFalse));
+    using var responsesTemplateRequest = JsonDocument.Parse(responsesHandler.LastRequestBody ?? "{}");
+    Assert(responsesTemplateRequest.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean() == false, "Expected Responses enable_thinking=false.");
+    Assert(!responsesTemplateRequest.RootElement.TryGetProperty("reasoning", out _), "Responses template mode must not also send reasoning.");
+}
+
+
+static async Task OpenAiCompatibleClientsCountReasoningDiagnostics()
+{
+    var chatSettings = new LlmEndpointSettings(
+        LlmProviderKind.OpenAiChatCompletions,
+        Enabled: true,
+        Endpoint: "http://localhost:8000/v1",
+        Model: "qwen-local",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+    var chatHandler = new StubHttpMessageHandler("""
+        {
+          "choices": [
+            {
+              "message": {
+                "content": "{\"ok\":true}",
+                "reasoning": "hidden reasoning"
+              }
+            }
+          ]
+        }
+        """);
+    var chatClient = new OpenAiChatCompletionsLlmClient(new HttpClient(chatHandler), chatSettings);
+
+    var chatCompletion = await chatClient.CompleteJsonAsync("system", "user");
+
+    var responsesSettings = chatSettings with { Provider = LlmProviderKind.OpenAiResponses };
+    var responsesHandler = new StubHttpMessageHandler("""
+        {
+          "output_text": "{\"ok\":true}",
+          "output": [
+            { "type": "reasoning", "summary": [ { "text": "hidden response reasoning" } ] },
+            { "type": "message", "content": [ { "type": "output_text", "text": "{\"ok\":true}" } ] }
+          ]
+        }
+        """);
+    var responsesClient = new OpenAiResponsesLlmClient(new HttpClient(responsesHandler), responsesSettings);
+
+    var responsesCompletion = await responsesClient.CompleteJsonAsync("system", "user");
+
+    Assert(chatCompletion.Diagnostics?.ThinkingCharCount > 0, "Expected Chat reasoning field to count as thinking leakage.");
+    Assert(responsesCompletion.Diagnostics?.ThinkingCharCount > 0, "Expected Responses reasoning block to count as thinking leakage.");
+}
+
+static async Task OpenAiResponsesTruncationStatusesThrow()
+{
+    var settings = new LlmEndpointSettings(
+        LlmProviderKind.OpenAiResponses,
+        Enabled: true,
+        Endpoint: "http://localhost:8000/v1",
+        Model: "qwen-local",
+        ApiKey: null,
+        TimeoutSeconds: 5);
+
+    await AssertJsonExceptionAsync(new OpenAiResponsesLlmClient(new HttpClient(new StubHttpMessageHandler("""{ "status": "incomplete", "output_text": "{}" }""")), settings));
+    await AssertJsonExceptionAsync(new OpenAiResponsesLlmClient(new HttpClient(new StubHttpMessageHandler("""{ "output_text": "{}", "output": [ { "finish_reason": "length" } ] }""")), settings));
+    await AssertJsonExceptionAsync(new OpenAiResponsesLlmClient(new HttpClient(new StubHttpMessageHandler("""{ "output_text": "{}", "incomplete_details": { "reason": "max_output_tokens" } }""")), settings));
 }
 
 static async Task OpenAiResponsesClientExtractsOutputText()
@@ -2681,12 +3218,12 @@ static async Task MailScanRunsPreparedLlmBatchesConcurrently()
         MaxItems: 0,
         IncludeBody: true,
         Since: DateTimeOffset.Now.AddDays(-30),
-        LlmInitialConcurrency: 2,
-        LlmMaxConcurrency: 4));
+        LlmInitialConcurrency: 1,
+        LlmMaxConcurrency: 1));
 
     Assert(summary.ReadCount == 36, "Expected all messages read.");
-    Assert(summary.IgnoredCount == 36, "Expected all concurrent analyzer results counted.");
-    Assert(analyzer.MaxActiveBatchCalls == 2, "Expected fixed v0.5.0 effective concurrency of two.");
+    Assert(summary.IgnoredCount == 36, "Expected all sequential analyzer results counted.");
+    Assert(analyzer.MaxActiveBatchCalls == 1, "Expected v0.13.0 sequential 1/1 LLM concurrency.");
     Assert(store.MaxActiveMutations <= 1, "Persistence must stay serialized.");
 }
 
@@ -2734,10 +3271,10 @@ static async Task MailScanCancellationStopsConcurrentScheduling()
             MaxItems: 0,
             IncludeBody: true,
             Since: DateTimeOffset.Now.AddDays(-30),
-            LlmInitialConcurrency: 2,
-            LlmMaxConcurrency: 4),
+            LlmInitialConcurrency: 1,
+            LlmMaxConcurrency: 1),
         cts.Token);
-    await analyzer.WaitForStartedAsync(expectedStarted: 2, cts.Token);
+    await analyzer.WaitForStartedAsync(expectedStarted: 1, cts.Token);
     await cts.CancelAsync();
 
     try
@@ -2747,7 +3284,7 @@ static async Task MailScanCancellationStopsConcurrentScheduling()
     }
     catch (OperationCanceledException)
     {
-        Assert(analyzer.StartedBatchCalls == 2, "Pending batches should not start after cancellation.");
+        Assert(analyzer.StartedBatchCalls == 1, "Pending batches should not start after cancellation.");
     }
 }
 
@@ -2950,6 +3487,34 @@ static async Task SqliteReviewCandidatesCanBeListed()
 
         Assert(candidates.Count == 1, "Expected one review candidate.");
         Assert(candidates[0].Analysis.SuggestedTitle == "검토 후보", "Expected candidate title.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static async Task SqliteReviewCandidateBacklogCountsSeparateTotalVisibleAndRetryable()
+{
+    var (store, _, cleanup) = await CreateTempStoreAsync();
+    try
+    {
+        for (var index = 0; index < 105; index++)
+        {
+            var mail = Mail($"검토 {index}", "확인 부탁드립니다.", $"review-backlog-{index}");
+            var analysis = index < 7
+                ? LlmFailureAnalysis(mail)
+                : new FollowUpAnalysis(FollowUpKind.ReviewNeeded, AnalysisDisposition.Review, 0.5, $"검토 {index}", "검토", null, null);
+            await store.SaveReviewCandidateAsync(ReviewCandidate.FromAnalysis(mail, analysis, DateTimeOffset.UtcNow.AddSeconds(index)));
+        }
+
+        var visible = await store.ListReviewCandidatesAsync();
+        var counts = await store.CountReviewCandidateBacklogAsync(visible.Count);
+
+        Assert(visible.Count == 100, "Expected visible review page capped at 100.");
+        Assert(counts.TotalUnresolved == 105, "Expected total unresolved count independent of visible cap.");
+        Assert(counts.VisiblePageCount == 100, "Expected visible page count reported separately.");
+        Assert(counts.RetryableLlmFailures == 7, "Expected retryable LLM failure count reported separately.");
     }
     finally
     {
@@ -3484,12 +4049,22 @@ static async Task LlmClosureJudgeCanRejectWeakReply()
     var task = new LocalTaskItem(Guid.NewGuid(), "견적 요청", null, "source", "source", 0.8, "대기", null, LocalTaskStatus.Open, null, now.AddDays(-1), now.AddDays(-1), Kind: FollowUpKind.WaitingForReply, SourceRecipientDisplayNames: new[] { "Partner" });
     var email = Mail("RE: 견적 요청", "확인해보겠습니다.", id: "weak-reply", conversationId: "conv", mailboxOwner: "Me", sender: "Partner");
     var trigger = new WaitingClosureTrigger(task, email, WaitingClosureTriggerKind.RecipientReply, 0.72, "요청한 상대의 회신이 감지되었습니다.");
-    var judge = new LlmBackedWaitingClosureJudge(new FakeLlmClient("""{"shouldSuggest":false,"confidence":0.2,"reason":"아직 확인 예정이라 완료가 아닙니다"}"""));
+    var llm = new FakeLlmClient("""{"shouldSuggest":false,"confidence":0.2,"reason":"아직 확인 예정이라 완료가 아닙니다"}""");
+    var judge = new LlmBackedWaitingClosureJudge(llm, settings: new LlmAnalysisSettings(
+        ThinkingControlMode: LlmThinkingControlMode.ReasoningEffortNone,
+        StructuredOutputMode: LlmStructuredOutputMode.JsonSchema,
+        Temperature: 0.2,
+        MaxOutputTokens: 0));
 
     var judgment = await judge.JudgeAsync(trigger);
 
     Assert(!judgment.ShouldSuggest, "Expected LLM to reject weak reply closure suggestion.");
     Assert(judgment.Source == WaitingClosureDecisionSource.Llm, "Expected LLM decision source.");
+    Assert(llm.LastRequestOptions?.ThinkingControlMode == LlmThinkingControlMode.ReasoningEffortNone, "Expected closure judge to use selected hard thinking mode.");
+    Assert(Math.Abs((llm.LastRequestOptions?.Temperature ?? 0) - 0.2) < 0.0001, "Expected closure judge temperature from settings.");
+    Assert(llm.LastRequestOptions?.StructuredOutputMode == LlmStructuredOutputMode.JsonSchema, "Expected closure judge JSON Schema mode.");
+    Assert(llm.LastRequestOptions?.JsonSchemaName == "mailwhere_waiting_closure", "Expected closure judge schema name.");
+    Assert(!(llm.LastSystemPrompt ?? string.Empty).Contains("/no_think", StringComparison.Ordinal), "Expected closure prompt not to use soft /no_think.");
 }
 
 static async Task WaitingClosureKeepAndArchiveDecisionsPersist()
@@ -3784,7 +4359,9 @@ static async Task MailWhereCliSearchMailIsSqliteOnlyAndSanitized()
         AssertProviderEnvelope(searchJson.RootElement, ok: true);
         var results = searchJson.RootElement.GetProperty("data").GetProperty("results");
         Assert(results.GetArrayLength() == 1, "Expected one mail search hit.");
-        Assert(results[0].GetProperty("can_open_source").GetBoolean(), "Expected opaque source-open capability flag.");
+        var openSourceToken = results[0].GetProperty("open_source_token").GetString();
+        Assert(MailMirrorOpenSourceToken.IsValid(openSourceToken), "Expected valid opaque source-open token.");
+        Assert(!ContainsJsonPropertyName(search.Stdout, "can_open_source"), "Expected legacy can_open_source flag omitted.");
         Assert(results[0].GetProperty("snippet").GetString()!.Length <= 160, "Expected bounded snippet.");
         Assert(!search.Stdout.Contains("secret-store", StringComparison.Ordinal), "Expected StoreID omitted from CLI search JSON.");
         Assert(!search.Stdout.Contains("secret-entry", StringComparison.Ordinal), "Expected EntryID omitted from CLI search JSON.");
@@ -3796,6 +4373,130 @@ static async Task MailWhereCliSearchMailIsSqliteOnlyAndSanitized()
     {
         cleanup();
     }
+}
+
+
+static async Task MailWhereCliSearchesLegacyMirrorWithoutOpenToken()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "MailWhere.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var dbPath = Path.Combine(directory, "legacy.db");
+    try
+    {
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE mail_messages (
+                    id INTEGER PRIMARY KEY,
+                    store_id TEXT NOT NULL,
+                    entry_id TEXT NOT NULL,
+                    folder TEXT NOT NULL,
+                    received_at TEXT NULL,
+                    sent_at TEXT NULL,
+                    last_modified_at TEXT NOT NULL,
+                    conversation_id TEXT NULL,
+                    subject TEXT NOT NULL,
+                    sender_display TEXT NOT NULL,
+                    recipients_text TEXT NULL,
+                    body_text TEXT NOT NULL,
+                    body_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(store_id, entry_id)
+                );
+                INSERT INTO mail_messages (store_id, entry_id, folder, received_at, sent_at, last_modified_at, conversation_id, subject, sender_display, recipients_text, body_text, body_hash, created_at, updated_at)
+                VALUES ('legacy-store', 'legacy-entry', 'Inbox', '2026-08-19T00:00:00+00:00', NULL, '2026-08-19T00:00:00+00:00', 'legacy-conv', '레거시 제목', 'Legacy Sender', NULL, '본문 needle', 'hash', '2026-08-19T00:00:00+00:00', '2026-08-19T00:00:00+00:00');
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var search = await RunCliAsync("search-mail", "--json", "--db", dbPath, "--query", "제목", "--folder", "inbox", "--limit", "5");
+
+        Assert(search.ExitCode == CliApp.ExitSuccess, "Expected legacy mirror search to succeed without open_source_token column.");
+        using var json = JsonDocument.Parse(search.Stdout);
+        AssertProviderEnvelope(json.RootElement, ok: true);
+        var result = json.RootElement.GetProperty("data").GetProperty("results")[0];
+        Assert(!result.TryGetProperty("open_source_token", out var token) || token.ValueKind == JsonValueKind.Null, "Expected legacy search token to be absent or null.");
+        Assert(!ContainsJsonPropertyName(search.Stdout, "store_id"), "Expected legacy StoreID still omitted.");
+        Assert(!ContainsJsonPropertyName(search.Stdout, "entry_id"), "Expected legacy EntryID still omitted.");
+        Assert(!ContainsJsonPropertyName(search.Stdout, "can_open_source"), "Expected legacy capability flag omitted.");
+    }
+    finally
+    {
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+        catch
+        {
+            // Test cleanup is best-effort.
+        }
+    }
+}
+
+static async Task OpenSourceTokenResolvesLocallyAndRejectsInvalidTokens()
+{
+    var (_, dbPath, cleanup) = await CreateTempStoreAsync();
+    await using var mirror = new SqliteMailMirrorStore(dbPath);
+    try
+    {
+        await mirror.InitializeAsync();
+        await mirror.UpsertBatchAsync(new[]
+        {
+            MirrorMessage("store-a", "entry-a", "토큰 테스트", "본문", MailSourceFolder.Inbox)
+        });
+
+        var results = await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "토큰", Folder: MailSourceFolder.Inbox));
+        var token = results.Single().OpenSourceToken;
+        var locator = await mirror.ResolveOpenSourceTokenAsync(token!);
+        var invalid = await mirror.ResolveOpenSourceTokenAsync("not-a-token");
+
+        Assert(MailMirrorOpenSourceToken.IsValid(token), "Expected generated token to be valid and opaque.");
+        Assert(token != MailMirrorOpenSourceToken.Create("store-a", "entry-a", collisionNonce: 1), "Expected token nonce to be part of stable local derivation.");
+        Assert(locator == new MailMirrorLocator("store-a", "entry-a"), "Expected valid token to resolve to the local locator.");
+        Assert(invalid is null, "Expected invalid token to fail closed.");
+        Assert(StartupLaunchModeResolver.FromArgs(new[] { "--open-source-token", token! }) == StartupLaunchMode.OpenSourceToken, "Expected token launch mode.");
+        Assert(StartupLaunchModeResolver.TryGetOpenSourceToken(new[] { "--open-source-token", token! }, out var parsed) && parsed == token, "Expected startup parser to keep opaque token only.");
+    }
+    finally
+    {
+        cleanup();
+    }
+}
+
+static Task MailWhereSkillBundleHasExpectedOfflinePackageShape()
+{
+    var root = Path.Combine(FindRepoRoot(), "skills", "mailwhere");
+    var skill = Path.Combine(root, "SKILL.md");
+    var manifest = Path.Combine(root, "manifest.json");
+    var contract = Path.Combine(root, "references", "contract.md");
+
+    Assert(File.Exists(skill), "Expected bundled MailWhere skill entrypoint.");
+    Assert(File.Exists(manifest), "Expected bundled skill manifest-style file.");
+    Assert(File.Exists(contract), "Expected bundled skill contract reference.");
+
+    var skillText = File.ReadAllText(skill);
+    var manifestText = File.ReadAllText(manifest);
+    var contractText = File.ReadAllText(contract);
+    Assert(skillText.Contains("read-only", StringComparison.OrdinalIgnoreCase), "Expected skill to declare read-only behavior.");
+    Assert(skillText.Contains("open_source_token", StringComparison.Ordinal), "Expected skill to document opaque source-open token.");
+    Assert(manifestText.Contains("mailwhere", StringComparison.OrdinalIgnoreCase), "Expected manifest to name the MailWhere bundle.");
+    Assert(contractText.Contains("store_id", StringComparison.OrdinalIgnoreCase), "Expected contract to document raw locator exclusion.");
+    Assert(contractText.Contains("open_source_token", StringComparison.Ordinal), "Expected contract to document token-only open surface.");
+    return Task.CompletedTask;
+}
+
+
+static Task MailWhereSkillInstallerSourceRejectsReparseTargets()
+{
+    var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "MailWhere.Windows", "MailWhereSkillInstaller.cs"));
+    Assert(source.Contains("ContainsReparsePointOnPath(skillRoot, destination)", StringComparison.Ordinal), "Expected installer to reject reparse points on the target path.");
+    Assert(source.Contains("ContainsReparsePoint(destination)", StringComparison.Ordinal), "Expected installer to reject reparse-point target content.");
+    Assert(source.Contains("unsafe-reparse-point-target", StringComparison.Ordinal), "Expected sanitized unsafe reparse status code.");
+    Assert(source.Contains("FileAttributes.ReparsePoint", StringComparison.Ordinal), "Expected cross-platform reparse attribute check.");
+    return Task.CompletedTask;
 }
 
 static Task MailWhereCliProjectReferencesOnlyCoreAndStorage()
@@ -4785,6 +5486,20 @@ static bool ContainsSequence(byte[] haystack, byte[] needle)
     return false;
 }
 
+
+static async Task AssertJsonExceptionAsync(ILlmClient client)
+{
+    try
+    {
+        await client.CompleteJsonAsync("system", "user");
+        Assert(false, "Expected JsonException.");
+    }
+    catch (JsonException)
+    {
+        // Expected truncation/incomplete response.
+    }
+}
+
 static void Assert(bool condition, string message)
 {
     if (!condition)
@@ -5514,11 +6229,8 @@ sealed class CancellableBatchAnalyzer : IFollowUpBatchAnalyzer
 
     public async Task<IReadOnlyList<FollowUpAnalysis>> AnalyzeBatchAsync(IReadOnlyList<EmailSnapshot> emails, CancellationToken cancellationToken = default)
     {
-        var started = Interlocked.Increment(ref _startedBatchCalls);
-        if (started >= 2)
-        {
-            _startedEnough.TrySetResult();
-        }
+        Interlocked.Increment(ref _startedBatchCalls);
+        _startedEnough.TrySetResult();
 
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         return emails.Select(_ => FollowUpAnalysis.Ignore("batch")).ToArray();

@@ -54,9 +54,50 @@ Ollama native 호출은 업무 triage에 맞춰 다음을 기본 적용합니다
 }
 ```
 
-vLLM에는 Chat Completions를 권장합니다. MailWhere는 단일 결과와 batch `items[]` 결과 각각에 `response_format: json_schema`를 보내 `kind`, `disposition`, `confidence`, `id` 등 출력 계약을 강제합니다. vLLM이 오래되어 `json_schema`를 지원하지 않으면 연결 테스트 또는 첫 분석에서 HTTP 오류가 나므로, 해당 서버를 업그레이드하거나 Responses provider를 명시적으로 선택합니다.
+vLLM에는 Chat Completions를 권장합니다. MailWhere는 단일 결과와 batch `items[]` 결과 각각에 `response_format: json_schema`를 보내 `kind`, `disposition`, `confidence`, `id` 등 출력 계약을 강제합니다. vLLM이 오래되어 `json_schema`를 지원하지 않으면 capability probe 또는 첫 분석에서 HTTP 오류가 나므로, 해당 서버를 업그레이드하거나 Responses provider를 명시적으로 선택합니다.
 
 LLM에 원문 전체를 보내지 않습니다. 현재 메일 본문은 최대 1,300자, 현재 발신자의 명시적 전달/대응 요청이 있을 때만 forwarded context는 최대 900자, reply quoted history는 최대 240자로 제한합니다. 전달 본문만의 요청은 자동 업무로 만들지 않습니다.
+
+## Qwen/Qwen3.8-27B with vLLM
+
+v0.13.0의 Qwen 대상은 `Qwen/Qwen3.8-27B`입니다. 이 release의 설정/운영 안내는 이 27B target만 기준으로 합니다.
+
+권장 vLLM 시작점:
+
+```bash
+vllm serve Qwen/Qwen3.8-27B \
+  --max-model-len 262144 \
+  --reasoning-parser qwen3
+```
+
+이 command는 target GPU/vLLM host에서 검증해야 합니다. Linux repo 검증은 문서와 static checks만 수행하고 live vLLM endpoint를 시작하지 않습니다.
+
+운영 기준:
+
+- vLLM recipe 최소 기준은 `vLLM 0.17.0+`입니다.
+- `--reasoning-parser qwen3`는 Qwen3 계열 reasoning block을 content와 분리하기 위한 필수 운영 옵션으로 봅니다.
+- thinking off 기본값은 request-level `chat_template_kwargs: { "enable_thinking": false }`입니다.
+- vLLM `0.25+`에서는 `reasoning_effort="none"`이 `enable_thinking=false`로 매핑될 수 있습니다. MailWhere는 이 경로를 편의 옵션으로만 취급하고, capability probe가 같은 single/batch/대기 종료 판단 shape에서 통과할 때만 사용합니다.
+- JSON Schema가 기본 structured-output mode입니다. JSON Object는 endpoint compatibility가 필요할 때 쓰는 약한 mode이며, schema 검증 강도를 낮춥니다.
+- LLM concurrency는 계속 `1/1`입니다. Batch 분석이 실패하거나 일부 id가 빠지면 누락 항목만 1건씩 순서대로 다시 분석하고, 병렬 요청을 시작하지 않습니다.
+
+Provider request body contract:
+
+- Chat Completions sends `temperature`, `max_tokens`, and `response_format`.
+- Responses sends `temperature`, `max_output_tokens`, and `text.format`.
+- `reasoning_effort="none"` maps to Chat Completions `reasoning_effort` and Responses `reasoning: { "effort": "none" }`.
+- Template-native thinking off maps to `chat_template_kwargs: { "enable_thinking": false }`.
+- Ollama-only fields such as `think=false` and `options.num_predict` stay on Ollama requests only.
+
+Settings tooltips should keep the user-facing distinction simple:
+
+| Control | Default | Tooltip point |
+| --- | --- | --- |
+| Thinking control | `enable_thinking=false` | Qwen3.8이 긴 reasoning에 예산을 쓰지 않도록 hard control을 보냅니다. |
+| Structured output | JSON Schema | 가장 엄격한 JSON 계약입니다. JSON Object는 호환성 fallback입니다. |
+| Temperature | `0.1` | 분류 결과를 안정화합니다. |
+| Output tokens | bounded preset | Batch 크기에 맞춰 늘리되 truncation을 probe에서 잡습니다. |
+| Batch size | small/sequential | 속도보다 endpoint 안정성을 우선하고 retry도 순차 실행합니다. |
 
 ## OpenAI-compatible Responses 예시
 
@@ -100,21 +141,35 @@ LLM에 원문 전체를 보내지 않습니다. 현재 메일 본문은 최대 1
 
 endpoint가 이미 `/v1`로 끝나면 중복으로 `/v1/v1/models`가 되지 않도록 `/models`만 붙입니다. 목록이 비어 있거나 서버가 모델 목록을 제공하지 않으면 모델명을 직접 입력할 수 있습니다.
 
-## 연결 테스트
+## Capability probe
 
-앱 설정의 **연결 테스트**는 메일 내용이 아닌 작은 JSON probe만 보냅니다.
+앱 설정의 **연결 테스트**는 메일 내용이 아닌 synthetic probe를 보냅니다. v0.13.0부터는 단순 JSON object ping이 아니라 MailWhere가 실제로 쓰는 follow-up single-item, follow-up batch, waiting-closure request shape을 검증합니다.
 
-- 성공: endpoint/model/provider 조합이 JSON object 응답을 반환함
+- 성공: endpoint/model/provider/structured-output/thinking-control 조합이 single-item, batch, waiting-closure 응답 계약을 모두 통과함
 - `not-configured`: provider/model/endpoint가 비어 있거나 LLM이 꺼져 있음
 - `invalid-json`: 응답이 JSON object가 아님
 - `timeout`: 설정된 timeout 안에 응답하지 않음
 - `http-error`: endpoint 연결/HTTP 오류
+- `schema-mismatch`: 필수 field, id, item count, disposition/kind 계약이 맞지 않음
+- `thinking-leakage`: `<think>` 같은 reasoning text가 final content에 남음
+- `truncated`: finish reason이나 parser 결과가 출력 잘림을 가리킴
+- `closure-analysis-shape`: waiting-closure 응답 계약을 통과하지 못함
+- `reasoning-incomplete`: reasoning metadata나 Responses incomplete 상태가 final JSON 계약을 방해함
+
+성공한 probe는 provider, normalized endpoint, model, thinking-control mode, structured-output mode, temperature, max-output-token policy, batch-size policy fingerprint와 함께 저장됩니다. 이 값 중 하나라도 바뀌면 저장된 proof는 stale이 되고, LLM 분석은 새 probe가 통과할 때까지 fail-closed로 거부됩니다.
+
+LLM-backed waiting-closure 판단도 같은 현재 proof가 있을 때만 endpoint를 호출합니다. 이 proof는 single-item, batch, waiting-closure synthetic 요청이 모두 통과할 때만 저장됩니다. proof가 없거나 stale이면 closure 판단은 rule-based fallback에 머뭅니다.
 
 로컬 30B 이상 모델은 첫 호출이나 긴 메일에서 30초를 넘길 수 있으므로 기본 timeout은 90초입니다. 필요하면 설정에서 30초/1분/1분 30초/3분 중 선택합니다. 사용자가 [스캔 중지]를 누른 cancellation은 timeout과 구분되어 즉시 스캔을 멈춥니다.
 
 ## 보안 원칙
 
 - prompt와 raw mail body는 저장하지 않습니다.
-- SQLite에는 source hash, 짧은 제목/사유/근거 snippet을 저장합니다. Outlook 원본 메일 열기와 업무보드 한 줄 표기를 위해 새 항목에는 로컬 source id, 보낸 사람 표시명, 수신 시각, 수신/참조 역할도 저장할 수 있으며, source-derived data 삭제/Not-a-task 처리/AI 분석 실패 항목 정리 시 함께 제거하거나 비식별화합니다.
+- SQLite에는 source hash, 짧은 제목/사유/근거 snippet을 저장합니다. Outlook 원본 메일 열기와 업무보드 한 줄 표기를 위해 새 항목에는 로컬 source id, 보낸 사람 표시명, 수신 시각, 수신/참조 역할도 저장할 수 있으며, source-derived data 삭제/Not-a-task 처리/AI 분석 실패 항목 정리 시 함께 제거하거나 비식별화합니다. CLI/search/list/export normal output은 source id/hash나 StoreID/EntryID를 내보내지 않고, explicit Skill launch에는 opaque `open_source_token`만 사용합니다. Internal WPF/Outlook adapter code may retain raw locators inside the trusted local process/database boundary.
 - 외부 네트워크 LLM은 기본 사용 시나리오가 아닙니다. 승인된 보안 정책이 허용할 때만 켭니다.
 - LLM JSON 파싱이 실패하면 선택한 `LlmFallbackPolicy`에 따라 확인 필요에 남기거나 rule-based analyzer로 fallback합니다.
+
+## Upstream references
+
+- vLLM Qwen/Qwen3.8-27B recipe: <https://recipes.vllm.ai/Qwen/Qwen3.8-27B>
+- vLLM reasoning outputs and `enable_thinking`/`reasoning_effort` behavior: <https://docs.vllm.ai/en/latest/features/reasoning_outputs/>

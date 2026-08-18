@@ -194,7 +194,7 @@ public static class CliApp
                 {
                     name = "search-mail",
                     usage = "search-mail --json --query TEXT [--folder inbox|sent|all] [--sender-recipient TEXT] [--conversation ID] [--limit N] [--db PATH]",
-                    description = "Search the local SQLite mail mirror only; returns bounded snippets and opaque can_open_source flags."
+                    description = "Search the local SQLite mail mirror only; returns bounded snippets and opaque open_source_token values."
                 }
             }
         });
@@ -298,7 +298,7 @@ public static class CliApp
                 sent_at = result.SentAt,
                 conversation_id = result.ConversationId,
                 snippet = result.Snippet,
-                can_open_source = result.Locator.IsValid
+                open_source_token = result.OpenSourceToken
             }).ToArray()
         }).ConfigureAwait(false);
     }

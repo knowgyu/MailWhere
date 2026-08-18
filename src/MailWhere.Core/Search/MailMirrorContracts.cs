@@ -2,6 +2,17 @@ using MailWhere.Core.Domain;
 
 namespace MailWhere.Core.Search;
 
+public static class MailMirrorOpenSourceToken
+{
+    private const string Prefix = "mailwhere-open-source-token-v1";
+
+    public static string Create(string storeId, string entryId, int collisionNonce = 0) =>
+        MailMirrorText.Hash($"{Prefix}\n{MailMirrorText.Normalize(storeId)}\n{MailMirrorText.Normalize(entryId)}\n{collisionNonce}");
+
+    public static bool IsValid(string? token) =>
+        token is { Length: 64 } && token.All(static ch => ch is >= '0' and <= '9' or >= 'a' and <= 'f');
+}
+
 public sealed record MailMirrorLocator(string StoreId, string EntryId)
 {
     public bool IsValid => !string.IsNullOrWhiteSpace(StoreId) && !string.IsNullOrWhiteSpace(EntryId);
@@ -40,6 +51,7 @@ public sealed record MailMirrorSearchRequest(
 
 public sealed record MailMirrorSearchResult(
     MailMirrorLocator Locator,
+    string? OpenSourceToken,
     MailSourceFolder Folder,
     string Subject,
     string SenderDisplay,
@@ -59,6 +71,7 @@ public interface IMailMirrorStore : IAsyncDisposable
     Task<int> DeleteAsync(IReadOnlyList<MailMirrorLocator> locators, CancellationToken cancellationToken = default);
     Task<int> ReconcileFolderAsync(string folder, IReadOnlyList<MailMirrorLocator> currentLocators, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<MailMirrorSearchResult>> SearchAsync(MailMirrorSearchRequest request, CancellationToken cancellationToken = default);
+    Task<MailMirrorLocator?> ResolveOpenSourceTokenAsync(string openSourceToken, CancellationToken cancellationToken = default);
     Task<string?> GetCheckpointAsync(string folder, CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<MailMirrorLocator, DateTimeOffset>> GetKnownLastModifiedAsync(
         IReadOnlyList<MailMirrorLocator> locators,

@@ -17,9 +17,11 @@
 - [`CAPABILITY_PROBES.md`](CAPABILITY_PROBES.md): Outlook/저장소/알림/LLM capability probe 계약.
 - [`FAILURE_MODES.md`](FAILURE_MODES.md): 실패 모드와 degrade 동작.
 - [`SECURITY.md`](SECURITY.md): read-only mailbox, raw body 최소 저장, LLM 안전 경계.
+- [`SKILL_INSTALL.md`](SKILL_INSTALL.md): bundled Codex/Claude MailWhere skill 설치·repair 정책.
 
 ## 제품/기획
 
+- [`releases/v0.13.0.md`](releases/v0.13.0.md): `Qwen/Qwen3.8-27B` endpoint probe, thinking control, backlog clarity, bundled skill, opaque-token open 정책.
 - [`releases/v0.12.2.md`](releases/v0.12.2.md): vLLM JSON Schema 출력, bounded retry, 전달 본문 제한, fallback 팝업 정책을 정리한 안정화 패치.
 - [`releases/v0.12.1.md`](releases/v0.12.1.md): 생성된 agent 표면과 중복 harness, 내부 문서를 portable 배포에서 제거한 유지보수 릴리즈.
 - [`releases/v0.12.0.md`](releases/v0.12.0.md): 결정적 checkpoint 재개와 SQLite-only WPF 메일 검색 창 릴리즈 노트.
