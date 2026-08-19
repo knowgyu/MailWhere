@@ -65,7 +65,7 @@
                 <Button x:Name="TodayFilterButton" Style="{StaticResource BoardFilterButton}" Click="TodayMainFilter_Click">오늘</Button>
                 <Button x:Name="WeekFilterButton" Style="{StaticResource BoardFilterButton}" Click="WeekMainFilter_Click">이번 주</Button>
                 <Button x:Name="AllFilterButton" Style="{StaticResource BoardFilterButton}" Click="AllMainFilter_Click">전체</Button>
-                <Button x:Name="NoDueFilterButton" Style="{StaticResource BoardFilterButton}" Click="NoDueMainFilter_Click">날짜 없음</Button>
+                <Button x:Name="NoDueFilterButton" Style="{StaticResource BoardFilterButton}" Click="NoDueMainFilter_Click" ToolTip="7일 넘게 기한이 정해지지 않은 업무">미정 backlog</Button>
             </UniformGrid>
         </Border>
 

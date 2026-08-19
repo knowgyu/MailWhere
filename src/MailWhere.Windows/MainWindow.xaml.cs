@@ -45,7 +45,7 @@ public partial class MainWindow : Window
     private ArchiveWindow? _archiveWindow;
     private SettingsWindow? _settingsWindow;
     private BoardSnapshot? _boardSnapshot;
-    private BoardRouteFilter _mainFilter = BoardRouteFilter.Today;
+    private BoardRouteFilter _mainFilter = BoardRouteFilter.Week;
     private AnalysisTelemetry _lastAnalysisTelemetry = AnalysisTelemetry.Empty;
     private bool _dailyBoardCheckInProgress;
     private bool _reminderCheckInProgress;
@@ -146,7 +146,7 @@ public partial class MainWindow : Window
 
     public async Task OpenDailyBoardAsync()
     {
-        await OpenDailyBoardAsync(DailyBoardOpenOptions.ManualAll());
+        await OpenDailyBoardAsync(DailyBoardOpenOptions.ManualWeek());
     }
 
     public async Task OpenDailyBoardTodayAsync(bool showBriefSummary, BoardOrigin origin)
@@ -1828,6 +1828,10 @@ public partial class MainWindow : Window
             var due = FollowUpPresentation.HumanDueText(task.DueAt, now);
             var sender = FollowUpPresentation.HumanSenderText(task.SourceSenderDisplay);
             var meta = $"{due} · {sender}";
+            if (task.SourceReceivedAt is not null)
+            {
+                meta += $" · 메일: {FollowUpPresentation.HumanMailTime(task.SourceReceivedAt, now)}";
+            }
             if (replyProgress is not null)
             {
                 meta = $"{meta} · {replyProgress.SummaryText}";

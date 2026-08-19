@@ -2,7 +2,7 @@
 
 ## Source truth
 - Status: Active.
-- Refreshed: 2026-07-29.
+- Refreshed: 2026-08-19.
 - Primary product surfaces:
   - Tray-resident MailWhere shell (`src/MailWhere.Windows/MainWindow.xaml`).
   - Task board, review candidates, archive, settings, toast notifications.
@@ -20,6 +20,8 @@
 ## Product stance
 - Personality: quiet, competent Korean-first desktop assistant; calm utility over dashboard spectacle.
 - Search scope: local SQLite mail mirror only.
+- Default board scope: `이번 주`, including undated work created in the last seven days; older undated work stays in `미정 backlog`.
+- Review scope: same-sender candidates whose titles differ only by numbers share one card and one set of bulk actions.
 - Mailbox posture: read-only; search and source-open must not mutate mailbox contents or mirror rows.
 - Supported search controls: query text plus one folder filter with `전체`, `받은 메일`, `보낸 메일`.
 - Privacy boundary:

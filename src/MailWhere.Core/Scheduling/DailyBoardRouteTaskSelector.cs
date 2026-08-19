@@ -4,6 +4,8 @@ namespace MailWhere.Core.Scheduling;
 
 public static class DailyBoardRouteTaskSelector
 {
+    private static readonly TimeSpan RecentUndatedAge = TimeSpan.FromDays(7);
+
     public static IReadOnlyList<LocalTaskItem> SelectVisibleTasks(
         IEnumerable<LocalTaskItem> tasks,
         IEnumerable<ReviewCandidate> candidates,
@@ -35,9 +37,11 @@ public static class DailyBoardRouteTaskSelector
         {
             BoardRouteFilter.All => tasks,
             BoardRouteFilter.Today => tasks.Where(task => task.DueAt is not null && task.DueAt.Value.ToOffset(now.Offset).Date <= now.Date),
-            BoardRouteFilter.Week => tasks.Where(task => task.DueAt is not null && task.DueAt.Value.ToOffset(now.Offset).Date <= FollowUpPresentation.EndOfKoreanWeek(now.Date)),
+            BoardRouteFilter.Week => tasks.Where(task =>
+                task.DueAt is not null && task.DueAt.Value.ToOffset(now.Offset).Date <= FollowUpPresentation.EndOfKoreanWeek(now.Date)
+                || task.DueAt is null && task.CreatedAt >= now - RecentUndatedAge),
             BoardRouteFilter.Month => tasks.Where(task => task.DueAt is not null && task.DueAt.Value.ToOffset(now.Offset).Date <= now.AddDays(30).Date),
-            BoardRouteFilter.NoDue => tasks.Where(task => task.DueAt is null),
+            BoardRouteFilter.NoDue => tasks.Where(task => task.DueAt is null && task.CreatedAt < now - RecentUndatedAge),
             _ => tasks
         };
 }

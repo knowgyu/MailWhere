@@ -6,8 +6,8 @@ public sealed record DailyBoardOpenOptions(
     BoardOrigin Origin,
     bool BringToFront)
 {
-    public static DailyBoardOpenOptions ManualAll(bool bringToFront = true) =>
-        new(BoardRouteFilter.All, ShowBriefSummary: false, BoardOrigin.Manual, bringToFront);
+    public static DailyBoardOpenOptions ManualWeek(bool bringToFront = true) =>
+        new(BoardRouteFilter.Week, ShowBriefSummary: false, BoardOrigin.Manual, bringToFront);
 
     public static DailyBoardOpenOptions TodayBrief(BoardOrigin origin, bool bringToFront = true) =>
         new(BoardRouteFilter.Today, ShowBriefSummary: true, origin, bringToFront);

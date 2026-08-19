@@ -14,7 +14,7 @@ Use these artifacts when picking up product or implementation work:
 
 1. [`README.md`](../README.md), [`DESIGN.md`](../DESIGN.md), and [`docs/README.md`](README.md) — current product, search UX, and document map.
 2. [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/SECURITY.md`](SECURITY.md) — current runtime, provider, retention, and export boundaries.
-3. [`docs/releases/v0.13.0.md`](releases/v0.13.0.md), [`docs/SKILL_INSTALL.md`](SKILL_INSTALL.md), and [`docs/MANAGED_PC_SMOKE_TEST.md`](MANAGED_PC_SMOKE_TEST.md) — latest Qwen3.8/skill behavior and remaining managed-PC validation.
+3. [`docs/releases/v0.13.1.md`](releases/v0.13.1.md), [`docs/SKILL_INSTALL.md`](SKILL_INSTALL.md), and [`docs/MANAGED_PC_SMOKE_TEST.md`](MANAGED_PC_SMOKE_TEST.md) — latest mailbox search/review UX behavior and remaining managed-PC validation.
 4. [`docs/VISUAL_QA_WORKFLOW_2026-05-16.md`](VISUAL_QA_WORKFLOW_2026-05-16.md) — historical tray-first UI decisions.
 5. [`docs/history/parent-omx-import/`](history/parent-omx-import/) — historical context, plans, research, and filtered logs. These records do not override current docs.
 

@@ -39,6 +39,8 @@ var tests = new List<(string Name, Func<Task> Test)>
     ("Follow-up presentation buckets promise and waiting", FollowUpPresentationBucketsPromiseAndWaiting),
     ("Follow-up presentation strips card scaffolding", FollowUpPresentationStripsCardScaffolding),
     ("Follow-up presentation uses human due labels", FollowUpPresentationUsesHumanDueLabels),
+    ("Follow-up presentation uses human mail time", FollowUpPresentationUsesHumanMailTime),
+    ("Review candidates group same sender similar numbered title", ReviewCandidatesGroupSameSenderSimilarNumberedTitle),
     ("Managed mode blocks automatic check before readiness", ManagedModeBlocksWatcherWithoutGate),
     ("Manual readiness is required even if managed mode is false", SmokeGateRequiredEvenIfManagedModeFalse),
     ("Ambiguous mail does not auto create", AmbiguousMailDoesNotAutoCreate),
@@ -473,6 +475,38 @@ static Task FollowUpPresentationUsesHumanDueLabels()
     Assert(FollowUpPresentation.HumanDueText(friday.AddDays(2).AddHours(1), friday) == "이번 주 일요일 10:00", "Same calendar week due should use weekday copy.");
     Assert(FollowUpPresentation.HumanDueText(friday.AddDays(10), friday) == "5/25 09:00", "Later due should use compact date.");
     Assert(FollowUpPresentation.HumanSenderText("Customer Success") == "보낸 사람: Customer Success", "Sender should use explicit label.");
+    return Task.CompletedTask;
+}
+
+static Task FollowUpPresentationUsesHumanMailTime()
+{
+    var now = new DateTimeOffset(2026, 8, 20, 9, 0, 0, TimeSpan.FromHours(9));
+    Assert(FollowUpPresentation.HumanMailTime(null, now) == "메일 시각 없음", "Missing source time should stay explicit.");
+    Assert(FollowUpPresentation.HumanMailTime(now.AddMinutes(-30), now) == "오늘 08:30", "Same-day mail should use today and time.");
+    Assert(FollowUpPresentation.HumanMailTime(now.AddDays(-2), now) == "8/18 09:00", "Same-year mail should use compact date and time.");
+    Assert(FollowUpPresentation.HumanMailTime(now.AddYears(-1), now) == "2025/8/20 09:00", "Older mail should include the year.");
+    return Task.CompletedTask;
+}
+
+static Task ReviewCandidatesGroupSameSenderSimilarNumberedTitle()
+{
+    ReviewCandidate Candidate(string title, string id, string sender) => ReviewCandidate.FromAnalysis(
+        Mail(title, "자동 알림", id, sender: sender),
+        new FollowUpAnalysis(FollowUpKind.ReviewNeeded, AnalysisDisposition.Review, 0.5, title, "확인 필요", null, null),
+        DateTimeOffset.UtcNow);
+
+    var groups = ReviewCandidateGrouping.Group(new[]
+    {
+        Candidate("배치 실패 101", "group-1", "System Bot"),
+        Candidate("배치 실패 102", "group-2", "system bot"),
+        Candidate("배치 성공 103", "group-3", "System Bot"),
+        Candidate("배치 실패 104", "group-4", "Other Bot"),
+        Candidate("101", "group-5", "System Bot"),
+        Candidate("102", "group-6", "System Bot")
+    });
+
+    Assert(groups.Count == 5, "Expected only same-sender titles with stable text around changing numbers grouped.");
+    Assert(groups.Single(group => group.Count == 2).Select(candidate => candidate.SourceId).SequenceEqual(new[] { "group-1", "group-2" }), "Expected stable candidate order inside group.");
     return Task.CompletedTask;
 }
 
@@ -1078,8 +1112,8 @@ static Task DailyBoardPlannerWaitsForStartupSettlingDelay()
 
 static Task DailyBoardRouteOptionsMapManualAndTodayBrief()
 {
-    var manual = DailyBoardOpenOptions.ManualAll();
-    Assert(manual.Filter == BoardRouteFilter.All, "Generic board route should use All filter.");
+    var manual = DailyBoardOpenOptions.ManualWeek();
+    Assert(manual.Filter == BoardRouteFilter.Week, "Generic board route should use Week filter.");
     Assert(!manual.ShowBriefSummary, "Generic board route should not show brief summary.");
     Assert(manual.Origin == BoardOrigin.Manual, "Generic board route should record manual origin.");
     Assert(manual.BringToFront, "Generic board route should bring the board forward.");
@@ -1115,16 +1149,24 @@ static Task DailyBoardWeekFilterUsesCalendarWeek()
     var now = new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.FromHours(9)); // Friday
     var sunday = BriefTask("이번 주 일요일", FollowUpKind.ActionRequested, now.AddDays(2), LocalTaskStatus.Open, null, now, 0.8);
     var nextMonday = BriefTask("다음 주 월요일", FollowUpKind.ActionRequested, now.AddDays(3), LocalTaskStatus.Open, null, now, 0.8);
-    var noDue = BriefTask("날짜 없음", FollowUpKind.ActionRequested, null, LocalTaskStatus.Open, null, now, 0.8);
+    var recentNoDue = BriefTask("최근 날짜 없음", FollowUpKind.ActionRequested, null, LocalTaskStatus.Open, null, now.AddDays(-2), 0.8);
+    var oldNoDue = BriefTask("오래된 날짜 없음", FollowUpKind.ActionRequested, null, LocalTaskStatus.Open, null, now.AddDays(-8), 0.8);
 
     var week = DailyBoardRouteTaskSelector.SelectVisibleTasks(
-        new[] { sunday, nextMonday, noDue },
+        new[] { sunday, nextMonday, recentNoDue, oldNoDue },
         Array.Empty<ReviewCandidate>(),
         now,
         BoardRouteFilter.Week,
         showBriefSummary: false);
 
-    Assert(week.Single().Title == "이번 주 일요일", "Week filter should mean this calendar week, not the next seven days.");
+    Assert(week.Select(task => task.Title).OrderBy(title => title, StringComparer.Ordinal).SequenceEqual(new[] { "이번 주 일요일", "최근 날짜 없음" }), "Week filter should include calendar-week due tasks and recent undated inbox items.");
+    var backlog = DailyBoardRouteTaskSelector.SelectVisibleTasks(
+        new[] { recentNoDue, oldNoDue },
+        Array.Empty<ReviewCandidate>(),
+        now,
+        BoardRouteFilter.NoDue,
+        showBriefSummary: false);
+    Assert(backlog.Single().Title == "오래된 날짜 없음", "Undated backlog should contain only items older than seven days.");
     return Task.CompletedTask;
 }
 
@@ -5034,19 +5076,22 @@ static async Task MailMirrorBackfillHydratesOnlyNewChangedCheckpointsFolders()
         {
             unchanged,
             changed,
-            InventoryItem("store", "sent-new", MailSourceFolder.Sent, 2, "sent", "sent body")
+            InventoryItem("store", "sent-new", MailSourceFolder.Sent, 2, "sent", "sent body"),
+            InventoryItem("store", "other-new", MailSourceFolder.Other, 3, "other", "other body")
         });
         var service = new MailMirrorBackfillService(source, mirror);
 
         var summary = await service.RunInitialBackfillAsync();
 
-        Assert(summary.SeenCount == 3, "Expected Inbox and Sent all-history inventory.");
-        Assert(summary.HydratedCount == 2, "Expected only new/changed bodies hydrated.");
+        Assert(summary.SeenCount == 4, "Expected all-history inventory across the primary mailbox.");
+        Assert(summary.HydratedCount == 3, "Expected only new/changed bodies hydrated.");
         Assert(summary.SkippedUnchangedCount == 1, "Expected unchanged item skip hydration.");
-        Assert(source.HydrateCalls.Count == 2 && !source.HydrateCalls.Contains(unchanged.Locator), "Expected unchanged locator not hydrated.");
+        Assert(source.HydrateCalls.Count == 3 && !source.HydrateCalls.Contains(unchanged.Locator), "Expected unchanged locator not hydrated.");
         Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "sent", Folder: MailSourceFolder.Sent))).Count == 1, "Expected sent message searchable.");
+        Assert((await mirror.SearchAsync(new MailMirrorSearchRequest(Query: "other"))).Count == 1, "Expected all-folder search to include another primary-mailbox folder.");
         Assert(await mirror.GetCheckpointAsync("Inbox") is not null, "Expected independent Inbox checkpoint.");
         Assert(await mirror.GetCheckpointAsync("Sent") is not null, "Expected independent Sent checkpoint.");
+        Assert(await mirror.GetCheckpointAsync("Other") is not null, "Expected independent other-folder checkpoint.");
     }
     finally
     {

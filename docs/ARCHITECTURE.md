@@ -16,8 +16,8 @@ Current product surface:
 
 - `App` distinguishes direct launch from startup launch: direct launch opens the board, while startup registration uses `--tray` and keeps shutdown explicit so closing the shell does not kill the assistant accidentally.
 - `MainWindow` is now the primary 업무 보드 surface. Tray `열기`, tray `오늘 업무 보기`, scheduled daily-board routes, and toast CTAs converge here.
-- The primary board defaults to `오늘`, then offers `이번 주`, `전체`, and `날짜 없음`; the old separate daily-board window has been removed so route targets no longer diverge.
-- Review candidates and archived tasks stay in separate WPF windows; settings and developer tools share one tabbed settings window so the task list stays compact.
+- The primary board defaults to `이번 주`, includes recent undated work, and keeps older undated work under `미정 backlog`; the old separate daily-board window has been removed so route targets no longer diverge.
+- Review candidates and archived tasks stay in separate WPF windows; same-sender, number-varying review titles are grouped for bulk action. Settings and developer tools share one tabbed settings window so the task list stays compact.
 - Task rows expose only `열기`, `나중에`, `보관`; double-click opens the bounded edit dialog with Enter/Esc behavior.
 - Scheduled daily-board time opens or updates the unified board first. Notification is a fallback only when the board cannot be surfaced.
 - `LocalTaskStatus.Archived` is the active-list exit state for the user-facing `보관` action. Archived tasks are recoverable through `ListArchivedTasksAsync`/`RestoreArchivedTaskAsync`; legacy `Done`/`Dismissed` values remain readable but are not primary UI actions.
@@ -33,7 +33,7 @@ Runtime safety notes:
 
 ## Mail mirror search boundary
 
-MailWhere owns the local mail corpus in the existing `followups.sqlite` file. `mail_messages` stores normalized plain-text subject/body metadata for Classic Outlook default Inbox and Sent Items, with external-content FTS5 triggers so content rows and search terms update/delete in the same SQLite transaction. Ordinary search uses the prewarmed SQLite reader only; Outlook COM is used by sync or explicit source-open, not by search.
+MailWhere owns the local mail corpus in the existing `followups.sqlite` file. `mail_messages` stores normalized plain-text subject/body metadata from every mail folder under Classic Outlook's default store, excluding separate stores such as Online Archive and excluding virtual search folders. External-content FTS5 triggers keep content rows and search terms in the same SQLite transaction. Ordinary search uses the prewarmed SQLite reader only; Outlook COM is used by sync or explicit source-open, not by search.
 
 The Windows app wires this through the existing serialized mail-check lifecycle: `OutlookComMailInventorySource` feeds `SqliteMailMirrorStore` and `MailMirrorBackfillService` before task analysis, using the same cancellation token and `followups.sqlite` path. Cadence is content-free `app_state`: initial backfill until `mail-mirror-initial-sync-completed-at`, manual or stale 24-hour reconcile via `mail-mirror-last-authoritative-reconcile-at`, otherwise checkpoint incremental catch-up.
 

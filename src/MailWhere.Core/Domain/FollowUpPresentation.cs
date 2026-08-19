@@ -130,6 +130,22 @@ public static class FollowUpPresentation
         return $"보낸 사람: {compact}";
     }
 
+    public static string HumanMailTime(DateTimeOffset? mailAt, DateTimeOffset now)
+    {
+        if (mailAt is null)
+        {
+            return "메일 시각 없음";
+        }
+
+        var value = mailAt.Value.ToOffset(now.Offset);
+        if (value.Date == now.Date)
+        {
+            return $"오늘 {value:HH:mm}";
+        }
+
+        return value.Year == now.Year ? $"{value:M/d HH:mm}" : $"{value:yyyy/M/d HH:mm}";
+    }
+
     public static DateTime StartOfKoreanWeek(DateTime date)
     {
         var diff = ((int)date.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;

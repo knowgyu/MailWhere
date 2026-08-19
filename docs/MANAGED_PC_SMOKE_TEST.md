@@ -20,7 +20,7 @@ Do not enable 새 메일 자동 확인 if any probe causes unacceptable policy w
 ## Controlled synthetic search setup
 
 1. Create or send one test message whose body contains this literal body-only term and whose subject does not: `MailWhereSmokeBodyOnly20260729`.
-2. Put the message in a test-safe mailbox location covered by the mirror; note whether it is Inbox or Sent.
+2. Put the message in a test-safe child mail folder under the default mailbox. Do not use Online Archive.
 3. Keep the mailbox open only for normal Outlook use; SQLite search itself must not activate Outlook.
 4. Delete the synthetic message after the run if local policy requires it.
 
@@ -30,7 +30,8 @@ Do not enable 새 메일 자동 확인 if any probe causes unacceptable policy w
 2. Click **지금 메일 확인** and confirm progress exposes only folder names/counts.
 3. Open **메일 검색** and confirm the initial state is empty/help text, not stale results.
 4. Search for `MailWhereSmokeBodyOnly20260729` using Enter, then again using the **검색** button; both return the synthetic message.
-5. Repeat with folder filters: **전체** shows the message, **받은 메일** shows it only for Inbox mail, and **보낸 메일** shows it only for Sent mail.
+5. Confirm **전체** shows the child-folder message while **받은 메일** and **보낸 메일** do not. Then repeat with Inbox/Sent test messages to verify those two filters.
+   If policy permits a separate synthetic Online Archive copy, confirm it is not indexed.
 6. Search a nonsense term and confirm the empty-results state is safe and content-free.
 7. Press Esc and confirm the search window closes.
 8. Reopen search, select the synthetic result, double-click it, then repeat with **원본 열기**; both must explicitly open the source message.
@@ -42,6 +43,16 @@ Do not enable 새 메일 자동 확인 if any probe causes unacceptable policy w
 14. Confirm exported diagnostics remain content-free and contain no source locator, StoreId, EntryId, subject body, or body snippet.
 
 Automated coverage includes the mirror checkpoint case where `DefaultPageSize + 1` messages share equal timestamps. The real managed Outlook/EDR run remains external and must be recorded as managed-PC evidence.
+
+## v0.13.1 board and grouped review smoke
+
+1. Open the app directly and from the tray; confirm both manual paths default to **이번 주**.
+2. Confirm a task without a due date created within seven days appears in **이번 주** and shows its source mail time.
+3. Confirm an undated task older than seven days appears in **미정 backlog**, without an invented due date.
+4. Create two synthetic review candidates from the same sender whose titles differ only by numbers; confirm they appear as one counted card.
+5. Exercise `모두 나중에`, then repeat with `모두 무시`; confirm every grouped candidate changes state and Outlook remains unchanged.
+6. Double-click every review-row button and confirm none opens Outlook; double-click the row text and confirm only that explicit row action opens the source.
+7. With Korean IME active, confirm `Y`, `S`, `I`, and `Esc` shortcuts still work.
 
 ## v0.13.0 skill and LLM smoke
 

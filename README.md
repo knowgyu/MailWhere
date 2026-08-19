@@ -12,15 +12,15 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 
 - **Tray-first**: 자동 시작은 tray만 띄우고, 사용자가 직접 실행하면 업무 보드를 바로 엽니다.
 - **지정 시간 업무 보드**: 기본 08:00에 오늘 업무 보드를 열어 빠르게 훑게 합니다. 보드 열기에 실패한 경우에만 알림으로 fallback합니다.
-- **통합 업무 보드**: tray의 `열기`가 곧 업무 보드입니다. 기본은 `오늘`이고 필터는 `오늘`/`이번 주`/`전체`/`날짜 없음` 순서입니다.
-- **한 줄 업무 행**: 업무는 “제목 · 날짜 · 보낸 사람”만 먼저 보이고, 오른쪽에 `열기`, `나중에`, `보관`만 둡니다. 제목/기한은 더블클릭으로 수정합니다.
+- **통합 업무 보드**: tray의 `열기`가 곧 업무 보드입니다. 기본은 `이번 주`이고 최근 7일 내 생성된 기한 미정 업무도 함께 보입니다. 오래된 미정 업무는 `미정 backlog`에서 정리합니다.
+- **한 줄 업무 행**: 업무는 “제목 · 날짜 · 보낸 사람 · 메일 시각”만 먼저 보이고, 오른쪽에 `열기`, `나중에`, `보관`만 둡니다. 제목/기한은 더블클릭으로 수정합니다.
 - **분리된 보조 화면**: 확인 필요, 메일 검색, 보관함은 별도 창으로 열고 설정/개발자 도구는 설정 창 탭으로 열어 업무 목록을 방해하지 않습니다.
 - **보관 모델**: 여러 종료/제외 액션을 사용자-facing 개념으로 나누지 않고 `보관`으로 통합합니다. 보관된 항목은 active 목록에서 사라지고 자동으로 다시 뜨지 않지만, 보관함에서 열거나 복원할 수 있습니다.
 
 ## 지금 되는 것
 
-- Classic Outlook COM 기반 read-only Inbox/Sent Items 메일 읽기
-- **지금 메일 확인**: Inbox/Sent 검색 mirror는 전체 이력을 이어서 동기화하고, 업무 후보 분석은 기본 최근 30일(설정 1/7/30/90일)을 확인
+- Classic Outlook COM 기반 read-only 기본 사서함 메일 읽기
+- **지금 메일 확인**: Online Archive를 제외한 기본 사서함의 모든 메일 폴더를 재귀적으로 mirror하고, 업무 후보 분석은 기본 최근 30일(설정 1/7/30/90일)을 확인
 - **새 메일 자동 확인**: Outlook ItemAdd 이벤트를 감지해 짧게 debounce하고, 놓친 이벤트는 자동 확인 간격의 cursor scan으로 보정
 - 자동 확인은 Inbox/Sent Items cursor를 분리해 한쪽 실패가 다른 쪽 성공 시각을 잘못 앞당기지 않음
 - 자동 delta 확인에서는 중복/이미 처리한 source를 body/LLM 분석 전에 fast filter로 제거하고, 애매한 메일은 계속 분석 대상으로 유지
@@ -30,6 +30,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - `Qwen/Qwen3.8-27B`용 vLLM thinking control, structured-output, temperature, output-token, batch-size 설정
 - LLM 시도/성공/fallback/실패 요약과 확인 필요 창의 **실패한 AI 분석 다시 시도**
 - 확인 필요 backlog는 전체 미해결 수, 표시 중인 100개 page cap, retryable LLM 실패 수를 구분
+- 같은 발신자와 숫자만 달라지는 유사 제목 후보는 한 카드로 묶어 `모두 등록`/`모두 나중에`/`모두 무시`
 - 답장/전달 메일, To/CC 수신 여부, 담당자 표현을 보수적으로 판단
 - 같은 스레드의 동일 업무 후보 중복 생성 억제
 - 낮은 확신/LLM 실패 후보는 기본 업무 보드에 섞지 않고 별도 검토 후보 창에서 처리
@@ -85,9 +86,9 @@ portable zip에는 UI 앱 `MailWhere.exe`와 별도로 `MailWhere.Cli.exe`가 �
 
 ## 기본 사용 흐름
 
-1. `MailWhere.exe`를 직접 실행하면 오늘 기준 업무 보드가 열리고 앱은 tray에도 상주합니다. Windows 자동 시작은 tray-only로 실행됩니다.
+1. `MailWhere.exe`를 직접 실행하면 이번 주 업무 보드가 열리고 앱은 tray에도 상주합니다. Windows 자동 시작은 tray-only로 실행됩니다.
 2. tray 메뉴의 **열기**로 언제든 같은 업무 보드를 다시 엽니다.
-3. **지금 메일 확인**으로 전체 Inbox/Sent 검색 mirror를 이어서 동기화하고, 최근 메일에서는 로컬 업무 후보를 만듭니다.
+3. **지금 메일 확인**으로 Online Archive를 제외한 기본 사서함 전체 검색 mirror를 이어서 동기화하고, 최근 Inbox/Sent 메일에서는 로컬 업무 후보를 만듭니다.
 4. 지정 시간에 열리는 **오늘 업무 보드**를 훑고, 필요하면 tray의 **오늘 업무 보기**로 다시 엽니다.
 5. 업무 행에서 `열기`, `나중에`, `보관`으로 정리하고, 제목/기한은 더블클릭으로 바로잡습니다. 보관한 항목은 **보관함**에서 다시 열거나 복원합니다.
 
@@ -117,7 +118,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.13.0-win-x64-portable.zip
+artifacts/MailWhere-v0.13.1-win-x64-portable.zip
 ```
 
 ## LLM endpoint

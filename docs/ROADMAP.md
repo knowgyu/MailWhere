@@ -1,5 +1,17 @@
 # Roadmap
 
+## Release 0.13.1 — full default-mailbox search and faster triage
+
+Goal: search every regular mail folder in the default Outlook store and reduce repetitive review/backlog work without inventing due dates.
+
+Included:
+
+- Recursive default-store mail mirror, excluding Online Archive/separate stores and virtual search folders.
+- Same-sender, number-varying similar review candidates grouped for bulk approve/snooze/ignore.
+- Source mail time on task and review rows.
+- Manual board defaults to `이번 주`; recent undated work appears there while items older than seven days move to `미정 backlog`.
+- Review-row button double-click isolation and Korean IME shortcut normalization.
+
 ## Release 0.13.0 — Qwen3.8 endpoint hardening and bundled skill
 
 Goal: correct the local Qwen target to `Qwen/Qwen3.8-27B`, make LLM analysis fail closed on the real request shape, clarify review backlog counts, and ship a read-only bundled MailWhere skill for local agents.
@@ -163,7 +175,6 @@ Next patch candidates:
 - Deduplicate or vary developer/sample data so repeated identical rows do not make the board look broken during demos.
 - Add a small visual smoke checklist for Windows screenshots before every release, especially main board, 확인 필요, settings, edit dialog, and toast.
 - Add main-board keyboard affordances: Enter/open, S/snooze, archive key, Esc-to-hide, with visible but unobtrusive hints.
-- Add 확인 필요 bulk flow later: multi-select, approve/snooze/ignore selected, and compact “why this is a candidate” detail panel.
 - Decide on a refreshed app/tray icon from the prepared concepts.
 
 ## Release 0.4.0 — unified board and simplified secondary surfaces

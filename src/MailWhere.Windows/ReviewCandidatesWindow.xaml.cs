@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using MailWhere.Core.Domain;
 using MailWhere.Core.Pipeline;
 using MailWhere.Storage;
@@ -73,10 +75,12 @@ public partial class ReviewCandidatesWindow : Window
 
     private void Render()
     {
+        var restoreListFocus = CandidatesList.IsKeyboardFocusWithin;
         var now = DateTimeOffset.Now;
         var rows = _closureSuggestions
             .Select(suggestion => ReviewWorkRow.FromClosureSuggestion(suggestion, _busyRowIds.Contains(suggestion.Id)))
-            .Concat(_candidates.Select(candidate => ReviewWorkRow.FromCandidate(candidate, now, _busyRowIds.Contains(candidate.Id))))
+            .Concat(ReviewCandidateGrouping.Group(_candidates)
+                .Select(group => ReviewWorkRow.FromCandidates(group, now, group.Any(candidate => _busyRowIds.Contains(candidate.Id)))))
             .ToArray();
         CandidatesList.ItemsSource = rows;
         CandidatesList.Visibility = rows.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -84,6 +88,11 @@ public partial class ReviewCandidatesWindow : Window
         if (rows.Length > 0 && CandidatesList.SelectedIndex < 0)
         {
             CandidatesList.SelectedIndex = 0;
+        }
+
+        if (restoreListFocus)
+        {
+            CandidatesList.Focus();
         }
 
         var hasRetryableFailure = _backlogCounts.RetryableLlmFailures > 0 || _candidates.Any(candidate => candidate.Analysis.IsTransientLlmFailureReview);
@@ -154,8 +163,11 @@ public partial class ReviewCandidatesWindow : Window
 
     private async void CandidatesList_DoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (SelectedRow() is { Candidate: { } candidate })
+        if (e.OriginalSource is DependencyObject source
+            && FindVisualAncestor<System.Windows.Controls.Primitives.ButtonBase>(source) is null
+            && FindVisualAncestor<ListBoxItem>(source)?.DataContext is ReviewWorkRow { Candidate: { } candidate })
         {
+            e.Handled = true;
             await ExecuteCandidateAsync(candidate, _openMailAsync, "원본 메일을 열었습니다.", optimisticRemove: false);
         }
     }
@@ -167,9 +179,9 @@ public partial class ReviewCandidatesWindow : Window
             return;
         }
 
-        if (row.Candidate is not null)
+        if (row.Candidates.Count > 0)
         {
-            await ExecuteCandidateAsync(row.Candidate, _approveAsync, "등록했습니다.", optimisticRemove: true);
+            await ExecuteCandidatesAsync(row.Candidates, _approveAsync, "등록했습니다.", optimisticRemove: true);
         }
         else if (row.ClosureSuggestion is not null)
         {
@@ -184,9 +196,9 @@ public partial class ReviewCandidatesWindow : Window
             return;
         }
 
-        if (row.Candidate is not null)
+        if (row.Candidates.Count > 0)
         {
-            await ExecuteCandidateAsync(row.Candidate, _ignoreAsync, "무시했습니다.", optimisticRemove: true);
+            await ExecuteCandidatesAsync(row.Candidates, _ignoreAsync, "무시했습니다.", optimisticRemove: true);
         }
         else if (row.ClosureSuggestion is not null)
         {
@@ -204,41 +216,63 @@ public partial class ReviewCandidatesWindow : Window
 
     private async Task RunCandidateAsync(object sender, Func<ReviewCandidate, Task> action, string successMessage)
     {
-        if (sender is FrameworkElement { Tag: ReviewWorkRow { Candidate: { } candidate } })
+        if (sender is FrameworkElement { Tag: ReviewWorkRow { Candidates.Count: > 0 } row })
         {
-            await ExecuteCandidateAsync(candidate, action, successMessage, optimisticRemove: true);
+            await ExecuteCandidatesAsync(row.Candidates, action, successMessage, optimisticRemove: true);
         }
     }
 
-    private async Task ExecuteCandidateAsync(ReviewCandidate candidate, Func<ReviewCandidate, Task> action, string successMessage, bool optimisticRemove)
+    private Task ExecuteCandidateAsync(ReviewCandidate candidate, Func<ReviewCandidate, Task> action, string successMessage, bool optimisticRemove) =>
+        ExecuteCandidatesAsync([candidate], action, successMessage, optimisticRemove);
+
+    private async Task ExecuteCandidatesAsync(IReadOnlyList<ReviewCandidate> candidates, Func<ReviewCandidate, Task> action, string successMessage, bool optimisticRemove)
     {
-        if (!_busyRowIds.Add(candidate.Id))
+        if (candidates.Count == 0 || candidates.Any(candidate => _busyRowIds.Contains(candidate.Id)))
         {
             StatusText.Text = "이미 처리 중인 항목입니다.";
             return;
         }
 
+        foreach (var candidate in candidates)
+        {
+            _busyRowIds.Add(candidate.Id);
+        }
+
         if (optimisticRemove)
         {
-            _candidates = _candidates.Where(item => item.Id != candidate.Id).ToArray();
+            var ids = candidates.Select(candidate => candidate.Id).ToHashSet();
+            _candidates = _candidates.Where(item => !ids.Contains(item.Id)).ToArray();
         }
 
         Render();
-        string? finalStatus = null;
+        var succeeded = 0;
+        Exception? lastError = null;
         try
         {
-            await action(candidate);
-            finalStatus = successMessage;
-        }
-        catch (Exception ex)
-        {
-            finalStatus = $"처리하지 못했습니다: {ex.GetType().Name}";
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    await action(candidate);
+                    succeeded++;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                }
+            }
         }
         finally
         {
-            _busyRowIds.Remove(candidate.Id);
+            foreach (var candidate in candidates)
+            {
+                _busyRowIds.Remove(candidate.Id);
+            }
+
             Render();
-            StatusText.Text = finalStatus ?? StatusText.Text;
+            StatusText.Text = lastError is null
+                ? candidates.Count == 1 ? successMessage : $"{succeeded}개 {successMessage}"
+                : $"{succeeded}/{candidates.Count}개 처리 · 실패: {lastError.GetType().Name}";
         }
     }
 
@@ -272,7 +306,8 @@ public partial class ReviewCandidatesWindow : Window
 
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        var key = e.Key == Key.ImeProcessed ? e.ImeProcessedKey : e.Key;
+        if (key == Key.Escape)
         {
             e.Handled = true;
             Close();
@@ -284,22 +319,22 @@ public partial class ReviewCandidatesWindow : Window
             return;
         }
 
-        if (e.Key == Key.Y)
+        if (key == Key.Y)
         {
             e.Handled = true;
             _ = ExecuteSelectedPrimaryAsync();
         }
-        else if (e.Key == Key.N)
+        else if (key == Key.N)
         {
             e.Handled = true;
             _ = ExecuteSelectedClosureKeepAsync();
         }
-        else if (e.Key == Key.I)
+        else if (key == Key.I)
         {
             e.Handled = true;
             _ = ExecuteSelectedCandidateAsync(_ignoreAsync, "무시했습니다.");
         }
-        else if (e.Key == Key.S)
+        else if (key == Key.S)
         {
             e.Handled = true;
             _ = ExecuteSelectedCandidateAsync(_snoozeAsync, "내일까지 다시 표시하지 않습니다.");
@@ -326,9 +361,9 @@ public partial class ReviewCandidatesWindow : Window
     {
         if (SelectedRow() is { } row)
         {
-            if (row.Candidate is not null)
+            if (row.Candidates.Count > 0)
             {
-                await ExecuteCandidateAsync(row.Candidate, _approveAsync, "등록했습니다.", optimisticRemove: true);
+                await ExecuteCandidatesAsync(row.Candidates, _approveAsync, "등록했습니다.", optimisticRemove: true);
             }
             else if (row.ClosureSuggestion is not null)
             {
@@ -347,10 +382,32 @@ public partial class ReviewCandidatesWindow : Window
 
     private async Task ExecuteSelectedCandidateAsync(Func<ReviewCandidate, Task> action, string successMessage)
     {
-        if (SelectedRow() is { Candidate: { } candidate })
+        if (SelectedRow() is { Candidates.Count: > 0 } row)
         {
-            await ExecuteCandidateAsync(candidate, action, successMessage, optimisticRemove: true);
+            await ExecuteCandidatesAsync(row.Candidates, action, successMessage, optimisticRemove: true);
         }
+    }
+
+    private static T? FindVisualAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T match)
+            {
+                return match;
+            }
+
+            try
+            {
+                current = VisualTreeHelper.GetParent(current);
+            }
+            catch (InvalidOperationException)
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
@@ -369,52 +426,56 @@ public partial class ReviewCandidatesWindow : Window
 
     private sealed record ReviewWorkRow(
         Guid Id,
-        ReviewCandidate? Candidate,
+        IReadOnlyList<ReviewCandidate> Candidates,
         WaitingClosureSuggestion? ClosureSuggestion,
         string Title,
         string Meta,
         string PrimaryText,
         string SecondaryText,
+        string SnoozeText,
         Visibility SnoozeVisibility,
         bool CanOpen,
         bool CanAct)
     {
-        public static ReviewWorkRow FromCandidate(ReviewCandidate candidate, DateTimeOffset now, bool isBusy) => new(
-            candidate.Id,
-            candidate,
+        public ReviewCandidate? Candidate => Candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.SourceId)) ?? Candidates.FirstOrDefault();
+
+        public static ReviewWorkRow FromCandidates(IReadOnlyList<ReviewCandidate> candidates, DateTimeOffset now, bool isBusy) => new(
+            candidates[0].Id,
+            candidates,
             null,
-            FollowUpPresentation.ActionTitle(candidate.Analysis.SuggestedTitle),
-            BuildCandidateMeta(candidate, now, isBusy),
-            "등록(Y)",
-            "무시(I)",
+            FollowUpPresentation.ActionTitle(candidates[0].Analysis.SuggestedTitle) + (candidates.Count > 1 ? $" · {candidates.Count}건" : string.Empty),
+            BuildCandidateMeta(candidates, now, isBusy),
+            candidates.Count > 1 ? "모두 등록(Y)" : "등록(Y)",
+            candidates.Count > 1 ? "모두 무시(I)" : "무시(I)",
+            candidates.Count > 1 ? "모두 나중에(S)" : "나중에(S)",
             Visibility.Visible,
-            !isBusy && !string.IsNullOrWhiteSpace(candidate.SourceId),
+            !isBusy && candidates.Any(candidate => !string.IsNullOrWhiteSpace(candidate.SourceId)),
             !isBusy);
 
         public static ReviewWorkRow FromClosureSuggestion(WaitingClosureSuggestion suggestion, bool isBusy) => new(
             suggestion.Id,
-            null,
+            [],
             suggestion,
             FollowUpPresentation.ActionTitle(suggestion.TaskTitle),
             $"{suggestion.ActionText} · {suggestion.Reason}" + (isBusy ? " · 처리 중" : string.Empty),
             "보관(Y)",
             "유지(N)",
+            string.Empty,
             Visibility.Collapsed,
             false,
             !isBusy);
 
-        private static string BuildCandidateMeta(ReviewCandidate candidate, DateTimeOffset now, bool isBusy)
+        private static string BuildCandidateMeta(IReadOnlyList<ReviewCandidate> candidates, DateTimeOffset now, bool isBusy)
         {
+            var candidate = candidates[0];
+            var dueTexts = candidates.Select(item => FollowUpPresentation.HumanDueText(item.Analysis.DueAt, now)).Distinct().ToArray();
+            var latestMailAt = candidates.Max(item => item.SourceReceivedAt);
             var parts = new List<string>
             {
-                FollowUpPresentation.HumanDueText(candidate.Analysis.DueAt, now),
-                FollowUpPresentation.HumanSenderText(candidate.SourceSenderDisplay, "알 수 없음")
+                dueTexts.Length == 1 ? dueTexts[0] : "기한 혼합",
+                FollowUpPresentation.HumanSenderText(candidate.SourceSenderDisplay, "알 수 없음"),
+                $"{(candidates.Count > 1 ? "최근 메일" : "메일")}: {FollowUpPresentation.HumanMailTime(latestMailAt, now)}"
             };
-            var reason = Compact(candidate.Analysis.Summary ?? candidate.Analysis.Reason, 120);
-            if (!string.IsNullOrWhiteSpace(reason))
-            {
-                parts.Add(reason);
-            }
 
             if (isBusy)
             {
@@ -422,17 +483,6 @@ public partial class ReviewCandidatesWindow : Window
             }
 
             return string.Join(" · ", parts);
-        }
-
-        private static string Compact(string? value, int maxChars)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return string.Empty;
-            }
-
-            var compact = string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-            return compact.Length <= maxChars ? compact : compact[..maxChars].TrimEnd() + "…";
         }
     }
 }

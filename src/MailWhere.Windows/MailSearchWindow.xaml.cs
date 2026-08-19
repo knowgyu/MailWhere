@@ -231,7 +231,7 @@ public partial class MailSearchWindow : Window
             {
                 MailSourceFolder.Inbox => "받은 메일",
                 MailSourceFolder.Sent => "보낸 메일",
-                _ => "기타"
+                _ => "기타 폴더"
             };
 
             return new MailSearchRow(

@@ -116,7 +116,7 @@ public sealed class MailMirrorBackfillService
 {
     public const int DefaultPageSize = 200;
     public const int DefaultBatchSize = 25;
-    private static readonly MailSourceFolder[] DefaultFolders = [MailSourceFolder.Inbox, MailSourceFolder.Sent];
+    private static readonly MailSourceFolder[] DefaultFolders = [MailSourceFolder.Inbox, MailSourceFolder.Sent, MailSourceFolder.Other];
     private readonly IMailMirrorInventorySource _source;
     private readonly IMailMirrorStore _store;
 

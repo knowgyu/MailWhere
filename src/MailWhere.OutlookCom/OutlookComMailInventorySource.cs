@@ -30,8 +30,10 @@ public sealed class OutlookComMailInventorySource : IMailMirrorInventorySource
         object? outlook = null;
         object? session = null;
         object? folder = null;
-        object? table = null;
+        object? store = null;
+        object? rootFolder = null;
         var warnings = new List<MailMirrorSyncWarning>();
+        var items = new List<MailInventoryItem>();
 
         try
         {
@@ -48,35 +50,22 @@ public sealed class OutlookComMailInventorySource : IMailMirrorInventorySource
             }
 
             session = Get(outlook, "Session") ?? throw new InvalidOperationException("OutlookSessionUnavailable");
-            folder = Invoke(session, "GetDefaultFolder", request.Folder == MailSourceFolder.Sent ? 5 : 6)
-                ?? throw new InvalidOperationException("OutlookFolderUnavailable");
-            var storeId = Convert.ToString(Get(folder, "StoreID")) ?? string.Empty;
-            table = Invoke(folder, "GetTable") ?? throw new InvalidOperationException("OutlookTableUnavailable");
-            TryAddTableColumns(table);
-            TrySort(table, "LastModificationTime");
-
-            var items = new List<MailInventoryItem>();
-            while (HasNext(table))
+            if (request.Folder == MailSourceFolder.Other)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                object? row = null;
-                try
+                store = Get(session, "DefaultStore") ?? throw new InvalidOperationException("OutlookDefaultStoreUnavailable");
+                rootFolder = Invoke(store, "GetRootFolder") ?? throw new InvalidOperationException("OutlookRootFolderUnavailable");
+                var defaultFolderIds = new HashSet<string>(StringComparer.Ordinal)
                 {
-                    row = Invoke(table, "GetNextRow") ?? throw new InvalidOperationException("OutlookRowUnavailable");
-                    items.Add(ReadRow(row, storeId, request.Folder));
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    warnings.Add(new MailMirrorSyncWarning("outlook-inventory-item-failed", CapabilitySeverity.Degraded, ex.GetType().Name));
-                }
-                finally
-                {
-                    ComRelease.FinalRelease(row);
-                }
+                    ReadDefaultFolderEntryId(session, 5),
+                    ReadDefaultFolderEntryId(session, 6)
+                };
+                ReadChildMailFolders(rootFolder, defaultFolderIds, ReadSearchFolderIds(store), items, warnings, cancellationToken);
+            }
+            else
+            {
+                folder = Invoke(session, "GetDefaultFolder", request.Folder == MailSourceFolder.Sent ? 5 : 6)
+                    ?? throw new InvalidOperationException("OutlookFolderUnavailable");
+                ReadFolderItems(folder, request.Folder, items, warnings, cancellationToken);
             }
 
             return MailInventoryOrdering.BuildPages(request, items, warnings);
@@ -91,10 +80,180 @@ public sealed class OutlookComMailInventorySource : IMailMirrorInventorySource
         }
         finally
         {
-            ComRelease.FinalRelease(table);
+            ComRelease.FinalRelease(rootFolder);
+            ComRelease.FinalRelease(store);
             ComRelease.FinalRelease(folder);
             ComRelease.FinalRelease(session);
             ComRelease.FinalRelease(outlook);
+        }
+    }
+
+    private static void ReadChildMailFolders(
+        object parent,
+        HashSet<string> defaultFolderIds,
+        HashSet<string> searchFolderIds,
+        List<MailInventoryItem> items,
+        List<MailMirrorSyncWarning> warnings,
+        CancellationToken cancellationToken)
+    {
+        object? folders = null;
+        try
+        {
+            folders = Get(parent, "Folders") ?? throw new InvalidOperationException("OutlookFoldersUnavailable");
+            var count = Convert.ToInt32(Get(folders, "Count"));
+            for (var index = 1; index <= count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                object? child = null;
+                try
+                {
+                    child = Invoke(folders, "Item", index) ?? throw new InvalidOperationException("OutlookFolderUnavailable");
+                    var entryId = Convert.ToString(Get(child, "EntryID")) ?? string.Empty;
+                    if (searchFolderIds.Contains(entryId))
+                    {
+                        continue;
+                    }
+
+                    if (!defaultFolderIds.Contains(entryId) && IsMailFolder(child))
+                    {
+                        ReadFolderItems(child, MailSourceFolder.Other, items, warnings, cancellationToken);
+                    }
+
+                    ReadChildMailFolders(child, defaultFolderIds, searchFolderIds, items, warnings, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add(new MailMirrorSyncWarning("outlook-inventory-folder-failed", CapabilitySeverity.Degraded, ex.GetType().Name));
+                }
+                finally
+                {
+                    ComRelease.FinalRelease(child);
+                }
+            }
+        }
+        finally
+        {
+            ComRelease.FinalRelease(folders);
+        }
+    }
+
+    private static void ReadFolderItems(
+        object folder,
+        MailSourceFolder sourceFolder,
+        List<MailInventoryItem> items,
+        List<MailMirrorSyncWarning> warnings,
+        CancellationToken cancellationToken)
+    {
+        object? table = null;
+        try
+        {
+            var storeId = Convert.ToString(Get(folder, "StoreID")) ?? string.Empty;
+            table = Invoke(folder, "GetTable") ?? throw new InvalidOperationException("OutlookTableUnavailable");
+            TryAddTableColumns(table);
+            TrySort(table, "LastModificationTime");
+
+            while (HasNext(table))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                object? row = null;
+                try
+                {
+                    row = Invoke(table, "GetNextRow") ?? throw new InvalidOperationException("OutlookRowUnavailable");
+                    items.Add(ReadRow(row, storeId, sourceFolder));
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add(new MailMirrorSyncWarning("outlook-inventory-item-failed", CapabilitySeverity.Degraded, ex.GetType().Name));
+                }
+                finally
+                {
+                    ComRelease.FinalRelease(row);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add(new MailMirrorSyncWarning("outlook-inventory-folder-failed", CapabilitySeverity.Degraded, ex.GetType().Name));
+        }
+        finally
+        {
+            ComRelease.FinalRelease(table);
+        }
+    }
+
+    private static string ReadDefaultFolderEntryId(object session, int folderId)
+    {
+        object? folder = null;
+        try
+        {
+            folder = Invoke(session, "GetDefaultFolder", folderId) ?? throw new InvalidOperationException("OutlookFolderUnavailable");
+            return Convert.ToString(Get(folder, "EntryID")) ?? string.Empty;
+        }
+        finally
+        {
+            ComRelease.FinalRelease(folder);
+        }
+    }
+
+    private static HashSet<string> ReadSearchFolderIds(object store)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        object? folders = null;
+        try
+        {
+            folders = Invoke(store, "GetSearchFolders");
+            var count = Convert.ToInt32(Get(folders!, "Count"));
+            for (var index = 1; index <= count; index++)
+            {
+                object? folder = null;
+                try
+                {
+                    folder = Invoke(folders!, "Item", index);
+                    var entryId = folder is null ? null : Convert.ToString(Get(folder, "EntryID"));
+                    if (!string.IsNullOrWhiteSpace(entryId))
+                    {
+                        result.Add(entryId);
+                    }
+                }
+                finally
+                {
+                    ComRelease.FinalRelease(folder);
+                }
+            }
+        }
+        catch
+        {
+            // Search folders are virtual duplicates; unsupported Outlook builds simply omit this optimization.
+        }
+        finally
+        {
+            ComRelease.FinalRelease(folders);
+        }
+
+        return result;
+    }
+
+    private static bool IsMailFolder(object folder)
+    {
+        try
+        {
+            return Convert.ToInt32(Get(folder, "DefaultItemType")) == 0;
+        }
+        catch
+        {
+            return false;
         }
     }
 

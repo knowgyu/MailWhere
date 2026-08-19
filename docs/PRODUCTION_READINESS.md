@@ -2,14 +2,15 @@
 
 ## Shipped and locally verified
 
-- Inbox/Sent mirror with FTS5, bounded transactional writes, safe resume, and
-  warning-aware reconciliation.
+- Default-store mail-folder mirror with FTS5, bounded transactional writes,
+  safe resume, and warning-aware reconciliation; separate Online Archive and
+  virtual search folders stay outside the corpus.
 - Equal-timestamp checkpoint ordering across page boundaries.
 - SQLite-only CLI and WPF search; Outlook COM is reached only after an explicit
   source-open action.
 - Read-only mailbox behavior and sanitized diagnostics/export contracts.
-- v0.13.0 documentation defines fail-closed Qwen3.8 endpoint probing, skill
-  install/repair boundaries, and opaque-token original-open behavior.
+- v0.13.1 documentation preserves fail-closed Qwen3.8 probing and adds grouped
+  review actions plus weekly undated-backlog routing.
 
 ## Remaining required evidence
 

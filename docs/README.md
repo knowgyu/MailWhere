@@ -21,6 +21,7 @@
 
 ## 제품/기획
 
+- [`releases/v0.13.1.md`](releases/v0.13.1.md): 기본 사서함 전체 폴더 FTS5, 확인 필요 묶음 처리, 메일 시각, 이번 주/미정 backlog UX patch.
 - [`releases/v0.13.0.md`](releases/v0.13.0.md): `Qwen/Qwen3.8-27B` endpoint probe, thinking control, backlog clarity, bundled skill, opaque-token open 정책.
 - [`releases/v0.12.2.md`](releases/v0.12.2.md): vLLM JSON Schema 출력, bounded retry, 전달 본문 제한, fallback 팝업 정책을 정리한 안정화 패치.
 - [`releases/v0.12.1.md`](releases/v0.12.1.md): 생성된 agent 표면과 중복 harness, 내부 문서를 portable 배포에서 제거한 유지보수 릴리즈.
@@ -56,7 +57,7 @@
 
 - 사용자-facing CTA는 `지금 메일 확인`을 씁니다. 내부 구현 설명에서만 scan이라는 표현을 허용합니다.
 - `새 메일 자동 확인`은 설정에서 켜는 기능이며, 내부 safety gate는 사용자 화면에 그대로 노출하지 않습니다.
-- 기본 화면은 통합 업무 보드이며 필터는 `오늘`, `이번 주`, `전체`, `날짜 없음` 순서입니다.
+- 기본 화면은 통합 업무 보드의 `이번 주`이며, 최근 7일 기한 미정도 함께 표시하고 오래된 미정 업무는 `미정 backlog`로 분리합니다.
 - 업무 행 1차 액션은 `열기`, `나중에`, `보관`입니다. 편집은 행 더블클릭으로 처리합니다.
 - 확인 필요 항목은 별도 창이고, 개발자 도구는 설정 창의 탭입니다.
 - `나중에`는 다시 표시되는 snooze이고, `보관`은 active 목록에서 제외되어 자동으로 다시 뜨지 않습니다. 보관한 항목은 보관함에서 복원할 수 있습니다.
