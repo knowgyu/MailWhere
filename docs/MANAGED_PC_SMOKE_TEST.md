@@ -1,5 +1,12 @@
 # Managed PC Readiness Test
 
+## v0.13.2 Qwen3.8 request-profile smoke
+
+- [ ] 기존 설치를 v0.13.2로 교체한 뒤 과거 LLM probe proof가 재사용되지 않고 **연결 테스트**를 다시 요구하는지 확인합니다.
+- [ ] 정확한 모델명이 `Qwen/Qwen3.8-27B`인지 확인하고 synthetic single/batch/대기 종료 probe가 모두 통과하는지 확인합니다.
+- [ ] 서버의 사고 모드 기본값을 바꾸지 않은 상태에서도 MailWhere 분석 응답에 reasoning leakage와 truncation이 없는지 확인합니다.
+- [ ] 실제 메일 내용이나 prompt가 로그·진단 export에 포함되지 않는지 확인합니다.
+
 Run this on the managed Windows PC before enabling 새 메일 자동 확인.
 Use a throwaway/synthetic message only; do not paste real mail content into diagnostics or test notes.
 

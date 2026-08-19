@@ -21,6 +21,7 @@
 
 ## 제품/기획
 
+- [`releases/v0.13.2.md`](releases/v0.13.2.md): Qwen3.8 공식 비사고 sampling profile을 request-level로 적용하고 기존 probe proof를 갱신하는 호환성 patch.
 - [`releases/v0.13.1.md`](releases/v0.13.1.md): 기본 사서함 전체 폴더 FTS5, 확인 필요 묶음 처리, 메일 시각, 이번 주/미정 backlog UX patch.
 - [`releases/v0.13.0.md`](releases/v0.13.0.md): `Qwen/Qwen3.8-27B` endpoint probe, thinking control, backlog clarity, bundled skill, opaque-token open 정책.
 - [`releases/v0.12.2.md`](releases/v0.12.2.md): vLLM JSON Schema 출력, bounded retry, 전달 본문 제한, fallback 팝업 정책을 정리한 안정화 패치.

@@ -1,5 +1,16 @@
 # Roadmap
 
+## Release 0.13.2 — Qwen3.8 non-thinking sampling alignment
+
+Goal: keep the shared vLLM server's thinking defaults intact while making MailWhere's verified non-thinking JSON requests follow the official Qwen3.8 sampling profile.
+
+Included:
+
+- Request-level `temperature=0.7`, `top_p=0.8`, `top_k=20`, `presence_penalty=1.5`, and `repetition_penalty=1.0` for the exact `Qwen/Qwen3.8-27B` target.
+- The same profile across Chat Completions, Responses, single, batch, and waiting-closure probes.
+- A versioned request-contract fingerprint that invalidates older probe proof after the request shape changes.
+- No production seed, preserved-thinking history, streaming, or server-wide default override.
+
 ## Release 0.13.1 — full default-mailbox search and faster triage
 
 Goal: search every regular mail folder in the default Outlook store and reduce repetitive review/backlog work without inventing due dates.

@@ -27,7 +27,7 @@ MailWhere는 Windows tray에 조용히 상주하면서 Classic Outlook 메일에
 - 규칙 기반 업무 후보 탐지와 선택형 LLM 분석
 - Ollama native `/api/chat`, OpenAI-compatible `/v1/chat/completions`, `/v1/responses` endpoint 지원
 - endpoint 모델 목록 불러오기와 analysis-shaped LLM capability probe
-- `Qwen/Qwen3.8-27B`용 vLLM thinking control, structured-output, temperature, output-token, batch-size 설정
+- `Qwen/Qwen3.8-27B`용 vLLM thinking control, 공식 비사고 sampling profile, structured-output, output-token, batch-size 설정
 - LLM 시도/성공/fallback/실패 요약과 확인 필요 창의 **실패한 AI 분석 다시 시도**
 - 확인 필요 backlog는 전체 미해결 수, 표시 중인 100개 page cap, retryable LLM 실패 수를 구분
 - 같은 발신자와 숫자만 달라지는 유사 제목 후보는 한 카드로 묶어 `모두 등록`/`모두 나중에`/`모두 무시`
@@ -118,7 +118,7 @@ PATH="$PWD/.tools/dotnet:$PATH" scripts/verify-static.sh
 portable 출력 예:
 
 ```text
-artifacts/MailWhere-v0.13.1-win-x64-portable.zip
+artifacts/MailWhere-v0.13.2-win-x64-portable.zip
 ```
 
 ## LLM endpoint
@@ -141,7 +141,7 @@ artifacts/MailWhere-v0.13.1-win-x64-portable.zip
 }
 ```
 
-vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 기본 모델명은 비워두고, 앱의 설정 창에서 **모델 불러오기** 버튼으로 `/api/tags` 또는 `/v1/models`에서 목록을 가져와 선택하는 흐름을 권장합니다. `Qwen/Qwen3.8-27B`는 vLLM `>=0.17.0`과 `--reasoning-parser qwen3`를 기준으로 두고, thinking off는 template-native `enable_thinking=false`를 우선합니다. vLLM `0.25+`의 `reasoning_effort=none` convenience mapping은 probe가 같은 request shape에서 통과할 때만 사용합니다. **연결 테스트**는 메일 내용이 아닌 synthetic single/batch/대기 종료 판단 요청으로 fail-closed probe를 수행합니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
+vLLM 같은 OpenAI-compatible local endpoint는 `LlmProvider`를 `OpenAiChatCompletions` 또는 `OpenAiResponses`로 설정합니다. 기본 모델명은 비워두고, 앱의 설정 창에서 **모델 불러오기** 버튼으로 `/api/tags` 또는 `/v1/models`에서 목록을 가져와 선택하는 흐름을 권장합니다. `Qwen/Qwen3.8-27B`는 vLLM `>=0.17.0`과 `--reasoning-parser qwen3`를 기준으로 두고, thinking off는 template-native `enable_thinking=false`를 우선합니다. 검증된 비사고 요청에는 Qwen 공식 profile인 `temperature=0.7`, `top_p=0.8`, `top_k=20`, `presence_penalty=1.5`, `repetition_penalty=1.0`을 요청 단위로 적용합니다. vLLM `0.25+`의 `reasoning_effort=none` convenience mapping은 probe가 같은 request shape에서 통과할 때만 사용합니다. **연결 테스트**는 메일 내용이 아닌 synthetic single/batch/대기 종료 판단 요청으로 fail-closed probe를 수행합니다. 자세한 내용은 [`docs/LLM_ENDPOINTS.md`](docs/LLM_ENDPOINTS.md)를 참고하세요.
 
 ## 팀 기본 설정 seed
 

@@ -971,6 +971,13 @@ static Task RuntimeSettingsPersistAndInvalidateLlmProbeProof()
 
     var withProof = settings.WithSuccessfulLlmProbeProof(probedAt, LlmThinkingControlMode.EnableThinkingFalse);
     var reloaded = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof));
+    var legacyRequestContract = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with
+    {
+        LastSuccessfulLlmProbeProof = withProof.LastSuccessfulLlmProbeProof! with
+        {
+            Fingerprint = "bca8e61ae87285fdd0204633d085c8a896ba553e3ea39888e49b2b02529279f6"
+        }
+    }));
     var normalizedEndpoint = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmEndpoint = "http://localhost:8000/v1" }));
     var changedModel = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmModel = "other-model" }));
     var changedControl = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmThinkingControlMode = LlmThinkingControlMode.ReasoningEffortNone }));
@@ -980,6 +987,7 @@ static Task RuntimeSettingsPersistAndInvalidateLlmProbeProof()
     var changedBatch = RuntimeSettingsSerializer.ParseOrDefault(RuntimeSettingsSerializer.Serialize(withProof with { LlmBatchSize = 8 }));
 
     Assert(reloaded.HasCurrentLlmProbeProof(), "Expected matching proof fingerprint to survive serialization.");
+    Assert(!legacyRequestContract.HasCurrentLlmProbeProof() && legacyRequestContract.LastSuccessfulLlmProbeProof is null, "Expected the pre-v0.13.2 request contract proof to be invalidated.");
     Assert(reloaded.LastSuccessfulLlmProbeProof?.SelectedThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse, "Expected proof to persist selected hard thinking mode.");
     Assert(reloaded.ToLlmAnalysisSettings().ThinkingControlMode == LlmThinkingControlMode.EnableThinkingFalse, "Expected configured Auto to resolve to selected proof mode for analysis.");
     Assert(normalizedEndpoint.HasCurrentLlmProbeProof(), "Expected endpoint normalization to preserve proof.");
@@ -2828,6 +2836,7 @@ static async Task OpenAiCompatibleClientsHonorOutputTokenRequestOptions()
     using var chatRequest = JsonDocument.Parse(chatHandler.LastRequestBody ?? "{}");
     Assert(chatRequest.RootElement.GetProperty("max_tokens").GetInt32() == 1536, "Expected Chat Completions max_tokens from request options.");
     Assert(!chatRequest.RootElement.TryGetProperty("num_ctx", out _), "OpenAI-compatible body must not include Ollama context option.");
+    Assert(!chatRequest.RootElement.TryGetProperty("top_k", out _), "Non-target OpenAI-compatible models must keep server sampling defaults.");
 
     await chatClient.CompleteJsonAsync(
         "system",
@@ -2883,7 +2892,12 @@ static async Task OpenAiCompatibleClientsHonorThinkingAndStructuredOutputModes()
         ThinkingControlMode: LlmThinkingControlMode.EnableThinkingFalse,
         Temperature: 0.2));
     using var chatTemplateRequest = JsonDocument.Parse(chatHandler.LastRequestBody ?? "{}");
-    Assert(Math.Abs(chatTemplateRequest.RootElement.GetProperty("temperature").GetDouble() - 0.2) < 0.0001, "Expected Chat temperature from request options.");
+    Assert(Math.Abs(chatTemplateRequest.RootElement.GetProperty("temperature").GetDouble() - 0.7) < 0.0001, "Expected Qwen3.8 non-thinking temperature 0.7.");
+    Assert(Math.Abs(chatTemplateRequest.RootElement.GetProperty("top_p").GetDouble() - 0.8) < 0.0001, "Expected Qwen3.8 non-thinking top_p 0.8.");
+    Assert(chatTemplateRequest.RootElement.GetProperty("top_k").GetInt32() == 20, "Expected Qwen3.8 non-thinking top_k 20.");
+    Assert(Math.Abs(chatTemplateRequest.RootElement.GetProperty("presence_penalty").GetDouble() - 1.5) < 0.0001, "Expected Qwen3.8 non-thinking presence penalty 1.5.");
+    Assert(Math.Abs(chatTemplateRequest.RootElement.GetProperty("repetition_penalty").GetDouble() - 1.0) < 0.0001, "Expected Qwen3.8 neutral repetition penalty 1.0.");
+    Assert(!chatTemplateRequest.RootElement.TryGetProperty("seed", out _), "Qwen3.8 production requests must not force an evaluation seed.");
     Assert(chatTemplateRequest.RootElement.GetProperty("response_format").GetProperty("type").GetString() == "json_object", "Expected Chat JSON Object compatibility mode.");
     Assert(chatTemplateRequest.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean() == false, "Expected Chat enable_thinking=false.");
     Assert(!chatTemplateRequest.RootElement.TryGetProperty("reasoning_effort", out _), "Template thinking mode must not also send reasoning_effort.");
@@ -2901,6 +2915,11 @@ static async Task OpenAiCompatibleClientsHonorThinkingAndStructuredOutputModes()
     using var responsesReasoningRequest = JsonDocument.Parse(responsesHandler.LastRequestBody ?? "{}");
     Assert(responsesReasoningRequest.RootElement.GetProperty("reasoning").GetProperty("effort").GetString() == "none", "Expected Responses nested reasoning.effort=none.");
     Assert(!responsesReasoningRequest.RootElement.TryGetProperty("chat_template_kwargs", out _), "Responses reasoning mode must not also send template kwargs.");
+    Assert(Math.Abs(responsesReasoningRequest.RootElement.GetProperty("temperature").GetDouble() - 0.7) < 0.0001, "Expected Responses Qwen3.8 non-thinking temperature 0.7.");
+    Assert(Math.Abs(responsesReasoningRequest.RootElement.GetProperty("top_p").GetDouble() - 0.8) < 0.0001, "Expected Responses Qwen3.8 non-thinking top_p 0.8.");
+    Assert(responsesReasoningRequest.RootElement.GetProperty("top_k").GetInt32() == 20, "Expected Responses Qwen3.8 non-thinking top_k 20.");
+    Assert(Math.Abs(responsesReasoningRequest.RootElement.GetProperty("presence_penalty").GetDouble() - 1.5) < 0.0001, "Expected Responses Qwen3.8 non-thinking presence penalty 1.5.");
+    Assert(Math.Abs(responsesReasoningRequest.RootElement.GetProperty("repetition_penalty").GetDouble() - 1.0) < 0.0001, "Expected Responses Qwen3.8 neutral repetition penalty 1.0.");
 
     await responsesClient.CompleteJsonAsync("system", "user", requestOptions: new LlmRequestOptions(ThinkingControlMode: LlmThinkingControlMode.EnableThinkingFalse));
     using var responsesTemplateRequest = JsonDocument.Parse(responsesHandler.LastRequestBody ?? "{}");

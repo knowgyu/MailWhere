@@ -99,6 +99,23 @@ public abstract class HttpJsonLlmClient : ILlmClient
 
     protected static double TemperatureOrDefault(LlmRequestOptions? requestOptions) =>
         requestOptions?.Temperature is { } temperature ? temperature : 0.1;
+
+    protected void ApplyModelSamplingProfile(
+        IDictionary<string, object?> body,
+        LlmRequestOptions? requestOptions)
+    {
+        if (!string.Equals(Settings.Model.Trim(), "Qwen/Qwen3.8-27B", StringComparison.OrdinalIgnoreCase)
+            || requestOptions?.ThinkingControlMode is not (LlmThinkingControlMode.EnableThinkingFalse or LlmThinkingControlMode.ReasoningEffortNone))
+        {
+            return;
+        }
+
+        body["temperature"] = 0.7;
+        body["top_p"] = 0.8;
+        body["top_k"] = 20;
+        body["presence_penalty"] = 1.5;
+        body["repetition_penalty"] = 1.0;
+    }
 }
 
 public sealed class OllamaLlmClient : HttpJsonLlmClient
@@ -235,6 +252,7 @@ public sealed class OpenAiChatCompletionsLlmClient : HttpJsonLlmClient
         {
             body["chat_template_kwargs"] = new { enable_thinking = false };
         }
+        ApplyModelSamplingProfile(body, requestOptions);
 
         using var response = await HttpClient.PostAsJsonAsync(BuildUri(Settings.Endpoint, "/v1/chat/completions"), body, JsonOptions, cancellationToken).ConfigureAwait(false);
         using var json = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
@@ -294,6 +312,7 @@ public sealed class OpenAiResponsesLlmClient : HttpJsonLlmClient
         {
             body["chat_template_kwargs"] = new { enable_thinking = false };
         }
+        ApplyModelSamplingProfile(body, requestOptions);
 
         using var response = await HttpClient.PostAsJsonAsync(BuildUri(Settings.Endpoint, "/v1/responses"), body, JsonOptions, cancellationToken).ConfigureAwait(false);
         using var json = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);

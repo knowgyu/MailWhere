@@ -9,8 +9,8 @@
 - SQLite-only CLI and WPF search; Outlook COM is reached only after an explicit
   source-open action.
 - Read-only mailbox behavior and sanitized diagnostics/export contracts.
-- v0.13.1 documentation preserves fail-closed Qwen3.8 probing and adds grouped
-  review actions plus weekly undated-backlog routing.
+- v0.13.2 sends the official Qwen3.8 non-thinking sampling profile only on the
+  verified request path and invalidates older probe proof before reuse.
 
 ## Remaining required evidence
 

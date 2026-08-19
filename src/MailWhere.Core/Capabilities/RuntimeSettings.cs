@@ -139,6 +139,8 @@ public sealed record LlmProbeProof(
     string Model,
     LlmThinkingControlMode SelectedThinkingControlMode)
 {
+    private const string RequestContractVersion = "qwen38-nonthinking-sampling-v1";
+
     public static LlmProbeProof FromSettings(RuntimeSettings settings, DateTimeOffset probedAt, LlmThinkingControlMode selectedThinkingControlMode) => new(
         settings.CurrentLlmProbeFingerprint(),
         probedAt,
@@ -158,6 +160,7 @@ public sealed record LlmProbeProof(
     {
         var normalized = string.Join("\n", new[]
         {
+            RequestContractVersion,
             provider.ToString(),
             NormalizeEndpoint(endpoint),
             model.Trim(),

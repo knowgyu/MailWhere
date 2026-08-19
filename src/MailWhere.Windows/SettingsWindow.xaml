@@ -232,7 +232,7 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Grid.Column="0">
                                             <TextBlock Text="Temperature" FontWeight="SemiBold"/>
-                                            <ComboBox x:Name="LlmTemperatureBox" ToolTip="낮을수록 반복 가능한 업무 분류에 유리합니다.">
+                                            <ComboBox x:Name="LlmTemperatureBox" ToolTip="Qwen/Qwen3.8-27B 비사고 분석은 공식 sampling profile의 0.7을 사용합니다. 이 값은 다른 모델에 적용됩니다.">
                                                 <ComboBoxItem Tag="0" Content="0"/>
                                                 <ComboBoxItem Tag="0.1" Content="0.1"/>
                                                 <ComboBoxItem Tag="0.2" Content="0.2"/>

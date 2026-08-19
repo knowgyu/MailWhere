@@ -78,13 +78,15 @@ vllm serve Qwen/Qwen3.8-27B \
 - `--reasoning-parser qwen3`는 Qwen3 계열 reasoning block을 content와 분리하기 위한 필수 운영 옵션으로 봅니다.
 - thinking off 기본값은 request-level `chat_template_kwargs: { "enable_thinking": false }`입니다.
 - vLLM `0.25+`에서는 `reasoning_effort="none"`이 `enable_thinking=false`로 매핑될 수 있습니다. MailWhere는 이 경로를 편의 옵션으로만 취급하고, capability probe가 같은 single/batch/대기 종료 판단 shape에서 통과할 때만 사용합니다.
+- 정확한 `Qwen/Qwen3.8-27B` target에서 hard thinking-off가 선택되면 Qwen 공식 비사고 profile인 `temperature=0.7`, `top_p=0.8`, `top_k=20`, `presence_penalty=1.5`, `repetition_penalty=1.0`을 요청 단위로 명시합니다. 서버의 사고 모드 generation defaults는 바꾸지 않습니다.
+- `min_p=0.0`과 `repetition_penalty=1.0`은 neutral 값입니다. Responses 호환성을 위해 neutral `min_p`는 보내지 않고, production `seed`, `preserve_thinking`, streaming도 사용하지 않습니다.
 - JSON Schema가 기본 structured-output mode입니다. JSON Object는 endpoint compatibility가 필요할 때 쓰는 약한 mode이며, schema 검증 강도를 낮춥니다.
 - LLM concurrency는 계속 `1/1`입니다. Batch 분석이 실패하거나 일부 id가 빠지면 누락 항목만 1건씩 순서대로 다시 분석하고, 병렬 요청을 시작하지 않습니다.
 
 Provider request body contract:
 
-- Chat Completions sends `temperature`, `max_tokens`, and `response_format`.
-- Responses sends `temperature`, `max_output_tokens`, and `text.format`.
+- Chat Completions sends `temperature`, `max_tokens`, and `response_format`; the Qwen3.8 non-thinking profile also sends `top_p`, `top_k`, `presence_penalty`, and `repetition_penalty`.
+- Responses sends `temperature`, `max_output_tokens`, and `text.format`; the same supported Qwen3.8 sampling fields are applied.
 - `reasoning_effort="none"` maps to Chat Completions `reasoning_effort` and Responses `reasoning: { "effort": "none" }`.
 - Template-native thinking off maps to `chat_template_kwargs: { "enable_thinking": false }`.
 - Ollama-only fields such as `think=false` and `options.num_predict` stay on Ollama requests only.
@@ -95,7 +97,7 @@ Settings tooltips should keep the user-facing distinction simple:
 | --- | --- | --- |
 | Thinking control | `enable_thinking=false` | Qwen3.8이 긴 reasoning에 예산을 쓰지 않도록 hard control을 보냅니다. |
 | Structured output | JSON Schema | 가장 엄격한 JSON 계약입니다. JSON Object는 호환성 fallback입니다. |
-| Temperature | `0.1` | 분류 결과를 안정화합니다. |
+| Temperature | other models `0.1`; Qwen3.8 non-thinking `0.7` | Qwen3.8 target은 공식 비사고 profile을 사용하며 UI 값은 다른 모델에 적용됩니다. |
 | Output tokens | bounded preset | Batch 크기에 맞춰 늘리되 truncation을 probe에서 잡습니다. |
 | Batch size | small/sequential | 속도보다 endpoint 안정성을 우선하고 retry도 순차 실행합니다. |
 
@@ -156,7 +158,7 @@ endpoint가 이미 `/v1`로 끝나면 중복으로 `/v1/v1/models`가 되지 않
 - `closure-analysis-shape`: waiting-closure 응답 계약을 통과하지 못함
 - `reasoning-incomplete`: reasoning metadata나 Responses incomplete 상태가 final JSON 계약을 방해함
 
-성공한 probe는 provider, normalized endpoint, model, thinking-control mode, structured-output mode, temperature, max-output-token policy, batch-size policy fingerprint와 함께 저장됩니다. 이 값 중 하나라도 바뀌면 저장된 proof는 stale이 되고, LLM 분석은 새 probe가 통과할 때까지 fail-closed로 거부됩니다.
+성공한 probe는 request-contract version, provider, normalized endpoint, model, thinking-control mode, structured-output mode, temperature, max-output-token policy, batch-size policy fingerprint와 함께 저장됩니다. 이 값 중 하나라도 바뀌면 저장된 proof는 stale이 되고, LLM 분석은 새 probe가 통과할 때까지 fail-closed로 거부됩니다. v0.13.2의 sampling contract 변경도 기존 proof를 자동 폐기합니다.
 
 LLM-backed waiting-closure 판단도 같은 현재 proof가 있을 때만 endpoint를 호출합니다. 이 proof는 single-item, batch, waiting-closure synthetic 요청이 모두 통과할 때만 저장됩니다. proof가 없거나 stale이면 closure 판단은 rule-based fallback에 머뭅니다.
 
@@ -171,5 +173,6 @@ LLM-backed waiting-closure 판단도 같은 현재 proof가 있을 때만 endpoi
 
 ## Upstream references
 
+- Qwen3.8-27B model card and thinking/non-thinking sampling profiles: <https://huggingface.co/Qwen/Qwen3.8-27B>
 - vLLM Qwen/Qwen3.8-27B recipe: <https://recipes.vllm.ai/Qwen/Qwen3.8-27B>
 - vLLM reasoning outputs and `enable_thinking`/`reasoning_effort` behavior: <https://docs.vllm.ai/en/latest/features/reasoning_outputs/>

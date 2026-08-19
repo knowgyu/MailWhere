@@ -33,7 +33,7 @@ It runs on:
 The workflow performs the Windows verification path and uploads:
 
 ```text
-artifacts/MailWhere-v0.13.1-win-x64-portable.zip
+artifacts/MailWhere-v0.13.2-win-x64-portable.zip
 ```
 
 The zip contains the published app, the read-only CLI provider, the bundled `skills/mailwhere/**` tree, a portable README, curated operational docs, the README SVG logo, `appsettings.sample.json`, `MailWhere.defaults.sample.json`, and `BUILD-MANIFEST.json`. Historical plans, reviews, screenshots, `.omx` runtime files, and unused logo variants stay in the repository rather than the package.
